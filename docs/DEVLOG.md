@@ -485,3 +485,18 @@ So the prompt is not trusted: every suggested command is checked against the com
 the documentation actually shows (fenced shell blocks, inline code, the launcher's usage
 and case arms), and the UI marks the undocumented ones in amber. Home paths and anything
 key-shaped are scrubbed from both the prompt and the issue text.
+
+## Follow-on: Find in the nebula
+
+The cloud stays up behind Find. When a search returns, the camera glides to the centroid
+of the hit volumes and zooms to their spread (the projection now subtracts a camera
+point before rotating, so the cloud keeps turning around whatever it is looking at); the
+hits light in rubric; hovering a listed finding rings its own dot in verdigris and draws
+the title beside it; clicking opens the volume. Clearing the query glides back out.
+
+Two small things found on the way: `display:flex` on a class beat the `hidden`
+attribute, so the desk bar leaked into Find -- a global `[hidden] { display:none
+!important }` ends that class of bug; and a read job whose document was removed while it
+waited its turn was recorded as an incident twice (explicit call plus the log handler).
+An exception recorded explicitly is now marked so the handler skips it, and a document
+that is gone by the time its job runs is not an incident at all.

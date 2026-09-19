@@ -243,10 +243,10 @@ async def run_turn(
             },
         }
     except Exception as exc:
-        log.exception("chat turn failed")
         await record_exception(
             exc, source="chat", context={"model": locals().get("model"), "question": question[:200]}
         )
+        log.exception("chat turn failed")
         yield {"event": "error", "data": str(exc)[:500]}
     finally:
         await client.aclose()

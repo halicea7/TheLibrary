@@ -63,10 +63,10 @@ app = FastAPI(title="Library Agent", version="0.1.0", lifespan=lifespan)
 async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
     """Anything that escapes a route becomes an incident the Settings tab can explain.
     HTTPExceptions (4xx the routes raise on purpose) never reach here."""
-    log.exception("unhandled error on %s %s", request.method, request.url.path)
     await incidents.record_exception(
         exc, source="api", context={"method": request.method, "path": request.url.path}
     )
+    log.exception("unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500, content={"detail": f"{type(exc).__name__}: {exc}"[:500]})
 
 

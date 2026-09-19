@@ -62,6 +62,13 @@ def _make_gate(job_id: uuid.UUID):
 
 async def read_document(ctx: dict, document_id: str, job_id: str, tier: int = 1) -> dict[str, Any]:
     did, jid = uuid.UUID(document_id), uuid.UUID(job_id)
+    async with session_scope() as db:
+        if await db.get(Document, did) is None:
+            # Removed from the shelf while the job waited its turn. Nothing went wrong.
+            await _set_job(
+                jid, state=JobState.ERROR, error="document was removed before it was read"
+            )
+            return {"document_id": document_id, "skipped": "removed"}
     await _set_job(jid, state=JobState.RUNNING)
 
     async def progress(current: int, total: int) -> None:
@@ -91,10 +98,10 @@ async def read_document(ctx: dict, document_id: str, job_id: str, tier: int = 1)
             "categories": result.categories,
         }
     except Exception as exc:
-        log.exception("tier1 failed for %s", did)
         await record_exception(
             exc, source="worker", context={"job": f"tier{tier}", "document_id": str(did)}
         )
+        log.exception("tier1 failed for %s", did)
         await _set_job(jid, state=JobState.ERROR, error=str(exc)[:2000])
         async with session_scope() as db:
             await db.execute(
@@ -133,8 +140,8 @@ async def build_library_layer(ctx: dict, kind: str) -> dict[str, Any]:
                         out["contradictions"] = await find_contradictions(db, client=client)
             except Exception as exc:
                 # One pass failing must not take the others with it.
-                log.exception("library pass %s failed", k)
                 await record_exception(exc, source="worker", context={"job": f"library:{k}"})
+                log.exception("library pass %s failed", k)
                 out[k] = {"error": str(exc)[:300]}
     return out
 
@@ -157,8 +164,8 @@ async def reshelve_library(ctx: dict, job_id: str, rebuild: bool = True) -> dict
         await _set_job(jid, state=JobState.DONE, yielded_reason=None)
         return r.__dict__
     except Exception as exc:
-        log.exception("reshelve failed")
         await record_exception(exc, source="worker", context={"job": "reshelve"})
+        log.exception("reshelve failed")
         await _set_job(jid, state=JobState.ERROR, error=str(exc)[:2000])
         raise
 

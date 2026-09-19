@@ -112,8 +112,12 @@ async def record_exception(
     exc: BaseException, *, source: str, context: dict[str, Any] | None = None
 ) -> None:
     """Fire-and-forget from any failure path. Never raises: an error in error recording
-    must not mask the original."""
+    must not mask the original. Marks the exception so a later `log.exception` of the
+    same error is not recorded a second time by the logging handler."""
+    if getattr(exc, "_incident_recorded", False):
+        return
     try:
+        exc._incident_recorded = True  # type: ignore[attr-defined]
         async with session_scope() as db:
             await record(
                 db,
@@ -138,6 +142,8 @@ class IncidentHandler(logging.Handler):
     def emit(self, rec: logging.LogRecord) -> None:
         if rec.name.startswith("library_agent.ops"):
             return  # never record our own recording
+        if rec.exc_info and getattr(rec.exc_info[1], "_incident_recorded", False):
+            return  # already recorded, with better context, by record_exception
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:

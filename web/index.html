@@ -46,6 +46,7 @@
 }
 
 * { box-sizing:border-box; }
+[hidden] { display:none !important; }  /* the attribute wins over any display: on a class */
 html,body { height:100%; }
 body {
   margin:0; background:var(--bg); color:var(--fg);
@@ -409,7 +410,9 @@ select, .toggle {
 @keyframes tick { 0%{content:'·'} 25%{content:'··'} 50%{content:'···'} 75%{content:'··'} }
 
 /* ── search results ───────────────────────────────────────────────────── */
-.hit { padding:13px 0; border-bottom:1px solid var(--rule-soft); }
+.hit { padding:13px 10px; margin:0 -10px; border-bottom:1px solid var(--rule-soft); max-width:calc(76ch + 20px); cursor:pointer; border-radius:3px;
+       background:linear-gradient(90deg, color-mix(in srgb, var(--bg) 78%, transparent) 0 80%, transparent); transition:background .12s; }
+.hit:hover { background:color-mix(in srgb, var(--verdigris) 9%, var(--bg)); }
 .hit:last-child { border-bottom:0; }
 .hit-h { display:flex; align-items:baseline; gap:9px; }
 .hit-t { font:500 13.5px/1.4 var(--serif); }
@@ -673,6 +676,8 @@ localStorage.removeItem('showThinking');
 const web = {
   canvas: null, ctx: null, nodes: [], edges: [], byId: {}, alpha: 0, frame: null,
   scanning: false, scanT: 0, hueOf: {}, theta: 0, last: 0, R: 240, extent: 0,
+  // The camera: where it looks and how close. Find moves it to the hits; Ask leaves it wide.
+  cam: { x: 0, y: 0, z: 0, zoom: 1 }, camTo: { x: 0, y: 0, z: 0, zoom: 1 }, hovered: null,
   HUES: [206, 34, 96, 326, 172, 44, 262, 0],
   reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
   async load() {
@@ -701,7 +706,7 @@ const web = {
     this.hueOf = Object.fromEntries(tops.map((t, i) => [t, this.HUES[i % this.HUES.length]]));
     // The cloud's radius grows with the library, gently.
     this.R = 150 + 14 * Math.sqrt(this.nodes.length);
-    this.canvas.dataset.on = String(view === 'ask' && this.nodes.length > 0);
+    this.canvas.dataset.on = String((view === 'ask' || view === 'find') && this.nodes.length > 0);
     this.wake();
   },
   size() {
@@ -754,15 +759,29 @@ const web = {
     this.alpha *= .992;
   },
   project(n) {
-    // Turn about the vertical axis, tilt a little, then perspective.
-    const ct = Math.cos(this.theta), st = Math.sin(this.theta), tilt = .38;
-    const x = n.x * ct + n.z * st, z0 = -n.x * st + n.z * ct;
-    const y = n.y * Math.cos(tilt) - z0 * Math.sin(tilt), z = n.y * Math.sin(tilt) + z0 * Math.cos(tilt);
+    // Look from the camera's point, turn about the vertical axis, tilt a little, then
+    // perspective. The cloud keeps turning around whatever the camera is looking at.
+    const c = this.cam, ct = Math.cos(this.theta), st = Math.sin(this.theta), tilt = .38;
+    const px = n.x - c.x, py = n.y - c.y, pz = n.z - c.z;
+    const x = px * ct + pz * st, z0 = -px * st + pz * ct;
+    const y = py * Math.cos(tilt) - z0 * Math.sin(tilt), z = py * Math.sin(tilt) + z0 * Math.cos(tilt);
     const E = this.extent || this.R;
     const f = 720, s = f / (f + z + E * .6);
-    const fit = Math.min(this.w / (E * 2.6), this.h / (E * 2.3));
+    const fit = Math.min(this.w / (E * 2.6), this.h / (E * 2.3)) * c.zoom;
     return { x: this.w * .55 + x * s * fit, y: this.h * .5 + y * s * fit, s: s * fit, depth: (z + this.R) / (2 * this.R) };
   },
+  // Glide the camera to the centroid of these volumes, close enough that their spread
+  // fills the view. No ids: back out to the whole cloud.
+  focus(ids) {
+    const ns = (ids || []).map(id => this.byId[id]).filter(Boolean);
+    if (!ns.length) { this.camTo = { x: 0, y: 0, z: 0, zoom: 1 }; this.wake(); return; }
+    const cx = ns.reduce((a, n) => a + n.x, 0) / ns.length, cy = ns.reduce((a, n) => a + n.y, 0) / ns.length, cz = ns.reduce((a, n) => a + n.z, 0) / ns.length;
+    const spread = Math.max(30, ...ns.map(n => Math.hypot(n.x - cx, n.y - cy, n.z - cz)));
+    const E = this.extent || this.R;
+    this.camTo = { x: cx, y: cy, z: cz, zoom: Math.max(1, Math.min(3.4, E / (spread * 1.6 + 40))) };
+    this.wake();
+  },
+  hover(id) { this.hovered = id ? this.byId[id] || null : null; this.wake(); },
   draw(now) {
     const c = this.ctx; c.clearRect(0, 0, this.w, this.h);
     const dark = !document.documentElement.dataset.theme ? matchMedia('(prefers-color-scheme: dark)').matches : document.documentElement.dataset.theme === 'dark';
@@ -803,6 +822,18 @@ const web = {
       if (n.tier >= 2) { c.lineWidth = .7; c.strokeStyle = c.fillStyle; c.beginPath(); c.arc(p.x, p.y, n.r * p.s + 2, 0, Math.PI * 2); c.stroke(); }
     }
     c.globalAlpha = 1;
+    // the hovered finding: picked out in verdigris, named
+    if (this.hovered && P.has(this.hovered)) {
+      const n = this.hovered, p = P.get(n), r = Math.max(3, n.r * p.s + 4);
+      c.strokeStyle = verd; c.lineWidth = 1.5; c.globalAlpha = .95;
+      c.beginPath(); c.arc(p.x, p.y, r, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.arc(p.x, p.y, r + 6, 0, Math.PI * 2); c.globalAlpha = .35; c.stroke();
+      c.globalAlpha = .9; c.fillStyle = verd; c.font = '11px ui-monospace, Menlo, monospace';
+      const label = (n.t || '').slice(0, 48); const tw = c.measureText(label).width;
+      const lx = Math.min(this.w - tw - 8, p.x + r + 8), ly = p.y - r - 6;
+      c.fillText(label, lx, Math.max(12, ly));
+      c.globalAlpha = 1;
+    }
     // retrieval: a ring travelling out through the cloud, verdigris
     if (this.scanning || this.scanT > 0) {
       const t = ((now / 1400) % 1), R = t * Math.max(this.w, this.h) * .6;
@@ -817,9 +848,12 @@ const web = {
     const dt = this.last ? Math.min(.1, (now - this.last) / 1000) : 0; this.last = now;
     if (!this.reduced && this.canvas.dataset.on === 'true') this.theta += dt * (2 * Math.PI / 110);  // one turn in ~two minutes
     if (this.alpha > .003) this.tick();
+    const c = this.cam, g = this.camTo, k = 1 - Math.pow(.02, dt || .016);
+    c.x += (g.x - c.x) * k; c.y += (g.y - c.y) * k; c.z += (g.z - c.z) * k; c.zoom += (g.zoom - c.zoom) * k;
     this.draw(now);
     const on = this.canvas.dataset.on === 'true';
-    if (on || this.alpha > .003) this.frame = requestAnimationFrame(t => this.loop(t));
+    const moving = Math.abs(this.cam.zoom - this.camTo.zoom) > .002 || Math.hypot(this.cam.x - this.camTo.x, this.cam.y - this.camTo.y, this.cam.z - this.camTo.z) > .5;
+    if (on || this.alpha > .003 || moving) this.frame = requestAnimationFrame(t => this.loop(t));
     else this.last = 0;
   },
   wake() { if (!this.frame) this.frame = requestAnimationFrame(t => this.loop(t)); },
@@ -863,7 +897,9 @@ function setView(v) {
   if (v === 'threads') loadThreads();
   if (v === 'make') renderMake();
   if (v === 'settings') loadSettings();
-  $('#web').dataset.on = String(v === 'ask' && web.nodes.length > 0); web.wake();
+  $('#web').dataset.on = String((v === 'ask' || v === 'find') && web.nodes.length > 0);
+  if (v !== 'find') { web.focus(null); web.hover(null); }
+  web.wake();
   e.focus();
 }
 // One cartridge scoped is a room you have walked into; the composer says so.
@@ -1275,6 +1311,13 @@ function mdBlocks(text) {
   return out;
 }
 function md(text) { return `<div class="md">${mdBlocks(text).join('')}</div>`; }
+// A snippet, not a document: markdown syntax out, words kept.
+function plain(s) {
+  return String(s || '')
+    .replace(/```[a-z]*\n?/g, ' ').replace(/^#{1,6}\s+/gm, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[*_`>|]+/g, ' ').replace(/-{3,}/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
 
 function markup(text) {
   return esc(text).replace(/\[(\d+(?:,\s*\d+)*)\]/g, (_, nums) => {
@@ -1483,15 +1526,18 @@ async function runFind(q) {
   const cats = subjects.size ? '&categories=' + [...subjects].join(',') : '';
   const carts = cartridges.size ? '&cartridges=' + [...cartridges].join(',') : '';
   const r = await (await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=10${cats}${carts}`)).json();
+  // The cloud closes in on where the findings are; each listed one picks out its dot.
+  const found = [...new Set(r.hits.map(h => h.document_id))];
+  web.focus(found); web.light(found); web.hover(null);
   $('#view-find').innerHTML = r.hits.length ? r.hits.map(h => `
-    <div class="hit">
+    <div class="hit" onmouseenter="web.hover('${h.document_id}')" onmouseleave="web.hover(null)" onclick="openVolume('${h.document_id}')" title="Open the volume">
       <div class="hit-h">
         <span class="hit-t">${esc(h.document_title)}</span>
         ${h.page ? `<span class="hit-pg">p.${h.page}</span>` : ''}
         <span class="hit-rk">dense ${h.dense_rank ?? '–'} · lexical ${h.lexical_rank ?? '–'}</span>
       </div>
       <div class="hit-path">${esc((h.section_path || '').split(' › ').slice(1).join(' › ') || '—')}</div>
-      <div class="hit-x">${esc(h.text)}</div>
+      <div class="hit-x">${esc(plain(h.text))}</div>
     </div>`).join('') + `<div class="empty">${r.hits.length} passages · ${r.elapsed_seconds}s</div>`
     : `<div class="empty"><b>No passage matches that.</b>Try fewer words, or the exact term you are after.</div>`;
   desk(`${r.hits.length} passages · ${r.elapsed_seconds}s`);
@@ -1803,7 +1849,7 @@ $('#entry').oninput = e => {
   if (view !== 'find') return;
   clearTimeout(findTimer);
   const q = e.target.value.trim();
-  if (q.length < 2) { $('#view-find').innerHTML = ''; return; }
+  if (q.length < 2) { $('#view-find').innerHTML = ''; web.focus(null); web.hover(null); return; }
   findTimer = setTimeout(() => runFind(q), 220);
 };
 

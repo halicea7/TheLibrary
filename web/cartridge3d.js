@@ -226,7 +226,7 @@ export function mount(canvas) {
   lights(scene);
   // Refraction needs something behind it: a rounded plate in the page colour, which over
   // the nebula reads as a display case rather than a hole.
-  const backdrop = new THREE.Mesh(new THREE.ShapeGeometry(roundedRect(4.4, 5.6, .5)), new THREE.MeshBasicMaterial({ color: pageBg() }));
+  const backdrop = new THREE.Mesh(new THREE.ShapeGeometry(roundedRect(4.4, 5.6, .5)), new THREE.MeshBasicMaterial({ color: pageBg(), toneMapped: false }));
   backdrop.position.z = -1.6; scene.add(backdrop);
   const cart = makeCartridge(); scene.add(cart.group);
   let spin = 0, theta = 0, t0 = performance.now(), frame = null, alive = true;
@@ -251,85 +251,102 @@ export function mount(canvas) {
   return ctrl;
 }
 
-/* ── the rack ─────────────────────────────────────────────────────────── */
+/* ── the rack: one socket ─────────────────────────────────────────────── */
+// One socket, one cartridge in view. Scroll or step through the others: the current one
+// slides out, the next slides in and hangs above the socket. Click it and it drops in
+// with a bounce and the light comes on; click again and it lifts out. A spring does the
+// motion -- stiffness and damping, not a tween -- so the bounce is a real overshoot.
 export function mountRack(canvas, handlers = {}) {
   const renderer = makeRenderer(canvas);
   const scene = new THREE.Scene(); scene.environment = makeEnvironment(renderer);
-  const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 60); camera.position.set(0, 1.7, 8.2); camera.lookAt(0, 0.45, 0);
+  const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 60); camera.position.set(0, 1.5, 7.6); camera.lookAt(0, 0.7, 0);
   lights(scene);
-  // the base: a dark slab with a slot per cartridge, and a plate behind for refraction
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(10, .5, 1.6), new THREE.MeshStandardMaterial({ color: 0x0f1319, roughness: .8, metalness: .1 }));
-  slab.position.y = -.25; scene.add(slab);
-  const backplate = new THREE.Mesh(new THREE.PlaneGeometry(12, 8), new THREE.MeshBasicMaterial({ color: panelBg() }));
+  const backplate = new THREE.Mesh(new THREE.PlaneGeometry(12, 8), new THREE.MeshBasicMaterial({ color: panelBg(), toneMapped: false }));  // exact page colour, untouched by tone mapping
   backplate.position.set(0, 2, -2.2); scene.add(backplate);
-  const slots = new THREE.Group(); scene.add(slots);
-  const items = new Map(); // id -> { cart, x, y, inserted, slot }
-  let hovered = null, frame = null, alive = true, t0 = performance.now();
+  // the socket: a block with a slot cut into its top
+  const socket = new THREE.Group(); scene.add(socket);
+  const block = new THREE.Mesh(new THREE.BoxGeometry(2.6, .6, 1.5), new THREE.MeshStandardMaterial({ color: 0x0f1319, roughness: .75, metalness: .15 }));
+  block.position.y = -.3; socket.add(block);
+  const slot = new THREE.Mesh(new THREE.BoxGeometry(W * .5 + .16, .08, D * .5 + .14), new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1 }));
+  slot.position.y = .02; socket.add(slot);
+  const lip = new THREE.Mesh(new THREE.BoxGeometry(2.6, .05, 1.5), new THREE.MeshStandardMaterial({ color: 0x1b222c, roughness: .6, metalness: .3 }));
+  lip.position.y = .02; socket.add(lip);
+
+  const S = .5, RAISED = 1.55, SEATED = .62, SIDE = 3.6;
+  const items = new Map(); // id -> { cart, x, vx, y, vy, alpha, seated }
+  let order = [], index = 0, hovered = null, frame = null, alive = true, t0 = performance.now();
   const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
   const size = sizer(renderer, camera, canvas);
-  const RAISED = 1.3, SEATED = .58, S = .5;
+  const current = () => order[index] || null;
 
-  function layout() {
-    const n = items.size; let i = 0;
-    const gap = Math.min(1.6, 8.6 / Math.max(1, n));
-    for (const it of items.values()) { it.x = (i - (n - 1) / 2) * gap; it.cart.group.position.x = it.x; i++; }
-    slots.clear();
-    for (const it of items.values()) {
-      const s = new THREE.Mesh(new THREE.BoxGeometry(W * S + .14, .06, D * S + .12), new THREE.MeshStandardMaterial({ color: 0x0a0d12, roughness: .9 }));
-      s.position.set(it.x, .02, 0); slots.add(s); it.slot = s;
-    }
-    slab.scale.x = Math.max(1, (n * gap + 1.2) / 10);
+  function spring(v, target, vel, dt, k = 120, c = 11) {
+    // critically-ish damped spring with a little underdamping left in for the bounce
+    const a = -k * (v - target) - c * vel;
+    vel += a * dt; v += vel * dt;
+    return [v, vel];
   }
   function pick(ev) {
+    const id = current(); if (!id) return null;
     const r = canvas.getBoundingClientRect();
     ptr.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ptr, camera);
-    const hits = ray.intersectObjects([...items.values()].map(it => it.cart.group), true);
-    if (!hits.length) return null;
-    for (const [id, it] of items) { let o = hits[0].object; while (o) { if (o === it.cart.group) return id; o = o.parent; } }
-    return null;
+    return ray.intersectObject(items.get(id).cart.group, true).length ? id : null;
   }
   canvas.addEventListener('pointermove', ev => { const id = pick(ev); if (id !== hovered) { hovered = id; canvas.style.cursor = id ? 'pointer' : ''; handlers.onHover?.(id); wake(); } });
   canvas.addEventListener('pointerleave', () => { if (hovered) { hovered = null; canvas.style.cursor = ''; handlers.onHover?.(null); wake(); } });
   canvas.addEventListener('click', ev => { const id = pick(ev); if (id) handlers.onPick?.(id); });
+  canvas.addEventListener('wheel', ev => { if (order.length < 2) return; ev.preventDefault(); const d = (ev.deltaY || ev.deltaX); if (Math.abs(d) > 8) api.step(d > 0 ? 1 : -1); }, { passive: false });
 
   function loop(now) {
     frame = null; if (!alive) return;
-    const dt = Math.min(.05, (now - t0) / 1000); t0 = now; size();
+    const dt = Math.min(.04, (now - t0) / 1000); t0 = now; size();
     if ((now | 0) % 60 === 0) backplate.material.color.copy(panelBg());
     let moving = false;
+    const cur = current();
     for (const [id, it] of items) {
-      const g = it.cart.group;
-      const want = (it.inserted ? SEATED : RAISED) + (hovered === id ? .18 : 0);
-      const k = 1 - Math.pow(.002, dt);
-      it.y = it.y === undefined ? want : it.y + (want - it.y) * k;
-      if (Math.abs(want - it.y) > .003) moving = true;
-      g.position.y = it.y; g.scale.setScalar(S);
-      g.rotation.y = Math.sin(now / 3000 + it.x) * .06 + (hovered === id ? -.25 : 0);
+      const g = it.cart.group, isCur = id === cur;
+      const tx = isCur ? 0 : it.x < 0 ? -SIDE : SIDE;
+      const ty = isCur ? (it.seated ? SEATED : RAISED + (hovered === id ? .12 : 0)) : RAISED + .6;
+      [it.x, it.vx] = spring(it.x, tx, it.vx, dt, 90, 12);
+      // a seated cartridge lands harder: stiffer, less damped, so it bounces in the slot
+      [it.y, it.vy] = spring(it.y, ty, it.vy, dt, it.seated && isCur ? 220 : 110, it.seated && isCur ? 9 : 12);
+      if (isCur && it.seated && it.y < SEATED - .02) { it.y = SEATED - .02; it.vy = -it.vy * .35; }  // the slot floor
+      const ta = isCur ? 1 : 0; it.alpha += (ta - it.alpha) * Math.min(1, dt * 9);
+      g.position.set(it.x, it.y, 0); g.scale.setScalar(S * (.85 + .15 * it.alpha)); g.visible = it.alpha > .02;
+      g.rotation.y = Math.sin(now / 2600) * .07 + (hovered === id ? -.2 : 0) + (1 - it.alpha) * (it.x < 0 ? -.6 : .6);
       it.cart.twinkle(now);
+      if (Math.abs(it.vx) > .01 || Math.abs(it.vy) > .01 || Math.abs(it.alpha - ta) > .01) moving = true;
     }
     renderer.render(scene, camera);
-    const anyLit = [...items.values()].some(it => it.inserted);
-    if (canvas.isConnected && !canvas.closest('[hidden]') && (moving || anyLit || hovered)) frame = requestAnimationFrame(loop);
+    const lit = cur && items.get(cur)?.seated;
+    if (canvas.isConnected && !canvas.closest('[hidden]') && (moving || lit || hovered)) frame = requestAnimationFrame(loop);
   }
   function wake() { if (!frame && alive) { t0 = performance.now(); frame = requestAnimationFrame(loop); } }
   const ro = new ResizeObserver(() => { size(); wake(); }); ro.observe(canvas);
 
-  return {
+  const api = {
     setCartridges(list) {
       const keep = new Set(list.map(c => c.id));
       for (const [id, it] of items) if (!keep.has(id)) { scene.remove(it.cart.group); it.cart.dispose(); items.delete(id); }
       for (const c of list) {
         let it = items.get(c.id);
-        if (!it) { it = { cart: makeCartridge(), inserted: !!c.inserted, y: undefined }; scene.add(it.cart.group); items.set(c.id, it); }
-        it.inserted = !!c.inserted;
-        it.cart.set({ design: c.design || {}, colour: c.colour, name: c.name, sub: c.sub, level: c.level, points: c.points || [], artUrl: c.artUrl, lit: !!c.inserted });
+        if (!it) { it = { cart: makeCartridge(), x: SIDE, vx: 0, y: RAISED + .6, vy: 0, alpha: 0, seated: !!c.seated }; scene.add(it.cart.group); items.set(c.id, it); }
+        it.seated = !!c.seated;
+        it.cart.set({ design: c.design || {}, colour: c.colour, name: c.name, sub: c.sub, level: c.level, points: c.points || [], artUrl: c.artUrl, lit: !!c.seated });
       }
-      layout(); wake();
+      order = list.map(c => c.id);
+      // keep looking at what we were looking at, else the seated one, else the first
+      const seated = list.find(c => c.seated);
+      const want = order.includes(current()) ? current() : seated ? seated.id : order[0];
+      index = Math.max(0, order.indexOf(want));
+      wake();
     },
-    setInserted(id, on) { const it = items.get(id); if (!it) return; it.inserted = on; it.cart.set({ lit: on }); wake(); },
-    project(id) { const it = items.get(id); if (!it) return null; const v = new THREE.Vector3(it.x, -.1, 0).project(camera); const [w, h] = size(); return { x: (v.x + 1) / 2 * w, y: (1 - v.y) / 2 * h }; },
+    show(id) { const i = order.indexOf(id); if (i < 0) return; const from = index; index = i; const it = items.get(id); if (it && it.alpha < .05) { it.x = i >= from ? SIDE : -SIDE; it.vx = 0; } wake(); handlers.onChange?.(id); },
+    step(d) { if (!order.length) return; const i = (index + d + order.length) % order.length; const it = items.get(order[i]); if (it) { it.x = d > 0 ? SIDE : -SIDE; it.vx = 0; } index = i; wake(); handlers.onChange?.(order[i]); },
+    seat(id, on) { const it = items.get(id); if (!it) return; it.seated = on; if (on) { it.vy = -6; } else { it.vy = 4; } it.cart.set({ lit: on }); wake(); },
+    current, count: () => order.length,
     wake,
     dispose() { alive = false; if (frame) cancelAnimationFrame(frame); ro.disconnect(); for (const it of items.values()) it.cart.dispose(); renderer.dispose(); },
   };
+  return api;
 }

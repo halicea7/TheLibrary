@@ -160,18 +160,27 @@ body {
 }
 .slot:hover { color:var(--fg); border-color:var(--faint); }
 .rack-note { font:10.5px/1.5 var(--mono); color:var(--faint); margin:-2px 0 6px; min-height:14px; }
-/* The rack in three dimensions: cartridges standing in a slotted base. Names and eject
-   sit beneath each one as HTML, placed by projecting the slot. */
-.rack3d { position:relative; height:190px; margin:0 -6px 4px; }
+/* The rack in three dimensions: one socket, one cartridge in view. Arrows or the wheel
+   step through the others; "all" opens a grid to jump to one. */
+.rack3d { position:relative; height:210px; margin:0 -6px 2px; }
 .rack3d canvas { width:100%; height:100%; display:block; }
-.rack3d .tags { position:absolute; left:0; right:0; bottom:0; height:34px; pointer-events:none; }
-.rack3d .tag { position:absolute; transform:translateX(-50%); text-align:center; pointer-events:auto; white-space:nowrap; }
-.rack3d .tag .nm { display:block; font:500 10px/1.3 var(--serif); color:var(--dim); max-width:78px; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
-.rack3d .tag[data-on=true] .nm { color:var(--fg); }
-.rack3d .tag .ej { font:9.5px/1 var(--sans); color:var(--faint); background:none; border:0; cursor:pointer; padding:1px 0 0; display:none; }
-.rack3d .tag:hover .ej { display:inline; }
-.rack3d .tag .ej:hover { color:var(--amber); }
-.rack3d .slot2d { position:absolute; right:6px; top:8px; }
+.rack3d .arrow { position:absolute; top:78px; width:26px; height:44px; background:none; border:0; color:var(--faint); font:22px/1 var(--serif); cursor:pointer; padding:0; }
+.rack3d .arrow:hover { color:var(--fg); }
+.rack3d .arrow.l { left:0; } .rack3d .arrow.r { right:0; }
+.rack3d .arrow[disabled] { opacity:.25; cursor:default; }
+.rack3d .under { position:absolute; left:0; right:0; bottom:0; display:flex; align-items:baseline; justify-content:center; gap:10px; font:11px/1.4 var(--sans); color:var(--faint); pointer-events:none; }
+.rack3d .under > * { pointer-events:auto; }
+.rack3d .under .nm { font:500 12.5px/1.4 var(--serif); color:var(--dim); max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+.rack3d .under[data-on=true] .nm { color:var(--verdigris); }
+.rack3d .under .cnt { font:10px/1 var(--mono); }
+.rack3d .slot2d { position:absolute; right:6px; top:6px; }
+.rack3d .all { position:absolute; left:8px; top:6px; }
+.rackgrid { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:0 0 8px; }
+.rackgrid button { display:flex; align-items:center; gap:7px; padding:6px 8px; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; cursor:pointer; text-align:left; font:11.5px/1.3 var(--sans); color:var(--dim); }
+.rackgrid button:hover { color:var(--fg); border-color:var(--faint); }
+.rackgrid button[data-on=true] { border-color:var(--verdigris); color:var(--fg); }
+.rackgrid .dot { width:8px; height:8px; flex:0 0 8px; border-radius:50%; background:var(--c); }
+.rackgrid span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* ── the shelf itself ─────────────────────────────────────────────────── */
 /* Volumes are grouped by subject. A volume with three subjects sits on three shelves,
@@ -613,7 +622,15 @@ select, .toggle {
     </div>
 
     <p class="label spaced">Rack</p>
-    <div class="rack3d" id="rack3d" hidden><canvas id="rack-canvas"></canvas><div class="tags" id="rack-tags"></div><button class="slot slot2d" style="height:34px;width:22px;font-size:13px" onclick="openMake()" title="Make a cartridge from this library">+</button></div>
+    <div class="rack3d" id="rack3d" hidden>
+      <canvas id="rack-canvas"></canvas>
+      <button class="arrow l" onclick="rackStep(-1)" title="Previous cartridge">‹</button>
+      <button class="arrow r" onclick="rackStep(1)" title="Next cartridge">›</button>
+      <button class="linkish all" onclick="rackGrid()" title="All cartridges">all</button>
+      <button class="slot slot2d" style="height:30px;width:20px;font-size:13px" onclick="openMake()" title="Make a cartridge from this library">+</button>
+      <div class="under" id="rack-under"></div>
+    </div>
+    <div class="rackgrid" id="rackgrid" hidden></div>
     <div class="rack" id="rack"></div>
     <div class="rack-note" id="rack-note"></div>
 
@@ -1122,11 +1139,11 @@ async function loadRack(justInserted) {
   rackIndex = Object.fromEntries(r.cartridges.map(c => [c.id, c]));
   for (const id of [...cartridges]) if (!rackIndex[id]) cartridges.delete(id);
   if (window.Cartridge3D && r.cartridges.length) {
-    // The rack as objects. Constellations are fetched once per cartridge.
     $('#rack3d').hidden = false; $('#rack').hidden = true;
     if (!rack3d.ctrl) rack3d.ctrl = window.Cartridge3D.mountRack($('#rack-canvas'), {
       onPick: id => toggleCartridge(id),
       onHover: id => id ? inspectShow(id) : inspectHide(),
+      onChange: () => rackUnder(),
     });
     await Promise.all(r.cartridges.map(async c => {
       if (rack3d.points[c.id]) return;
@@ -1135,11 +1152,11 @@ async function loadRack(justInserted) {
     rack3d.ctrl.setCartridges(r.cartridges.map(c => ({
       id: c.id, design: c.design, colour: c.colour, name: c.name, level: c.level,
       sub: `${c.level} · ${c.document_count} volumes`, points: rack3d.points[c.id], artUrl: `/api/cartridges/${c.id}/art`,
-      inserted: cartridges.has(c.id),
+      seated: cartridges.has(c.id),
     })));
-    rackTags(r.cartridges);
+    rackUnder();
     const room = roomName();
-    $('#rack-note').textContent = room ? `in ${room}'s shelf` : cartridges.size ? `${cartridges.size} rooms` : '';
+    $('#rack-note').textContent = room ? `in ${room}'s shelf` : '';
     return;
   }
   $('#rack3d').hidden = true; $('#rack').hidden = false;
@@ -1178,24 +1195,33 @@ function inspectHide() {
   inspect.timer = setTimeout(() => { $('#inspect').dataset.on = 'false'; }, 260);
 }
 
-// Names under the standing cartridges, placed where each slot projects to.
-function rackTags(list) {
-  const el = $('#rack-tags');
-  const place = () => {
-    el.innerHTML = list.map(c => {
-      const p = rack3d.ctrl.project(c.id); if (!p) return '';
-      return `<div class="tag" data-on="${cartridges.has(c.id)}" style="left:${p.x}px">
-        <span class="nm" onclick="toggleCartridge('${c.id}')" title="${esc(c.name)} · ${c.level} · ${c.document_count} volumes">${esc(c.name)}</span>
-        <button class="ej" onclick="event.stopPropagation(); ejectCartridge('${c.id}', this)">eject</button>
-      </div>`;
-    }).join('');
-  };
-  place(); requestAnimationFrame(place);
+// Under the socket: which cartridge is in view, of how many, and eject.
+function rackUnder() {
+  const id = rack3d.ctrl?.current(); const c = id && rackIndex[id];
+  const n = rack3d.ctrl?.count() || 0;
+  const el = $('#rack-under');
+  if (!c) { el.innerHTML = ''; return; }
+  el.dataset.on = String(cartridges.has(id));
+  el.innerHTML = `<span class="nm" onclick="toggleCartridge('${id}')" title="${cartridges.has(id) ? 'Click to lift it out' : 'Click to seat it and ask its shelf'}">${esc(c.name)}</span>
+    <span class="cnt">${Object.keys(rackIndex).indexOf(id) + 1}/${n}</span>
+    <button class="linkish" style="font-size:10.5px" onclick="ejectCartridge('${id}', this)">eject</button>`;
+  for (const a of document.querySelectorAll('.rack3d .arrow')) a.disabled = n < 2;
+}
+function rackStep(d) { rack3d.ctrl?.step(d); rackUnder(); }
+function rackGrid() {
+  const g = $('#rackgrid');
+  if (!g.hidden) { g.hidden = true; return; }
+  g.hidden = false;
+  g.innerHTML = Object.values(rackIndex).map(c => `<button data-on="${cartridges.has(c.id)}" style="--c:${esc(c.colour)}" onclick="rack3d.ctrl.show('${c.id}'); rackUnder(); $('#rackgrid').hidden = true" title="${esc(c.name)} · ${c.level} · ${c.document_count}"><i class="dot"></i><span>${esc(c.name)}</span></button>`).join('');
 }
 function toggleCartridge(id) {
-  cartridges.has(id) ? cartridges.delete(id) : cartridges.add(id);
-  // The motion: down into the slot with the light coming on, or up and dark.
-  rack3d.ctrl?.setInserted(id, cartridges.has(id));
+  // One room at a time: seating a cartridge lifts whatever was seated.
+  const wasOn = cartridges.has(id);
+  for (const other of [...cartridges]) rack3d.ctrl?.seat(other, false);
+  cartridges.clear();
+  if (!wasOn) cartridges.add(id);
+  if (rack3d.ctrl) { rack3d.ctrl.show(id); rack3d.ctrl.seat(id, !wasOn); }
+  rackUnder();
   loadRack(); loadShelf();
   $('#entry').placeholder = placeholderFor(view);
   const room = roomName();

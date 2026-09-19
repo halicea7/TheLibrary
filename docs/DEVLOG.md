@@ -549,3 +549,14 @@ none; internal, confidential, restricted in slate, amber, rubric) with the marki
 printed on it. Clearance is sealed with the design; `restricted` is also enforced at the
 one place it can be: `resolve_selection` leaves out any volume that arrived only in a
 restricted cartridge, so the receiving library cannot re-export it.
+
+
+**One socket.** "You're overcomplicating it." The multi-slot rack became a single socket:
+one cartridge in view, arrows or the wheel to step through the rest, a grid to jump. The
+current one hangs above the socket; clicking drops it in and lights it. The motion is a
+spring (stiffness, damping, a floor at the slot with a rebound) rather than a tween, so
+the bounce is a real overshoot. Scoping became one room at a time, which is how it was
+being used. Two things learned: MeshBasicMaterial goes through tone mapping like
+everything else, so a backplate meant to match the page needs `toneMapped: false`; and
+Chrome stops animation frames in a background tab, which makes a mid-motion screenshot
+look like a bug.

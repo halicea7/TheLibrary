@@ -623,3 +623,21 @@ citations verified. Two things fixed on the way: a local `sources` in the UI sha
 global the apparatus reads (no margin notes until it was renamed), and the model opens a
 section with its own heading no matter how it is told not to, so the first line is
 dropped when it matches.
+
+
+## Follow-on: consistency, measured
+
+Retrieval re-evaluated on the 1,219-volume corpus with 57 freshly generated questions
+(the old suite had been cascade-deleted with its gold documents): hybrid RRF MRR 0.71,
+recall@10 0.91, against 0.65 / 0.94 two days earlier at 176 volumes. A sevenfold larger
+corpus cost almost nothing; lexical alone fell to MRR 0.17 on the security material,
+dense held at 0.69, fusion on top 0.71. The reranker did not help these keyword-shaped
+questions (0.69) and the router hurt (0.70, recall@10 0.86): both findings from Phase 2
+hold at scale.
+
+`scripts/consistency.py` asks questions with known answers three times each without
+memory and scores volume cited, required terms present, citations verified, runs agree,
+plus one unknowable question that must be declined without a citation. It could not run
+this session: partway through, the remote Ollama wedged -- HTTP answering, both models
+resident, no generation returning even with every client disconnected -- which is the
+failure `docs/TROUBLESHOOTING.md` describes and the one thing this side cannot fix.

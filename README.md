@@ -172,17 +172,19 @@ Ollama can be local or remote — every model call follows `LIBRARY_OLLAMA_URL`,
 
 ## What was measured
 
-The interesting engineering came from measuring rather than assuming. The full log is in [`docs/DEVLOG.md`](docs/DEVLOG.md); the results that changed the design:
+Retrieval is evaluated on a generated question set (a question per gold passage, the answer known) with a ladder of configurations, so every stage earns its place. Re-run on the current corpus — 1,219 volumes, 57 questions, most of them from the security material:
 
-- **`websearch_to_tsquery` ANDs every term**, so a natural-language question matched *zero* rows and the lexical half of hybrid search was silently doing nothing. Fixed with an OR-semantics helper. Postgres full-text ranking also has no IDF term, which is why the lexical half is down-weighted rather than fused equally.
-- **The cross-encoder helps paraphrased questions (recall@1 0.51 → 0.60) and hurts keyword queries (0.42 → 0.37).** Reranking depth 20 matches depth 100 on quality at a fifth of the latency.
-- **A document-constant context prefix on every chunk made retrieval slightly worse**, not better — it homogenises that document's vectors. Reverted.
-- **Tier 2 reflections don't improve retrieval**, on either a chunk-derived or a purpose-built interpretive question suite. They're kept because they're worth *reading*, and cut from the retrieval path.
-- **Constrained JSON generation emits fields in schema order**, so a verdict placed before its reasoning is committed to before the model has reasoned. The contradiction detector returned `false` while its own explanation said "they report opposite effects". Reasoning fields come first, everywhere.
-- **A too-small context doesn't error — the model emits `"..."` for every field** and writes it straight into the index. Context is sized from the prompt and placeholder payloads are rejected.
-- **Thinking can't be turned off on the 30B**: with `think: false` it narrates its reasoning into the answer instead. So thinking stays on and the UI shows the librarian considering; the toggle is *show*, not *off*.
-- **Grammar-constrained generation can run away and wedge Ollama** — three times in an hour, always on the same instruction-heavy pass. A `num_predict` cap and a short per-request timeout turned a 30-minute hang into a 22-second pass, because Ollama cancels a generation when its client disconnects.
-- **A model will answer `true` while its own explanation says no**, even with the verdict field last — and will paraphrase the instruction back as the explanation. The reasoning wins over the verdict, and an instruction-shaped explanation discards it.
+| config | recall@1 | recall@5 | recall@10 | MRR | s/query |
+|---|---|---|---|---|---|
+| dense only | 0.56 | 0.89 | 0.91 | 0.69 | 0.14 |
+| lexical only | 0.09 | 0.30 | 0.44 | 0.17 | 0.17 |
+| **hybrid (RRF)** | **0.61** | 0.86 | 0.91 | **0.71** | 0.19 |
+| hybrid + router | 0.61 | 0.81 | 0.86 | 0.70 | 0.23 |
+| hybrid + reranker | 0.58 | 0.82 | 0.89 | 0.69 | 1.50 |
+
+Two days earlier, at 176 volumes, hybrid RRF measured MRR 0.65 and recall@10 0.94 — so a sevenfold larger corpus cost almost nothing. Lexical search alone collapses on this material (short technical titles, heavy overlap between documents); dense carries it and fusion adds a little on top. The reranker does not help on generated questions, which read like keyword queries; it is kept for chat, where questions are sentences. The router hurts slightly and stays off by default.
+
+Answer quality is checked separately by `scripts/consistency.py`: a set of questions with known answers in the collection, each asked several times without memory, scored on whether the right volume was cited, whether the answer contains what a correct answer must, whether every emitted citation resolved, and whether the runs agree — plus a question the library cannot know, to confirm it says so rather than inventing a source. `uv run python scripts/verify.py` exercises every surface end to end.
 
 ## Layout
 

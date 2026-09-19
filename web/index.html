@@ -450,6 +450,55 @@ select, .toggle {
 .reader-m .dot { display:inline-block; vertical-align:middle; margin-right:5px; }
 .reading-only { font:italic 13px/1.6 var(--serif); color:var(--dim); margin:0 0 18px; max-width:68ch; }
 
+/* ── settings ─────────────────────────────────────────────────────────── */
+.settings { max-width: 78ch; }
+.settings h2 { font:600 20px/1.3 var(--serif); margin:0 0 14px; }
+.settings .sect { margin-bottom:26px; }
+.svc { display:flex; flex-wrap:wrap; gap:8px 18px; font:12.5px/1.6 var(--sans); color:var(--dim); }
+.svc span::before { content:''; display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:7px; background:var(--verdigris); vertical-align:middle; }
+.svc span[data-ok=false]::before { background:var(--amber); }
+.svc span[data-ok=false] { color:var(--amber); }
+.kv { width:100%; border-collapse:collapse; font:13px/1.5 var(--sans); }
+.kv td { padding:5px 0; border-bottom:1px solid var(--rule-soft); vertical-align:top; }
+.kv td:first-child { color:var(--dim); width:34%; }
+.kv td:nth-child(2) { font-family:var(--mono); font-size:12px; }
+.kv td:last-child { color:var(--faint); font-size:11.5px; }
+.kv code { font:11px/1 var(--mono); color:var(--faint); background:var(--sunk); padding:1px 5px; border-radius:2px; }
+.acts { display:flex; flex-wrap:wrap; gap:14px; }
+.incident { border:1px solid var(--rule); border-radius:4px; padding:10px 12px; margin-bottom:10px; background:color-mix(in srgb, var(--panel) 70%, transparent); }
+.incident[data-resolved=true] { opacity:.55; }
+.inc-h { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.inc-kind { font:600 13px/1.4 var(--mono); color:var(--amber); }
+.inc-src { font:10px/1 var(--mono); color:var(--faint); letter-spacing:.06em; text-transform:uppercase; border:1px solid var(--rule); padding:2px 5px; border-radius:2px; }
+.inc-n { font:10.5px/1 var(--mono); color:var(--faint); }
+.inc-t { margin-left:auto; font:10.5px/1 var(--mono); color:var(--faint); }
+.inc-msg { font:13.5px/1.55 var(--serif); margin:6px 0 8px; word-break:break-word; }
+.inc-acts { display:flex; gap:12px; align-items:center; }
+.inc-detail { margin-top:8px; }
+.inc-detail pre { margin:0; max-height:220px; overflow:auto; font:11px/1.5 var(--mono); background:var(--sunk); border:1px solid var(--rule-soft); border-radius:3px; padding:8px 10px; white-space:pre-wrap; color:var(--dim); }
+/* The advice: the librarian's diagnosis, then steps to run by hand. Commands are shown to
+   copy, never a button that runs them. */
+.advice { margin-top:12px; padding:12px 14px; border-left:2px solid var(--verdigris); background:color-mix(in srgb, var(--verdigris) 6%, transparent); border-radius:0 4px 4px 0; }
+.advice .cause { font:600 10.5px/1 var(--sans); letter-spacing:.09em; text-transform:uppercase; color:var(--verdigris); margin-bottom:6px; }
+.advice .cause[data-c=defect] { color:var(--amber); }
+.advice .diag { font:14px/1.6 var(--serif); margin:0 0 10px; }
+.advice .diag p { font:14px/1.6 var(--serif); margin:0 0 .5em; }
+.step { display:grid; grid-template-columns:22px 1fr; gap:4px 8px; margin:8px 0; }
+.step .n { font:11px/1.6 var(--mono); color:var(--faint); text-align:right; }
+.step b { font:500 13.5px/1.5 var(--serif); }
+.step .why { grid-column:2; font:12px/1.5 var(--sans); color:var(--dim); }
+.cmd { grid-column:2; display:flex; align-items:center; gap:8px; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; padding:5px 8px; }
+.cmd code { flex:1; font:12px/1.5 var(--mono); white-space:pre-wrap; word-break:break-all; }
+.cmd .linkish { flex:0 0 auto; }
+.cmd[data-doc=false] { border-color:color-mix(in srgb, var(--amber) 55%, var(--rule)); }
+.cmd .undoc { flex:0 0 auto; font:10px/1 var(--mono); color:var(--amber); border:1px solid var(--amber); border-radius:2px; padding:2px 5px; }
+.advice .refs { font:11px/1.6 var(--mono); color:var(--faint); margin-top:8px; }
+.advice .issue { margin-top:10px; padding-top:10px; border-top:1px solid var(--rule-soft); }
+.advice .issue a { color:var(--amber); font:13px/1.5 var(--sans); text-decoration:underline dotted; }
+.advice .issue pre { margin:8px 0 0; max-height:200px; overflow:auto; font:11.5px/1.5 var(--mono); background:var(--sunk); border:1px solid var(--rule-soft); border-radius:3px; padding:8px 10px; white-space:pre-wrap; color:var(--dim); }
+#tab-settings { margin-left:6px; }
+#inc-badge { display:inline-block; margin-left:6px; min-width:16px; padding:2px 5px; border-radius:99px; background:var(--amber); color:var(--bg); font:600 10px/1 var(--mono); text-align:center; vertical-align:middle; }
+
 /* ── make a cartridge ─────────────────────────────────────────────────── */
 .make { max-width:62ch; }
 .make h2 { font:600 20px/1.3 var(--serif); margin:0 0 4px; }
@@ -528,6 +577,7 @@ select, .toggle {
       <button class="view-tab" id="tab-threads" role="tab" aria-selected="false" onclick="setView('threads')">Threads</button>
       <button class="view-tab" id="tab-open"    role="tab" aria-selected="false" onclick="setView('open')" hidden>Open</button>
       <button class="view-tab" id="tab-make"    role="tab" aria-selected="false" onclick="setView('make')" hidden>Make a cartridge</button>
+      <button class="view-tab" id="tab-settings" role="tab" aria-selected="false" onclick="setView('settings')" title="Services, models, maintenance, incidents">Settings<span id="inc-badge" hidden></span></button>
       <span class="right">
         <select id="model" title="Switching models takes a moment"></select>
         <span class="stance">
@@ -545,6 +595,7 @@ select, .toggle {
       <div id="view-threads" hidden></div>
       <div id="view-open" hidden></div>
       <div id="view-make" hidden></div>
+      <div id="view-settings" hidden></div>
     </div>
 
     <form class="composer" id="composer" autocomplete="off">
@@ -775,16 +826,17 @@ $('#themer').onclick = () => {
 /* ── views ────────────────────────────────────────────────────────────── */
 function setView(v) {
   view = v;
-  for (const k of ['ask','find','threads','open','make']) {
+  for (const k of ['ask','find','threads','open','make','settings']) {
     $('#view-' + k).hidden = k !== v;
     const t = $('#tab-' + k); t.setAttribute('aria-selected', String(k === v));
   }
-  $('#composer').hidden = v === 'threads' || v === 'open' || v === 'make';
+  $('#composer').hidden = v === 'threads' || v === 'open' || v === 'make' || v === 'settings';
   const e = $('#entry');
   e.placeholder = placeholderFor(v);
-  $('#subjects').hidden = v === 'threads' || v === 'open';
+  $('#subjects').hidden = v === 'threads' || v === 'open' || v === 'settings';
   if (v === 'threads') loadThreads();
   if (v === 'make') renderMake();
+  if (v === 'settings') loadSettings();
   $('#web').dataset.on = String(v === 'ask' && web.nodes.length > 0); web.wake();
   e.focus();
 }
@@ -1449,6 +1501,123 @@ async function openVolume(id) {
   $('#pane').scrollTop = 0;
 }
 
+/* ── settings ─────────────────────────────────────────────────────────── */
+let showResolved = false;
+const fmtWhen = iso => { if (!iso) return ''; const d = new Date(iso), m = (Date.now() - d) / 60000;
+  return m < 1 ? 'just now' : m < 60 ? `${Math.round(m)}m ago` : m < 1440 ? `${Math.round(m/60)}h ago` : d.toLocaleDateString(); };
+async function loadSettings() {
+  const el = $('#view-settings');
+  el.innerHTML = '<div class="empty">Reading the settings…</div>';
+  let s, inc;
+  try {
+    [s, inc] = await Promise.all([
+      (await fetch('/api/settings')).json(),
+      (await fetch('/api/settings/incidents?resolved=' + showResolved)).json(),
+    ]);
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(String(e))}</div>`; return; }
+  const kv = rows => `<table class="kv">${rows.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.value ?? '—')}</td><td>${r.note ? esc(r.note) + ' · ' : ''}<code>${esc(r.env)}</code></td></tr>`).join('')}</table>`;
+  const sv = s.services;
+  el.innerHTML = `<div class="settings">
+    <h2>Settings</h2>
+    <div class="sect">
+      <p class="label">Services</p>
+      <div class="svc">
+        <span data-ok="${sv.postgres}">Postgres</span>
+        <span data-ok="${sv.redis}">Redis</span>
+        <span data-ok="${sv.ollama}">Ollama · ${esc(sv.ollama_url)}${sv.ollama && sv.resident_models.length ? ' · resident: ' + sv.resident_models.map(esc).join(', ') : ''}</span>
+        <span data-ok="${sv.reranker}">Reranker (local)</span>
+      </div>
+    </div>
+    <div class="sect"><p class="label">Models</p>${kv(s.models)}</div>
+    <div class="sect"><p class="label">Retrieval</p>${kv(s.retrieval)}</div>
+    <div class="sect"><p class="label">Library</p>${kv(s.library)}
+      <p class="empty" style="padding:8px 0 0">Configuration is read from the environment (or <code>.env</code>): set the variable shown and <code>./library restart</code>.</p></div>
+    <div class="sect">
+      <p class="label">Storage &amp; maintenance</p>
+      <table class="kv">
+        <tr><td>Store</td><td>${esc(s.storage.store)}</td><td></td></tr>
+        <tr><td>Database</td><td>${esc(s.storage.database)}</td><td></td></tr>
+        <tr><td>Orphans</td><td>${Object.values(s.storage.orphans).reduce((a,b)=>a+b,0)}</td><td>${esc(JSON.stringify(s.storage.orphans))}</td></tr>
+      </table>
+      <div class="acts" style="margin-top:10px">
+        <button class="linkish" onclick="gc(this)">collect garbage</button>
+        <button class="linkish" onclick="rebuild()">rebuild threads</button>
+        <button class="linkish" onclick="reshelve(this)">reshelve</button>
+        <button class="linkish" onclick="fetch('/api/settings/incidents/test',{method:'POST'}).then(loadSettings)">record a test incident</button>
+      </div>
+    </div>
+    <div class="sect">
+      <div class="shelf-h" style="padding:0 0 8px"><p class="label" style="margin:0">Incidents</p>
+        <button class="linkish" style="margin-left:auto" onclick="showResolved=!showResolved; loadSettings()">${showResolved ? 'hide resolved' : 'show resolved'}</button></div>
+      <div id="incidents">${inc.length ? inc.map(incidentHtml).join('') : '<div class="empty"><b>Nothing has gone wrong.</b>Errors from the API, the worker, reading jobs and chat turns collect here, and the library can be asked to troubleshoot them against its own documentation.</div>'}</div>
+    </div>
+  </div>`;
+  $('#inc-badge').hidden = !s.incidents_open; $('#inc-badge').textContent = s.incidents_open;
+}
+function incidentHtml(i) {
+  return `<div class="incident" data-resolved="${i.resolved}" id="inc-${i.id}">
+    <div class="inc-h">
+      <span class="inc-kind">${esc(i.kind)}</span>
+      <span class="inc-src">${esc(i.source)}</span>
+      ${i.count > 1 ? `<span class="inc-n">× ${i.count}</span>` : ''}
+      <span class="inc-t" title="${esc(i.first_at)}">${fmtWhen(i.last_at)}</span>
+    </div>
+    <div class="inc-msg">${esc(i.message)}</div>
+    <div class="inc-acts">
+      <button class="linkish" onclick="advise('${i.id}', this)">${i.advice ? 'troubleshoot again' : 'troubleshoot'}</button>
+      ${i.detail ? `<button class="linkish" onclick="const d=this.closest('.incident').querySelector('.inc-detail'); d.hidden=!d.hidden">traceback</button>` : ''}
+      <button class="linkish" onclick="resolveIncident('${i.id}', ${!i.resolved})">${i.resolved ? 'reopen' : 'resolved'}</button>
+    </div>
+    ${i.detail ? `<div class="inc-detail" hidden><pre>${esc(i.detail)}</pre></div>` : ''}
+    <div class="advice-slot">${i.advice ? adviceHtml(i.advice, i.advice_at) : ''}</div>
+  </div>`;
+}
+function adviceHtml(a, at) {
+  const steps = (a.steps || []).map((s, n) => `<div class="step">
+      <span class="n">${n + 1}</span><b>${esc(s.title)}</b>
+      ${s.command ? `<div class="cmd" data-doc="${s.documented !== false}"><code>${esc(s.command)}</code>${s.documented === false ? '<span class="undoc" title="This command or flag does not appear in the library\'s documentation; the model may have invented it.">not in our docs</span>' : ''}<button class="linkish" onclick="navigator.clipboard.writeText(this.parentElement.querySelector('code').textContent); this.textContent='copied'; setTimeout(()=>this.textContent='copy',1500)">copy</button></div>` : ''}
+      ${s.why ? `<div class="why">${esc(s.why)}</div>` : ''}
+    </div>`).join('');
+  const issue = a.open_issue ? `<div class="issue">
+      <a href="${esc(a.issue_url)}" target="_blank" rel="noopener">Open an issue on GitHub — ${esc(a.issue_title || '')}</a>
+      <span class="inc-n"> · pre-filled; review before submitting</span>
+      <pre>${esc(a.issue_body || '')}</pre>
+    </div>` : '';
+  return `<div class="advice">
+    <div class="cause" data-c="${esc(a.likely_cause)}">${esc(a.likely_cause)} · ${esc(a.model || '')}${at ? ' · ' + fmtWhen(at) : ''}</div>
+    <div class="diag md">${mdBlocks(a.diagnosis || '').join('')}</div>
+    ${steps}
+    ${a.docs_used?.length ? `<div class="refs">from: ${a.docs_used.map(esc).join(' · ')}</div>` : ''}
+    ${issue}
+    <div class="refs">These are suggestions to run yourself; the library does not run them.</div>
+  </div>`;
+}
+async function advise(id, btn) {
+  btn.disabled = true; btn.textContent = 'consulting the documentation…';
+  const slot = document.querySelector(`#inc-${id} .advice-slot`);
+  try {
+    const r = await fetch(`/api/settings/incidents/${id}/advise`, { method:'POST' });
+    const j = await r.json();
+    if (!r.ok) { slot.innerHTML = `<div class="advice"><div class="diag" style="color:var(--amber)">${esc(j.detail || 'The model could not advise.')}</div></div>`; return; }
+    slot.innerHTML = adviceHtml(j, new Date().toISOString());
+  } catch (e) { slot.innerHTML = `<div class="advice"><div class="diag" style="color:var(--amber)">${esc(String(e))}</div></div>`; }
+  finally { btn.disabled = false; btn.textContent = 'troubleshoot again'; }
+}
+async function resolveIncident(id, resolved) {
+  await fetch(`/api/settings/incidents/${id}/resolve?resolved=${resolved}`, { method:'POST' });
+  loadSettings();
+}
+async function gc(btn) {
+  btn.textContent = 'collecting…';
+  const j = await (await fetch('/api/settings/gc', { method:'POST' })).json();
+  say(`Collected: ${j.vectors_removed} orphaned vectors, ${j.files_removed} stray files.`);
+  holdings(); loadSettings();
+}
+async function incidentBadge() {
+  try { const s = await (await fetch('/api/settings/incidents')).json();
+    $('#inc-badge').hidden = !s.length; $('#inc-badge').textContent = s.length; } catch {}
+}
+
 /* ── make a cartridge ─────────────────────────────────────────────────── */
 const GLYPHS = {
   book:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>',
@@ -1586,7 +1755,8 @@ came from. Anything unmarked is its own reasoning.</span></div>`;
 setView('ask'); loadModels(); holdings(); loadRack().then(loadShelf); loadSubjects(); loadJobs();
 web.init();
 setInterval(loadJobs, 4000);
-setInterval(() => { holdings(); }, 30000);
+incidentBadge();
+setInterval(() => { holdings(); incidentBadge(); }, 30000);
 </script>
 </body>
 </html>

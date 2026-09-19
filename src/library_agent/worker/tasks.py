@@ -19,6 +19,7 @@ from library_agent.db.models import Document, Job, JobState
 from library_agent.db.session import session_scope
 from library_agent.llm.lease import reading_may_proceed, redis_client
 from library_agent.llm.ollama import Ollama
+from library_agent.ops.incidents import record_exception
 from library_agent.reading.tier1 import run_tier1
 from library_agent.reading.tier2 import run_tier2
 
@@ -91,6 +92,9 @@ async def read_document(ctx: dict, document_id: str, job_id: str, tier: int = 1)
         }
     except Exception as exc:
         log.exception("tier1 failed for %s", did)
+        await record_exception(
+            exc, source="worker", context={"job": f"tier{tier}", "document_id": str(did)}
+        )
         await _set_job(jid, state=JobState.ERROR, error=str(exc)[:2000])
         async with session_scope() as db:
             await db.execute(
@@ -114,15 +118,24 @@ async def build_library_layer(ctx: dict, kind: str) -> dict[str, Any]:
     out: dict[str, Any] = {"kind": kind}
     async with Ollama() as client:
         for k in kinds:
-            async with session_scope() as db:
-                if k == "citations":
-                    r = await build_citation_graph(db)
-                    out["citations"] = {"matched": r.matched, "references": r.references_found}
-                elif k == "clusters":
-                    r = await build_clusters(db, client=client)
-                    out["clusters"] = {"clusters": r.clusters, "cross_document": r.cross_document}
-                elif k == "contradictions":
-                    out["contradictions"] = await find_contradictions(db, client=client)
+            try:
+                async with session_scope() as db:
+                    if k == "citations":
+                        r = await build_citation_graph(db)
+                        out["citations"] = {"matched": r.matched, "references": r.references_found}
+                    elif k == "clusters":
+                        r = await build_clusters(db, client=client)
+                        out["clusters"] = {
+                            "clusters": r.clusters,
+                            "cross_document": r.cross_document,
+                        }
+                    elif k == "contradictions":
+                        out["contradictions"] = await find_contradictions(db, client=client)
+            except Exception as exc:
+                # One pass failing must not take the others with it.
+                log.exception("library pass %s failed", k)
+                await record_exception(exc, source="worker", context={"job": f"library:{k}"})
+                out[k] = {"error": str(exc)[:300]}
     return out
 
 
@@ -145,6 +158,7 @@ async def reshelve_library(ctx: dict, job_id: str, rebuild: bool = True) -> dict
         return r.__dict__
     except Exception as exc:
         log.exception("reshelve failed")
+        await record_exception(exc, source="worker", context={"job": "reshelve"})
         await _set_job(jid, state=JobState.ERROR, error=str(exc)[:2000])
         raise
 
@@ -191,8 +205,15 @@ async def backfill(ctx: dict, tier: int = 1) -> dict[str, Any]:
     return {"queued": len(ids)}
 
 
+async def _startup(ctx: dict) -> None:
+    from library_agent.ops.incidents import install_handler
+
+    install_handler("worker")
+
+
 class WorkerSettings:
     functions: ClassVar[list] = [read_document, backfill, build_library_layer, reshelve_library]
+    on_startup = _startup
     redis_settings = RedisSettings.from_dsn(settings().redis_url)
     job_timeout = JOB_TIMEOUT
     # One at a time: the models are a single shared resource, so concurrency here would

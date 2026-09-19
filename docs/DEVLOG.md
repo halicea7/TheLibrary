@@ -457,3 +457,31 @@ off each block instead of each paragraph. `.md` and `.rst` volumes render as wri
 the reader; PDFs stay as text.
 
 Logged for later: comparative questions retrieve from one volume (see TODO).
+
+
+## Follow-on: settings, and the library troubleshooting itself
+
+Asked for: a settings section with an error log where the same model helps fix things --
+guiding, not doing -- using our own documentation as the reference, and suggesting a
+GitHub issue with a ready description when that is the right move.
+
+`ops/incidents.py`. Recording is fed from the API's unhandled-exception handler, failed
+chat turns, failed jobs (one library pass failing no longer takes the others down) and a
+logging handler on `library_agent.*` at ERROR. Messages are normalised (ids, paths,
+numbers, quoted strings stripped) so a recurrence is a count, not a row.
+
+Advice is one structured call, thinking on where the model has it: the incident and the
+tail of its traceback, plus the most relevant paragraphs from `docs/TROUBLESHOOTING.md`
+(new, written from what actually broke), the README, the devlog and the scripts, chosen
+by keyword overlap weighted toward rare words. Output: diagnosis, likely cause from a
+fixed set, steps with optional commands, the doc sections used, and an issue draft when
+the cause is a defect. The technical model is used when configured; it answered a
+tunnel-drop incident in ten seconds with the right section cited and the right three
+commands, and a KeyError in our own code with a correct defect classification and a
+usable issue body.
+
+It also invented `./library cluster --dry-run` despite being told not to invent flags.
+So the prompt is not trusted: every suggested command is checked against the commands
+the documentation actually shows (fenced shell blocks, inline code, the launcher's usage
+and case arms), and the UI marks the undocumented ones in amber. Home paths and anything
+key-shaped are scrubbed from both the prompt and the issue text.

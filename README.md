@@ -83,6 +83,12 @@ This is what makes a 500-document backfill a single overnight rather than the ~2
 
 **Behind the Ask pane is the library itself**, drawn as a nebula: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning, laid out by a small force simulation in three dimensions and turning slowly. It thickens as the library grows, and the volumes an answer drew on light up as they are retrieved. Answers and markdown volumes are rendered as markdown; each block of an answer keeps its own margin notes.
 
+## Settings and incidents
+
+The Settings tab shows what the library is running on — services, models, retrieval and library configuration, each with the environment variable that changes it — and a maintenance row (collect garbage, rebuild threads, reshelve). Below it is the **incident log**: anything that escapes a route, fails a background job or a chat turn, or is logged at `ERROR` is recorded there, deduplicated within a window.
+
+*Troubleshoot* asks the model to read an incident against the library's own documentation — [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md), this README, the devlog, the launcher and ops scripts — and answer with a diagnosis, the likely cause (environment, configuration, data, model, or a defect in the library itself), steps with commands for *you* to run, and the sections it leaned on. Nothing is executed: it says what to do; you do it. Every suggested command is checked against the commands the docs actually show, and anything the model appears to have invented is marked. When the cause looks like a defect, it drafts a GitHub issue — what happened, the error, what was tried, the environment — and offers it as a pre-filled link, with home paths and anything key-shaped scrubbed.
+
 ## Cartridges
 
 A cartridge is a slice of a library that another library can put on its **rack**: a zip with a manifest, a colour, an icon, and the data. The receiving library doesn't just file it — it reads across everything it holds, so threads and disagreements form *between* collections, and every margin note keeps the colour of where it came from.
@@ -143,6 +149,7 @@ src/library_agent/
   reading/              tier 1 and tier 2 passes, versioned prompts
   retrieval/            hybrid search, router, reranked pipeline
   library/              clusters, citation graph, contradictions, taxonomy, shelving, cartridges
+  ops/                  incidents and troubleshooting against the docs
   chat/                 citations, query rewriting, stances, streaming
   eval/                 question generation, recall@k harness
   api/  worker/  db/

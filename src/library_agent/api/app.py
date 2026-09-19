@@ -7,17 +7,28 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import func, select
 
-from library_agent.api.routes import cartridges, chat, documents, library, reading, search
+from library_agent.api.routes import (
+    cartridges,
+    chat,
+    documents,
+    library,
+    reading,
+    search,
+)
+from library_agent.api.routes import (
+    settings as settings_routes,
+)
 from library_agent.api.schemas import HealthOut
 from library_agent.config import settings
 from library_agent.db.models import Chunk, Document, Embedding
 from library_agent.db.purge import count_orphans
 from library_agent.db.session import SessionDep, session_scope
 from library_agent.llm.ollama import Ollama
+from library_agent.ops import incidents
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +38,7 @@ WEB_DIR = Path(__file__).resolve().parents[3] / "web"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings().storage_dir.mkdir(parents=True, exist_ok=True)
+    incidents.install_handler("api")
     # Load the cross-encoder off the request path. It takes ~45s from cold and would
     # otherwise be paid by whoever runs the first reranked query.
     task = asyncio.create_task(asyncio.to_thread(_warm_reranker))
@@ -45,12 +57,26 @@ def _warm_reranker() -> None:
 
 
 app = FastAPI(title="Library Agent", version="0.1.0", lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+    """Anything that escapes a route becomes an incident the Settings tab can explain.
+    HTTPExceptions (4xx the routes raise on purpose) never reach here."""
+    log.exception("unhandled error on %s %s", request.method, request.url.path)
+    await incidents.record_exception(
+        exc, source="api", context={"method": request.method, "path": request.url.path}
+    )
+    return JSONResponse(status_code=500, content={"detail": f"{type(exc).__name__}: {exc}"[:500]})
+
+
 app.include_router(documents.router)
 app.include_router(search.router)
 app.include_router(reading.router)
 app.include_router(chat.router)
 app.include_router(library.router)
 app.include_router(cartridges.router)
+app.include_router(settings_routes.router)
 
 
 @app.get("/api/health", response_model=HealthOut)

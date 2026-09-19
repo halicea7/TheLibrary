@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     # into a single pass instead of one per document.
     library_rebuild_delay_seconds: int = 600
 
+    # --- incidents ---
+    # Where "open an issue" points. Public, so no harm in a default.
+    repo_url: str = "https://github.com/halicea7/TheLibrary"
+    # The same error inside this window is one incident with a count, not a pile of rows.
+    incident_dedupe_seconds: int = 600
+    # Troubleshooting leans on the technical model when one is configured.
+    troubleshoot_model: str | None = None
+
     # --- prompt versioning ---
     # Bumping a version marks matching artifacts stale so only those regenerate.
     prompt_versions: dict[str, str] = Field(

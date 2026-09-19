@@ -170,7 +170,9 @@ async def web(db: SessionDep) -> dict[str, object]:
         key = (min(str(a), str(b)), max(str(a), str(b)))
         e = edges.setdefault(key, {"a": key[0], "b": key[1], "k": kind, "w": 0.0})
         e["w"] = max(e["w"], w)
-        if kind == "cite" or kind == "thread" and e["k"] != "cite":  # the strongest kind wins the label
+        if (
+            kind == "cite" or kind == "thread" and e["k"] != "cite"
+        ):  # the strongest kind wins the label
             e["k"] = kind
 
     for r in await db.execute(text(_WEB_CITES)):

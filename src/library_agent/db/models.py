@@ -489,6 +489,28 @@ class Job(Base):
 # --------------------------------------------------------------------------- eval
 
 
+class Incident(Base):
+    """Something went wrong, recorded so the library can help fix it. Fed by the API's
+    exception handler, failed jobs, failed chat turns and ERROR-level logs. The same
+    error recurring within a window increments `count` rather than adding a row."""
+
+    __tablename__ = "incident"
+
+    id: Mapped[uuid.UUID] = _pk()
+    source: Mapped[str] = mapped_column(String(16), index=True)  # api | worker | chat | ingest
+    kind: Mapped[str] = mapped_column(String(80), index=True)  # exception class or job kind
+    message: Mapped[str] = mapped_column(Text)
+    detail: Mapped[str | None] = mapped_column(Text, default=None)  # traceback
+    context: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    first_at: Mapped[datetime] = _now()
+    last_at: Mapped[datetime] = _now()
+    resolved: Mapped[bool] = mapped_column(default=False, index=True)
+    # The model's troubleshooting, cached; regenerated on request.
+    advice: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    advice_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
 class EvalQuestion(Base):
     """Retrieval questions are generated from a known chunk, so the gold label comes free
     and recall@k needs no manual labeling."""

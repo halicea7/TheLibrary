@@ -20,6 +20,7 @@ from library_agent.db.session import session_scope
 from library_agent.library.cartridge import cartridge_provenance
 from library_agent.llm.lease import mark_chat_active, mark_chat_done, redis_client
 from library_agent.llm.ollama import Ollama
+from library_agent.ops.incidents import record_exception
 from library_agent.retrieval.hybrid import SearchHit
 from library_agent.retrieval.pipeline import CHAT_RETRIEVAL, retrieve
 
@@ -243,6 +244,9 @@ async def run_turn(
         }
     except Exception as exc:
         log.exception("chat turn failed")
+        await record_exception(
+            exc, source="chat", context={"model": locals().get("model"), "question": question[:200]}
+        )
         yield {"event": "error", "data": str(exc)[:500]}
     finally:
         await client.aclose()

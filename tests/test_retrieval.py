@@ -120,3 +120,23 @@ class TestCategoryFiltering:
         from library_agent.retrieval.hybrid import _build_sql
 
         assert "cast(:cats as uuid[]) is null or" in _build_sql(True, False, False)
+
+
+class TestDiversify:
+    def test_caps_per_document_then_fills(self):
+        from types import SimpleNamespace as H
+
+        from library_agent.retrieval.pipeline import diversify
+
+        hits = [H(document_id="a", n=i) for i in range(4)] + [H(document_id="b", n=9)]
+        out = diversify(hits, per_document=2, limit=5)
+        assert [h.document_id for h in out] == ["a", "a", "b", "a", "a"]
+        assert [h.n for h in out] == [0, 1, 9, 2, 3]  # rank order kept within each pass
+
+    def test_limit_applies(self):
+        from types import SimpleNamespace as H
+
+        from library_agent.retrieval.pipeline import diversify
+
+        hits = [H(document_id=str(i)) for i in range(10)]
+        assert len(diversify(hits, per_document=1, limit=3)) == 3

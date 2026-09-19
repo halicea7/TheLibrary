@@ -36,6 +36,10 @@ class RetrievalConfig:
     weight_dense: float | None = None
     weight_lexical: float | None = None
     router_top_documents: int | None = None
+    # Diversity: at most this many passages from one document until the limit is filled,
+    # then the rest in rank order. A comparative question otherwise gets five passages from
+    # the one volume that scored highest and nothing from the other side.
+    per_document: int | None = None
     # Share of the candidate budget searched corpus-wide even when routing, so a router
     # miss degrades results instead of losing the answer entirely.
     router_global_reserve: float | None = None
@@ -109,7 +113,23 @@ async def retrieve(
         # The unscored tail keeps its fusion order, below everything the reranker saw.
         candidates = head + tail
 
+    if rc.per_document:
+        candidates = diversify(candidates, per_document=rc.per_document, limit=top_k)
     return candidates[:top_k]
+
+
+def diversify(hits: list, *, per_document: int, limit: int) -> list:
+    """Two passes: first take up to `per_document` from each document in rank order; if
+    that leaves room, fill it with what was skipped, still in rank order."""
+    taken: dict = {}
+    first, rest = [], []
+    for h in hits:
+        if taken.get(h.document_id, 0) < per_document:
+            taken[h.document_id] = taken.get(h.document_id, 0) + 1
+            first.append(h)
+        else:
+            rest.append(h)
+    return (first + rest)[:limit]
 
 
 # Ablation ladder: each rung adds exactly one component.
@@ -120,6 +140,7 @@ LADDER = [
     RetrievalConfig(name="hybrid_router", use_router=True),
     RetrievalConfig(name="hybrid_rerank", use_reranker=True),
     RetrievalConfig(name="hybrid_router_rerank", use_router=True, use_reranker=True),
+    RetrievalConfig(name="hybrid_rerank_diverse", use_reranker=True, per_document=2),
 ]
 
 # What chat should use: reranking wins on conversational phrasing.

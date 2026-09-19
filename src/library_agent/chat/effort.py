@@ -51,7 +51,7 @@ EFFORTS: dict[str, Effort] = {
     "normal": Effort(
         "normal",
         passages=5,
-        config=RetrievalConfig(name="chat", use_reranker=True, rerank_depth=20),
+        config=RetrievalConfig(name="chat", use_reranker=True, rerank_depth=20, per_document=2),
         rewrite=True,
         multi_query=False,
         num_ctx=16384,
@@ -60,7 +60,7 @@ EFFORTS: dict[str, Effort] = {
     "deep": Effort(
         "deep",
         passages=10,
-        config=RetrievalConfig(name="deep", use_reranker=True, rerank_depth=40),
+        config=RetrievalConfig(name="deep", use_reranker=True, rerank_depth=40, per_document=3),
         rewrite=True,
         multi_query=True,
         num_ctx=32768,

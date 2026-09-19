@@ -1,0 +1,55 @@
+[project]
+name = "library-agent"
+version = "0.1.0"
+description = "Local-only conversational interface to a personal library of papers, books, and docs"
+readme = "README.md"
+requires-python = "==3.12.*"
+dependencies = [
+    # web
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.20",
+    "sse-starlette>=2.1",
+    # config
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    # db
+    "sqlalchemy[asyncio]>=2.0.36",
+    "alembic>=1.14",
+    "psycopg[binary,pool]>=3.2",
+    "pgvector>=0.3.6",
+    # jobs
+    "arq>=0.26",
+    "redis>=5.2",
+    # llm
+    "httpx>=0.28",
+    # ingest
+    "pymupdf>=1.25",
+    "markdown-it-py>=3.0",
+    "tiktoken>=0.8",
+]
+
+[project.optional-dependencies]
+ml = [
+    "torch>=2.5",
+    "sentence-transformers>=3.3",
+    "scikit-learn>=1.6",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

@@ -1,0 +1,957 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Library</title>
+<style>
+/* ──────────────────────────────────────────────────────────────────────────
+   Rubrication. Manuscripts used red ink for annotation and nothing else.
+   Three accents, one meaning each, and they never trade places:
+     rubric    a claim traced back to your shelf — the citation apparatus, nothing else
+     verdigris system and structural state — reading progress, selection, focus
+     amber     wants your attention — paused work, duplicates, sources that disagree
+     violet    the librarian speaking for itself — an answer given under a stance
+   Everything else is ink and paper. The discipline is the point: a flash of red
+   always means provenance, so you can trust it at a glance.
+   ────────────────────────────────────────────────────────────────────────── */
+:root {
+  --bg:#10141b; --panel:#161b24; --sunk:#0c1016;
+  --rule:#232b37; --rule-soft:#1b222c;
+  --fg:#dde2ea; --dim:#868f9f; --faint:#5a6472;
+  --rubric:#cc5f46; --verdigris:#4f9186; --amber:#b8894f; --opinion:#a98ae0;
+  --serif:'Iowan Old Style','Charter','Hoefler Text',Georgia,serif;
+  --sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif;
+  --mono:ui-monospace,'SF Mono',Menlo,monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:#f4f5f7; --panel:#fff; --sunk:#eceef1;
+    --rule:#e0e4e9; --rule-soft:#ebeef1;
+    --fg:#171c24; --dim:#5d6672; --faint:#8b95a3;
+    --rubric:#a8402a; --verdigris:#2f6b61; --amber:#8a6320; --opinion:#6b48c0;
+  }
+}
+:root[data-theme=light] {
+  --bg:#f4f5f7; --panel:#fff; --sunk:#eceef1;
+  --rule:#e0e4e9; --rule-soft:#ebeef1;
+  --fg:#171c24; --dim:#5d6672; --faint:#8b95a3;
+  --rubric:#a8402a; --verdigris:#2f6b61; --amber:#8a6320; --opinion:#6b48c0;
+}
+:root[data-theme=dark] {
+  --bg:#10141b; --panel:#161b24; --sunk:#0c1016;
+  --rule:#232b37; --rule-soft:#1b222c;
+  --fg:#dde2ea; --dim:#868f9f; --faint:#5a6472;
+  --rubric:#cc5f46; --verdigris:#4f9186; --amber:#b8894f; --opinion:#a98ae0;
+}
+
+* { box-sizing:border-box; }
+html,body { height:100%; }
+body {
+  margin:0; background:var(--bg); color:var(--fg);
+  font:15px/1.6 var(--sans); -webkit-font-smoothing:antialiased;
+  display:grid; grid-template-rows:auto 1fr;
+}
+:focus-visible { outline:2px solid var(--verdigris); outline-offset:2px; border-radius:2px; }
+@media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
+
+/* ── masthead ─────────────────────────────────────────────────────────── */
+.masthead {
+  display:flex; align-items:baseline; gap:18px; flex-wrap:wrap;
+  padding:14px 22px; border-bottom:1px solid var(--rule); background:var(--panel);
+}
+.wordmark {
+  font:600 15px/1 var(--serif); letter-spacing:.14em; text-transform:uppercase; margin:0;
+}
+.wordmark b { color:var(--fg); font-weight:700; }
+.holdings { font:11.5px/1 var(--mono); color:var(--faint); letter-spacing:.02em; }
+.holdings .sep { opacity:.4; padding:0 6px; }
+.masthead .right { margin-left:auto; display:flex; align-items:center; gap:10px; }
+
+/* ── frame ────────────────────────────────────────────────────────────── */
+.frame { display:grid; grid-template-columns:270px minmax(0,1fr); min-height:0; }
+@media (max-width:920px) { .frame { grid-template-columns:1fr; } }
+
+.shelf {
+  border-right:1px solid var(--rule); background:var(--panel);
+  padding:16px 16px 22px; overflow-y:auto; min-height:0;
+  scrollbar-width:thin; scrollbar-color:var(--rule) transparent;
+}
+.shelf::-webkit-scrollbar { width:6px; }
+.shelf::-webkit-scrollbar-thumb { background:var(--rule); border-radius:3px; }
+.shelf::-webkit-scrollbar-track { background:transparent; }
+.pane { scrollbar-width:thin; scrollbar-color:var(--rule) transparent; }
+.pane::-webkit-scrollbar { width:6px; }
+.pane::-webkit-scrollbar-thumb { background:var(--rule); border-radius:3px; }
+@media (max-width:920px) { .shelf { border-right:0; border-bottom:1px solid var(--rule); max-height:42vh; } }
+
+.reading { display:grid; grid-template-rows:auto 1fr auto; min-height:0; }
+
+/* ── small caps section labels ────────────────────────────────────────── */
+.label {
+  font:600 10.5px/1 var(--sans); letter-spacing:.11em; text-transform:uppercase;
+  color:var(--faint); margin:0 0 10px;
+}
+.label.spaced { margin-top:22px; }
+
+/* ── accession: dropping a file ───────────────────────────────────────── */
+.accession {
+  border:1px dashed var(--rule); border-radius:3px; padding:16px 12px;
+  text-align:center; color:var(--dim); font-size:12.5px; cursor:pointer;
+  transition:border-color .15s, color .15s;
+}
+.accession:hover, .accession.over { border-color:var(--verdigris); color:var(--fg); }
+.accession b { display:block; font:600 12.5px/1.5 var(--sans); color:var(--fg); }
+.accession span { font:11px/1.5 var(--mono); color:var(--faint); }
+
+.notice { font-size:12px; margin-top:10px; padding:7px 9px; border-radius:3px; display:none; line-height:1.45; }
+.notice.ok  { display:block; background:color-mix(in srgb,var(--verdigris) 13%,transparent); color:var(--verdigris); }
+.notice.bad { display:block; background:color-mix(in srgb,var(--amber) 14%,transparent); color:var(--amber); }
+
+/* ── the shelf itself ─────────────────────────────────────────────────── */
+/* Volumes are grouped by subject. A volume with three subjects sits on three shelves,
+   the way a subject index works; the collapse state remembers itself. */
+.shelf-group { margin-bottom:4px; }
+.shelf-h { display:flex; align-items:center; gap:6px; padding:6px 0 4px; }
+.caret {
+  background:none; border:0; padding:0 2px; cursor:pointer; color:var(--faint);
+  font:11px/1 var(--mono); width:14px; transition:transform .15s;
+}
+.caret[aria-expanded=false] { transform:rotate(-90deg); }
+.shelf-name {
+  background:none; border:0; padding:0; cursor:pointer; text-align:left;
+  font:600 10.5px/1.3 var(--sans); letter-spacing:.06em; text-transform:uppercase; color:var(--dim);
+}
+.shelf-name:hover { color:var(--fg); }
+.shelf-name[aria-pressed=true] { color:var(--verdigris); }
+.shelf-n { font:10px/1 var(--mono); color:var(--faint); margin-left:auto; }
+.shelf-vols { padding-left:14px; border-left:1px solid var(--rule-soft); margin-left:6px; }
+.shelf-group[data-open=false] .shelf-vols { display:none; }
+
+.vol { padding:8px 0; border-bottom:1px solid var(--rule-soft); }
+.vol:last-child { border-bottom:0; }
+.vol-t {
+  font:500 13px/1.4 var(--serif); hyphens:auto; -webkit-hyphens:auto; cursor:pointer;
+  background:none; border:0; padding:0; text-align:left; color:var(--fg); width:100%;
+}
+.vol-t:hover { color:var(--verdigris); }
+.vol.current .vol-t { color:var(--verdigris); }
+.vol-m {
+  display:flex; align-items:center; gap:7px; margin-top:4px;
+  font:10.5px/1 var(--mono); color:var(--faint);
+}
+/* Reading state as a filled square: empty = listed, half = read, full = annotated. */
+.state { width:8px; height:8px; flex:0 0 8px; border:1px solid var(--verdigris); border-radius:1px; }
+.state.s1 { background:linear-gradient(to right,var(--verdigris) 50%,transparent 50%); }
+.state.s2 { background:var(--verdigris); }
+/* Actions stay out of the way until the volume is under the cursor. */
+.vol-acts { display:flex; gap:10px; max-height:0; overflow:hidden; opacity:0;
+            transition:max-height .15s, opacity .12s, margin-top .15s; margin-top:0; }
+.vol:hover .vol-acts, .vol:focus-within .vol-acts { max-height:20px; opacity:1; margin-top:6px; }
+.linkish {
+  background:none; border:0; padding:0; cursor:pointer; color:var(--dim);
+  font:11px/1 var(--sans); border-bottom:1px solid transparent;
+}
+.linkish:hover { color:var(--fg); border-bottom-color:var(--verdigris); }
+.linkish.danger:hover { color:var(--amber); border-bottom-color:var(--amber); }
+
+/* ── jobs ─────────────────────────────────────────────────────────────── */
+.job { font:11px/1.5 var(--mono); color:var(--dim); padding:5px 0; }
+.job .bar { height:2px; background:var(--rule); margin-top:5px; overflow:hidden; }
+.job .bar i { display:block; height:100%; background:var(--verdigris); transition:width .4s ease; }
+.job.paused { color:var(--amber); }
+
+/* ── views ────────────────────────────────────────────────────────────── */
+.views {
+  display:flex; align-items:center; gap:2px; padding:10px 22px 0;
+  border-bottom:1px solid var(--rule); background:var(--bg);
+}
+.view-tab {
+  background:none; border:0; cursor:pointer; padding:7px 12px 9px;
+  font:500 12.5px/1 var(--sans); color:var(--faint);
+  border-bottom:2px solid transparent; margin-bottom:-1px;
+}
+.view-tab:hover { color:var(--fg); }
+.view-tab[aria-selected=true] { color:var(--fg); border-bottom-color:var(--verdigris); }
+.views .right { margin-left:auto; display:flex; align-items:center; gap:12px; padding-bottom:8px; }
+
+/* The stance control: a button that opens to its options, and wears violet when set. */
+.stance { position:relative; }
+.stance > button {
+  background:var(--sunk); color:var(--dim); border:1px solid var(--rule); border-radius:3px;
+  font:11.5px/1 var(--sans); padding:4px 8px; cursor:pointer;
+}
+.stance > button[data-on=true] { color:var(--opinion); border-color:var(--opinion); }
+.stance-menu {
+  position:absolute; right:0; top:calc(100% + 6px); z-index:5; min-width:220px;
+  background:var(--panel); border:1px solid var(--rule); border-radius:4px; padding:6px;
+  box-shadow:0 8px 24px rgba(0,0,0,.25); display:none;
+}
+.stance-menu[data-open=true] { display:block; }
+.stance-menu p { margin:2px 6px 6px; font:10px/1.4 var(--sans); color:var(--faint); letter-spacing:.06em; text-transform:uppercase; }
+.stance-opt {
+  display:flex; align-items:baseline; gap:8px; width:100%; text-align:left;
+  background:none; border:0; border-radius:3px; padding:6px 8px; cursor:pointer;
+  font:13px/1.3 var(--serif); color:var(--fg);
+}
+.stance-opt:hover { background:var(--sunk); }
+.stance-opt[aria-pressed=true] { color:var(--opinion); }
+.stance-opt small { margin-left:auto; font:10px/1 var(--mono); color:var(--faint); }
+.stance-pair { display:flex; gap:4px; }
+.stance-pair .stance-opt { flex:1; }
+.stance-pair .vs { align-self:center; font:10px/1 var(--mono); color:var(--faint); }
+/* An answer given under a stance says so, in the stance colour, above the question. */
+.stanced { font:600 10.5px/1 var(--sans); letter-spacing:.09em; text-transform:uppercase;
+           color:var(--opinion); margin-bottom:6px; }
+.turn[data-stance] .asked { border-left-color:var(--opinion); }
+
+select, .toggle {
+  background:var(--sunk); color:var(--dim); border:1px solid var(--rule);
+  border-radius:3px; font:11.5px/1 var(--sans); padding:4px 7px;
+}
+.toggle { display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }
+.toggle input { margin:0; accent-color:var(--verdigris); }
+
+.pane { overflow-y:auto; min-height:0; padding:18px 22px 24px; }
+
+/* ── subject chips ────────────────────────────────────────────────────── */
+.subjects { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px; }
+.subject {
+  font:11px/1 var(--sans); padding:4px 9px; border:1px solid var(--rule);
+  border-radius:99px; color:var(--dim); cursor:pointer; user-select:none;
+  transition:border-color .12s, color .12s;
+}
+.subject:hover { color:var(--fg); border-color:var(--faint); }
+.subject[aria-pressed=true] { color:var(--bg); background:var(--verdigris); border-color:var(--verdigris); }
+.subject i { font-style:normal; font-family:var(--mono); font-size:10px; opacity:.65; margin-left:4px; }
+
+/* ── the conversation ─────────────────────────────────────────────────── */
+.turn { margin-bottom:26px; max-width:none; }
+.asked {
+  font:500 16px/1.5 var(--serif); color:var(--fg);
+  padding-left:13px; border-left:2px solid var(--rule);
+}
+.asked .rewrote { display:block; margin-top:5px; font:11px/1.4 var(--mono); color:var(--faint); }
+
+/* Signature: the reading column keeps its margin, and every [n] resolves
+   into a note beside the paragraph that cites it. */
+.said { margin-top:14px; display:grid; grid-template-columns:minmax(0,68ch) 200px; gap:0 28px; }
+.said p {
+  grid-column:1; margin:0 0 .85em; font:15.5px/1.72 var(--serif); max-width:68ch;
+}
+.said .apparatus { grid-column:2; align-self:start; padding-top:.3em; }
+.mark {
+  font:11px/1 var(--mono); color:var(--rubric); cursor:default;
+  vertical-align:.25em; padding:0 1px; letter-spacing:-.02em;
+}
+.mark.lit { background:color-mix(in srgb,var(--rubric) 20%,transparent); border-radius:2px; }
+.note {
+  display:block; font:10.5px/1.45 var(--mono); color:var(--dim);
+  padding:3px 0 3px 9px; border-left:1px solid var(--rubric); margin-bottom:6px;
+}
+.note b { display:block; color:var(--fg); font-weight:500; }
+.note .pg { color:var(--rubric); }
+@media (max-width:1080px) {
+  .said { grid-template-columns:minmax(0,1fr); }
+  .said .apparatus { grid-column:1; display:flex; flex-wrap:wrap; gap:5px; padding:6px 0 0; }
+  .note { border-left:0; border-top:1px solid var(--rubric); padding:4px 0 0; margin:0; max-width:230px; }
+}
+.unsourced { font:11px/1.5 var(--mono); color:var(--faint); margin-top:6px; }
+/* The librarian considering, before it speaks. Faint and italic so it reads as
+   murmur rather than answer; it is replaced the moment real prose arrives. */
+.considering {
+  grid-column:1; font:italic 13.5px/1.6 var(--serif); color:var(--faint);
+  max-width:68ch; margin:0; white-space:pre-wrap;
+  mask-image:linear-gradient(to right, transparent, #000 12%);
+}
+
+.composer { border-top:1px solid var(--rule); background:var(--panel); padding:12px 22px 14px; }
+.composer input {
+  width:100%; background:var(--sunk); border:1px solid var(--rule); border-radius:3px;
+  color:var(--fg); font:15px/1.5 var(--serif); padding:11px 13px;
+}
+.composer input::placeholder { color:var(--faint); font-family:var(--sans); font-size:13.5px; }
+.composer input:focus { border-color:var(--verdigris); outline:none; }
+.desk { margin-top:7px; font:11px/1 var(--mono); color:var(--faint); min-height:13px; }
+.desk .working::after {
+  content:'·'; animation:tick 1.1s steps(4,end) infinite; margin-left:3px;
+}
+@keyframes tick { 0%{content:'·'} 25%{content:'··'} 50%{content:'···'} 75%{content:'··'} }
+
+/* ── search results ───────────────────────────────────────────────────── */
+.hit { padding:13px 0; border-bottom:1px solid var(--rule-soft); }
+.hit:last-child { border-bottom:0; }
+.hit-h { display:flex; align-items:baseline; gap:9px; }
+.hit-t { font:500 13.5px/1.4 var(--serif); }
+.hit-pg { font:10.5px/1 var(--mono); color:var(--rubric); }
+.hit-rk { margin-left:auto; font:10px/1 var(--mono); color:var(--faint); }
+.hit-path { font:10.5px/1.4 var(--mono); color:var(--faint); margin:3px 0 6px; }
+.hit-x { font:13px/1.6 var(--serif); color:var(--fg); opacity:.85; max-width:76ch;
+         display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+
+/* ── library themes ───────────────────────────────────────────────────── */
+.theme { padding:14px 0; border-bottom:1px solid var(--rule-soft); }
+.theme:last-child { border-bottom:0; }
+.theme-h { display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
+.theme-t { font:600 14px/1.35 var(--serif); }
+.theme-n { font:10.5px/1 var(--mono); color:var(--faint); }
+.theme-s { font:13.5px/1.65 var(--serif); margin:6px 0 8px; max-width:74ch; opacity:.9; }
+.spans { display:flex; flex-wrap:wrap; gap:5px; }
+.span { font:10px/1 var(--mono); color:var(--dim); border:1px solid var(--rule); border-radius:2px; padding:3px 6px; }
+.flag { font:10px/1 var(--mono); color:var(--amber); border:1px solid var(--amber); border-radius:2px; padding:2px 5px; }
+.edge { font:11px/1.7 var(--mono); color:var(--dim); }
+.edge em { font-style:normal; color:var(--faint); padding:0 5px; }
+.edge b { color:var(--fg); font-weight:500; }
+
+/* ── the reader ───────────────────────────────────────────────────────── */
+.reader-h { margin-bottom:18px; }
+.reader-t { font:600 22px/1.25 var(--serif); margin:0 0 6px; max-width:68ch; }
+.reader-m { font:11px/1.6 var(--mono); color:var(--faint); display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+.toc { margin:14px 0 26px; padding:0; list-style:none; columns:2; column-gap:28px; max-width:68ch; }
+.toc li { break-inside:avoid; font:12px/1.7 var(--sans); }
+.toc a { color:var(--dim); text-decoration:none; }
+.toc a:hover { color:var(--fg); }
+.toc .l2 { padding-left:12px; } .toc .l3 { padding-left:24px; }
+/* Text and marginalia share the apparatus grid: passage on the left, what the library
+   thought about it on the right, aligned. */
+.page { display:grid; grid-template-columns:minmax(0,68ch) 220px; gap:0 28px; }
+.page h3 { grid-column:1; font:600 15px/1.35 var(--serif); margin:26px 0 8px; scroll-margin-top:12px; }
+.page h3 small { font:10.5px/1 var(--mono); color:var(--faint); margin-left:8px; font-weight:400; }
+.page .lead { grid-column:1; font:italic 13.5px/1.6 var(--serif); color:var(--dim); margin:0 0 12px;
+              padding-left:11px; border-left:1px solid var(--rule); }
+.page p.pass { grid-column:1; font:15px/1.72 var(--serif); margin:0 0 .85em; white-space:pre-wrap; }
+.page .gloss { grid-column:2; align-self:start; padding-top:.2em; }
+.page .gloss span {
+  display:block; font:12px/1.5 var(--serif); color:var(--dim);
+  padding:2px 0 2px 10px; border-left:1px solid var(--rubric);
+}
+@media (max-width:1080px) {
+  .page { grid-template-columns:minmax(0,1fr); }
+  .page .gloss { grid-column:1; margin:-4px 0 14px; }
+}
+
+.empty { font:12.5px/1.6 var(--sans); color:var(--faint); padding:10px 0; max-width:52ch; }
+.empty b { color:var(--dim); font-weight:500; display:block; margin-bottom:3px; }
+.invitation { padding:14vh 0 0; max-width:46ch; }
+.invitation b { font:500 22px/1.3 var(--serif); color:var(--fg); display:block; margin-bottom:10px; }
+.invitation span { font:14px/1.65 var(--serif); color:var(--dim); }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <h1 class="wordmark">The <b>Library</b></h1>
+  <span class="holdings" id="holdings"></span>
+  <span class="right">
+    <button class="linkish" id="themer" title="Switch appearance">appearance</button>
+  </span>
+</header>
+
+<div class="frame">
+  <aside class="shelf">
+    <p class="label">Accession</p>
+    <div class="accession" id="drop" tabindex="0" role="button" aria-label="Add a document">
+      <b>Drop documents or folders</b>
+      <span>pdf · md · txt · rst — folders are walked</span>
+      <input type="file" id="file" multiple accept=".pdf,.md,.markdown,.txt,.rst" hidden/>
+    </div>
+    <div class="notice" id="notice" role="status"></div>
+
+    <div id="jobs-wrap" hidden>
+      <p class="label spaced">In hand</p>
+      <div id="jobs"></div>
+    </div>
+
+    <p class="label spaced">Shelf</p>
+    <div id="shelf"></div>
+  </aside>
+
+  <main class="reading">
+    <nav class="views" role="tablist">
+      <button class="view-tab" id="tab-ask"     role="tab" aria-selected="true"  onclick="setView('ask')">Ask</button>
+      <button class="view-tab" id="tab-find"    role="tab" aria-selected="false" onclick="setView('find')">Find</button>
+      <button class="view-tab" id="tab-threads" role="tab" aria-selected="false" onclick="setView('threads')">Threads</button>
+      <button class="view-tab" id="tab-open"    role="tab" aria-selected="false" onclick="setView('open')" hidden>Open</button>
+      <span class="right">
+        <select id="model" title="Switching models takes a moment"></select>
+        <label class="toggle" id="think-wrap" title="This model always thinks before it answers; this shows or hides that."><input type="checkbox" id="think" checked/> show thinking</label>
+        <span class="stance">
+          <button id="stance-btn" data-on="false" aria-haspopup="true" aria-expanded="false" onclick="toggleStanceMenu()">stance</button>
+          <div class="stance-menu" id="stance-menu" role="menu"></div>
+        </span>
+        <label class="toggle"><input type="checkbox" id="multi" checked/> remembers</label>
+      </span>
+    </nav>
+
+    <div class="pane" id="pane">
+      <div class="subjects" id="subjects"></div>
+      <div id="view-ask"></div>
+      <div id="view-find" hidden></div>
+      <div id="view-threads" hidden></div>
+      <div id="view-open" hidden></div>
+    </div>
+
+    <form class="composer" id="composer" autocomplete="off">
+      <input id="entry" placeholder="Ask the library something" aria-label="Ask the library"/>
+      <div class="desk" id="desk"></div>
+    </form>
+  </main>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const STATE = ['listed','read','annotated'];
+
+let view = 'ask', convId = null, subjects = new Set(), sources = [], busy = false;
+let stance = null, stanceMeta = [], thinkingModels = {};
+let showThinking = localStorage.getItem('showThinking') !== 'off';
+
+/* ── appearance ───────────────────────────────────────────────────────── */
+const saved = localStorage.getItem('appearance');
+if (saved) document.documentElement.dataset.theme = saved;
+$('#themer').onclick = () => {
+  const now = document.documentElement.dataset.theme
+    || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const next = now === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('appearance', next);
+};
+
+/* ── views ────────────────────────────────────────────────────────────── */
+function setView(v) {
+  view = v;
+  for (const k of ['ask','find','threads','open']) {
+    $('#view-' + k).hidden = k !== v;
+    const t = $('#tab-' + k); t.setAttribute('aria-selected', String(k === v));
+  }
+  $('#composer').hidden = v === 'threads' || v === 'open';
+  const e = $('#entry');
+  e.placeholder = v === 'ask' ? 'Ask the library something' : 'Search for a passage';
+  $('#subjects').hidden = v === 'threads' || v === 'open';
+  if (v === 'threads') loadThreads();
+  e.focus();
+}
+
+/* ── holdings line ────────────────────────────────────────────────────── */
+async function holdings() {
+  try {
+    const h = await (await fetch('/api/health')).json();
+    const orphans = Object.values(h.orphan_vectors).reduce((a,b)=>a+b,0);
+    $('#holdings').innerHTML =
+      `${h.documents} volumes<span class="sep">/</span>${h.chunks.toLocaleString()} passages` +
+      `<span class="sep">/</span>${h.embeddings.toLocaleString()} vectors` +
+      (orphans ? `<span class="sep">/</span><span style="color:var(--amber)">${orphans} orphaned</span>` : '');
+  } catch { $('#holdings').textContent = 'the library is not answering'; }
+}
+
+/* ── shelf ────────────────────────────────────────────────────────────── */
+let catIndex = {};          // name -> id, so shelf headers can drive the same filter as the chips
+let openDoc = null;
+const collapsed = new Set(JSON.parse(localStorage.getItem('shelf.collapsed') || '[]'));
+
+function volHtml(d) {
+  return `
+    <div class="vol ${d.id === openDoc ? 'current' : ''}">
+      <button class="vol-t" onclick="openVolume('${d.id}')" title="Open">${esc(d.title)}</button>
+      <div class="vol-m">
+        <span class="state s${d.tier}" title="${STATE[d.tier]}"></span>
+        <span>${STATE[d.tier]}</span>
+        <span>·</span>
+        <span>${d.page_count ? d.page_count + 'pp' : d.kind}</span>
+        <span>·</span>
+        <span>${d.chunks} passages</span>
+        ${d.near_dup_of ? '<span style="color:var(--amber)">· near-duplicate</span>' : ''}
+      </div>
+      <div class="vol-acts">
+        ${d.tier === 0 ? `<button class="linkish" onclick="readDoc('${d.id}', 1)">have it read</button>` : ''}
+        ${d.tier === 1 ? `<button class="linkish" onclick="readDoc('${d.id}', 2)">annotate it</button>` : ''}
+        <button class="linkish danger" onclick="removeDoc('${d.id}', this)">remove</button>
+      </div>
+    </div>`;
+}
+
+async function loadShelf() {
+  const [docs, cats] = await Promise.all([
+    (await fetch('/api/documents')).json(),
+    (await fetch('/api/categories')).json(),
+  ]);
+  catIndex = Object.fromEntries(cats.map(c => [c.name, c.id]));
+  if (!docs.length) {
+    $('#shelf').innerHTML = `<div class="empty"><b>Nothing shelved yet.</b>Drop a paper above. It is searchable within seconds; reading it takes a few minutes more.</div>`;
+    return;
+  }
+  const groups = {};
+  for (const d of docs) {
+    const names = d.categories?.length ? d.categories : ['Unsorted'];
+    for (const n of names) (groups[n] ||= []).push(d);
+  }
+  const order = Object.keys(groups).sort((a, b) =>
+    a === 'Unsorted' ? 1 : b === 'Unsorted' ? -1 : groups[b].length - groups[a].length || a.localeCompare(b));
+  $('#shelf').innerHTML = order.map(name => {
+    const id = catIndex[name]; const open = !collapsed.has(name);
+    return `<div class="shelf-group" data-open="${open}">
+      <div class="shelf-h">
+        <button class="caret" aria-expanded="${open}" aria-label="Collapse ${esc(name)}" onclick="toggleGroup('${esc(name).replace(/'/g,"\\'")}')">▾</button>
+        <button class="shelf-name" aria-pressed="${!!(id && subjects.has(id))}" title="${id ? 'Narrow to this subject' : ''}"
+                onclick="${id ? `toggleSubject('${id}')` : ''}">${esc(name)}</button>
+        <span class="shelf-n">${groups[name].length}</span>
+      </div>
+      <div class="shelf-vols">${groups[name].map(volHtml).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+function toggleGroup(name) {
+  collapsed.has(name) ? collapsed.delete(name) : collapsed.add(name);
+  localStorage.setItem('shelf.collapsed', JSON.stringify([...collapsed]));
+  loadShelf();
+}
+
+async function readDoc(id, tier = 1) {
+  await fetch(`/api/documents/${id}/read?tier=${tier}`, { method:'POST' });
+  say(tier >= 2 ? 'Queued for annotation.' : 'Queued for reading.');
+  loadJobs();
+}
+
+async function removeDoc(id, btn) {
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1'; btn.textContent = 'remove — sure?';
+    setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'remove'; }, 4000);
+    return;
+  }
+  await fetch('/api/documents/' + id, { method:'DELETE' });
+  loadShelf(); holdings(); loadSubjects();
+}
+
+function say(msg, bad) {
+  const n = $('#notice'); n.textContent = msg; n.className = 'notice ' + (bad ? 'bad' : 'ok');
+  clearTimeout(say.t); say.t = setTimeout(() => { n.className = 'notice'; }, 6000);
+}
+
+/* ── accession ────────────────────────────────────────────────────────── */
+const SUPPORTED = /\.(pdf|md|markdown|txt|text|rst)$/i;
+
+// A dropped folder arrives as a directory entry, not a list of files. Walk it.
+async function collect(items) {
+  const out = [];
+  const walk = entry => new Promise(resolve => {
+    if (entry.isFile) {
+      entry.file(f => { if (SUPPORTED.test(f.name) && !f.name.startsWith('.')) out.push(f); resolve(); }, resolve);
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const batch = () => reader.readEntries(async entries => {
+        if (!entries.length) return resolve();
+        for (const e of entries) await walk(e);
+        batch();  // readEntries returns in pages; keep going until empty
+      }, resolve);
+      batch();
+    } else resolve();
+  });
+  for (const item of items) {
+    const entry = item.webkitGetAsEntry?.();
+    if (entry) await walk(entry);
+    else if (item.getAsFile) { const f = item.getAsFile(); if (f && SUPPORTED.test(f.name)) out.push(f); }
+  }
+  return out;
+}
+
+async function accession(files) {
+  files = [...files].filter(f => SUPPORTED.test(f.name));
+  if (!files.length) { say('Nothing there the library can read.', true); return; }
+  const many = files.length > 1;
+  let shelved = 0, dupes = 0, failed = 0;
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    say(many ? `Reading ${i + 1} of ${files.length} — ${file.name}` : `Reading ${file.name}…`);
+    const fd = new FormData(); fd.append('file', file);
+    try {
+      const r = await fetch('/api/documents', { method:'POST', body:fd });
+      const j = await r.json();
+      if (!r.ok) { failed++; if (!many) say(j.detail || 'That file could not be read.', true); continue; }
+      if (j.status === 'duplicate') { dupes++; if (!many) say(`${file.name} is already on the shelf.`); }
+      else {
+        shelved++;
+        if (!many) say(`${j.title} — ${j.sections} sections, ${j.chunks} passages, ${j.elapsed_seconds}s`
+          + (j.needs_ocr ? ' · little text layer, may need OCR' : ''));
+      }
+    } catch (e) { failed++; if (!many) say(String(e), true); }
+    if (many && i % 5 === 4) { loadShelf(); holdings(); }
+  }
+  if (many) {
+    const parts = [`${shelved} shelved`];
+    if (dupes) parts.push(`${dupes} already there`);
+    if (failed) parts.push(`${failed} unreadable`);
+    say(parts.join(' · ') + '. They are searchable now; reading them takes a few minutes each.', failed > 0 && !shelved);
+  }
+  loadShelf(); holdings();
+}
+$('#drop').onclick = () => $('#file').click();
+$('#drop').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#file').click(); } };
+$('#file').onchange = e => accession(e.target.files);
+for (const ev of ['dragover','dragenter'])
+  $('#drop').addEventListener(ev, e => { e.preventDefault(); $('#drop').classList.add('over'); });
+for (const ev of ['dragleave','drop'])
+  $('#drop').addEventListener(ev, e => { e.preventDefault(); $('#drop').classList.remove('over'); });
+$('#drop').addEventListener('drop', async e => {
+  const items = e.dataTransfer.items;
+  accession(items && items.length ? await collect(items) : e.dataTransfer.files);
+});
+
+/* ── jobs ─────────────────────────────────────────────────────────────── */
+async function loadJobs() {
+  let jobs = [];
+  try { jobs = await (await fetch('/api/jobs?limit=40')).json(); } catch { return; }
+  const live = jobs.filter(j => ['queued','running','yielded'].includes(j.state));
+  $('#jobs-wrap').hidden = !live.length;
+  if (!live.length) { if (loadJobs.had) { loadShelf(); holdings(); loadSubjects(); loadJobs.had = false; } return; }
+  loadJobs.had = true;
+  const active = live.filter(j => j.state !== 'queued');
+  const waiting = live.length - active.length;
+  $('#jobs').innerHTML = active.map(j => {
+    const pct = j.progress_total ? Math.round(100 * j.progress_current / j.progress_total) : 0;
+    const paused = j.state === 'yielded';
+    return `<div class="job ${paused ? 'paused' : ''}">
+      ${esc((j.document_title || '').slice(0,30))}<br>
+      ${paused ? 'paused — you are talking' : `${j.kind === 'tier2' ? 'annotating' : 'reading'} · section ${j.progress_current} of ${j.progress_total}`}
+      <span class="bar"><i style="width:${pct}%"></i></span>
+    </div>`;
+  }).join('') + (waiting ? `<div class="job">${waiting} waiting</div>` : '');
+}
+
+/* ── subjects ─────────────────────────────────────────────────────────── */
+async function loadSubjects() {
+  let cats = [];
+  try { cats = await (await fetch('/api/categories')).json(); } catch { return; }
+  const used = cats.filter(c => c.documents > 0);
+  $('#subjects').innerHTML = used.length
+    ? used.map(c => `<span class="subject" role="button" tabindex="0" aria-pressed="${subjects.has(c.id)}"
+        onclick="toggleSubject('${c.id}')"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSubject('${c.id}')}"
+        >${esc(c.name)}<i>${c.documents}</i></span>`).join('')
+      + (subjects.size ? `<span class="subject" role="button" tabindex="0" onclick="clearSubjects()">clear</span>` : '')
+    : '';
+}
+function toggleSubject(id) {
+  subjects.has(id) ? subjects.delete(id) : subjects.add(id);
+  loadSubjects(); loadShelf();
+  desk(subjects.size ? `narrowed to ${subjects.size} subject${subjects.size > 1 ? 's' : ''}` : '');
+  if (view === 'find' && $('#entry').value.trim().length > 1) runFind($('#entry').value.trim());
+}
+function clearSubjects() { subjects.clear(); loadSubjects(); loadShelf(); desk(''); }
+
+function desk(html) { $('#desk').innerHTML = html; }
+
+/* ── the apparatus: resolve [n] into margin notes ─────────────────────── */
+// "ColBERT: Efficient and Effective Passage Search via…" → "ColBERT". Papers usually
+// name themselves before the colon; when they don't, take the first few words.
+function shortTitle(t) {
+  const head = t.split(/[:\u2014\u2013]/)[0].trim();
+  if (head.length >= 4 && head.length <= 28) return head;
+  const words = t.split(/\s+/);
+  return words.slice(0, 5).join(' ') + (words.length > 5 ? '…' : '');
+}
+
+function markup(text) {
+  return esc(text).replace(/\[(\d+(?:,\s*\d+)*)\]/g, (_, nums) => {
+    const ns = nums.split(',').map(n => n.trim());
+    return `<span class="mark" data-n="${ns.join(' ')}">[${nums}]</span>`;
+  });
+}
+
+function renderAnswer(el, text) {
+  const paras = text.split(/\n{2,}/).filter(p => p.trim());
+  el.innerHTML = paras.map(p => {
+    const used = [...p.matchAll(/\[(\d+(?:,\s*\d+)*)\]/g)]
+      .flatMap(m => m[1].split(',').map(n => parseInt(n.trim())));
+    const uniq = [...new Set(used)];
+    const notes = uniq.map(n => {
+      const s = sources.find(x => x.n === n);
+      if (!s) return '';
+      const short = shortTitle(s.title);
+      const where = (s.section || '').split(' › ').slice(1).join(' › ');
+      return `<span class="note" data-n="${n}"><b>${esc(short)}</b>${
+        s.page ? `<span class="pg">p.${s.page}</span>` : ''}${where ? ` · ${esc(where.slice(0,40))}` : ''}</span>`;
+    }).join('');
+    return `<p>${markup(p)}</p><div class="apparatus">${notes}</div>`;
+  }).join('');
+
+  // Hovering a marker lights its note, and vice versa.
+  const link = (a, b, on) => { for (const x of el.querySelectorAll(b)) x.classList.toggle('lit', on); };
+  for (const m of el.querySelectorAll('.mark')) {
+    const ns = m.dataset.n.split(' ');
+    m.onmouseenter = () => ns.forEach(n => link(m, `.note[data-n="${n}"]`, true));
+    m.onmouseleave = () => ns.forEach(n => link(m, `.note[data-n="${n}"]`, false));
+  }
+  for (const nt of el.querySelectorAll('.note')) {
+    const n = nt.dataset.n;
+    nt.onmouseenter = () => link(nt, `.mark[data-n~="${n}"]`, true);
+    nt.onmouseleave = () => link(nt, `.mark[data-n~="${n}"]`, false);
+  }
+}
+
+/* ── ask ──────────────────────────────────────────────────────────────── */
+async function ask(text) {
+  if (busy) return;
+  busy = true;
+  const intro = $('#view-ask .empty'); if (intro) intro.remove();
+  const wrap = document.createElement('div');
+  wrap.className = 'turn';
+  if (stance) wrap.dataset.stance = stance;
+  const label = stance ? (stanceMeta.find(s => s.id === stance)?.label || stance) : '';
+  wrap.innerHTML = `${stance ? `<div class="stanced">${esc(label)}</div>` : ''}<div class="asked">${esc(text)}</div><div class="said"><p></p></div>`;
+  $('#view-ask').appendChild(wrap);
+  const asked = wrap.querySelector('.asked');
+  const said = wrap.querySelector('.said');
+  wrap.scrollIntoView({ block:'start', behavior:'smooth' });
+  desk('<span class="working">consulting the shelf</span>');
+  sources = [];
+
+  const body = { message:text, conversational:$('#multi').checked, model:$('#model').value,
+                 conversation_id:convId, category_ids:subjects.size ? [...subjects] : null,
+                 stance };
+  let answer = '', ev = null, buf = '', thought = '';
+  try {
+    const res = await fetch('/api/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream:true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith('event:')) { ev = line.slice(6).trim(); continue; }
+        if (!line.startsWith('data:')) continue;
+        // Token payloads carry meaningful leading spaces; only trim structured events.
+        const rawFull = line.slice(5).replace(/^ /, '').replace(/\r$/, '');
+        const raw = (ev === 'token' || ev === 'thinking') ? rawFull : rawFull.trim();
+        if (ev === 'conversation') convId = JSON.parse(raw).conversation_id;
+        else if (ev === 'meta') {
+          const m = JSON.parse(raw);
+          if (m.rewritten) asked.insertAdjacentHTML('beforeend',
+            `<span class="rewrote">looked for: ${esc(m.rewritten)}</span>`);
+          desk('<span class="working">thinking</span>');
+        }
+        else if (ev === 'sources') {
+          sources = JSON.parse(raw);
+          desk(`<span class="working">${sources.length} passages in hand</span>`);
+        }
+        else if (ev === 'thinking') {
+          thought += raw;
+          // Show only the tail; the point is a pulse of activity, not a transcript.
+          // With thinking hidden, the desk still says it is happening.
+          if (showThinking) said.innerHTML = `<p class="considering">${esc(thought.slice(-160))}</p>`;
+          desk(`<span class="working">${showThinking ? 'considering' : 'thinking'}</span>`);
+        }
+        else if (ev === 'token') {
+          answer += raw;
+          said.innerHTML = `<p>${markup(answer)}</p>`;
+          if (thought) desk('');
+        }
+        else if (ev === 'done') {
+          const d = JSON.parse(raw);
+          renderAnswer(said, d.answer);
+          const cited = (d.cited || []).length;
+          if (!cited && sources.length) said.insertAdjacentHTML('beforeend',
+            `<div class="unsourced">answered without drawing on the shelf</div>`);
+          desk(d.markers_emitted
+            ? `${d.markers_resolved} of ${d.markers_emitted} citations verified against the shelf`
+            : '');
+        }
+        else if (ev === 'error') {
+          said.innerHTML = `<p style="color:var(--amber)">${esc(raw)}</p>`;
+          desk('');
+        }
+      }
+    }
+  } catch (e) {
+    said.innerHTML = `<p style="color:var(--amber)">${esc(String(e))}</p>`;
+    desk('');
+  }
+  busy = false;
+}
+
+/* ── find ─────────────────────────────────────────────────────────────── */
+let findTimer;
+async function runFind(q) {
+  const cats = subjects.size ? '&categories=' + [...subjects].join(',') : '';
+  const r = await (await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=10${cats}`)).json();
+  $('#view-find').innerHTML = r.hits.length ? r.hits.map(h => `
+    <div class="hit">
+      <div class="hit-h">
+        <span class="hit-t">${esc(h.document_title)}</span>
+        ${h.page ? `<span class="hit-pg">p.${h.page}</span>` : ''}
+        <span class="hit-rk">dense ${h.dense_rank ?? '–'} · lexical ${h.lexical_rank ?? '–'}</span>
+      </div>
+      <div class="hit-path">${esc((h.section_path || '').split(' › ').slice(1).join(' › ') || '—')}</div>
+      <div class="hit-x">${esc(h.text)}</div>
+    </div>`).join('') + `<div class="empty">${r.hits.length} passages · ${r.elapsed_seconds}s</div>`
+    : `<div class="empty"><b>No passage matches that.</b>Try fewer words, or the exact term you are after.</div>`;
+  desk(`${r.hits.length} passages · ${r.elapsed_seconds}s`);
+}
+
+/* ── threads ──────────────────────────────────────────────────────────── */
+async function loadThreads() {
+  const el = $('#view-threads');
+  el.innerHTML = '<div class="empty">Reading the shelf…</div>';
+  const [themes, graph, conflicts] = await Promise.all([
+    (await fetch('/api/library/clusters')).json(),
+    (await fetch('/api/library/graph')).json(),
+    (await fetch('/api/library/contradictions')).json(),
+  ]);
+  let h = '';
+  if (conflicts.length) {
+    h += `<p class="label">Where your sources disagree</p>`;
+    h += conflicts.map(c => `<div class="theme">
+      <div class="theme-h"><span class="theme-t">${esc(c.label)}</span><span class="flag">conflict</span></div>
+      <div class="theme-s">${esc(c.explanation)}</div>
+      <div class="spans">${(c.sources||[]).map(s=>`<span class="span">${esc(s)}</span>`).join('')}</div>
+    </div>`).join('');
+  }
+  h += `<p class="label ${conflicts.length ? 'spaced' : ''}">Threads running across volumes</p>`;
+  h += themes.length ? themes.map(t => `<div class="theme">
+      <div class="theme-h">
+        <span class="theme-t">${esc(t.label || 'unnamed')}</span>
+        <span class="theme-n">${t.size} claims from ${t.document_count} volumes</span>
+        ${t.has_contradiction ? '<span class="flag">conflict</span>' : ''}
+      </div>
+      <div class="theme-s">${esc(t.summary || '')}</div>
+      <div class="spans">${t.documents.map(d=>`<span class="span">${esc(d.slice(0,40))}</span>`).join('')}</div>
+    </div>`).join('')
+    : `<div class="empty"><b>No threads yet.</b>Threads appear once several volumes have been read and share ground.</div>`;
+
+  if (graph.hubs?.length) {
+    h += `<p class="label spaced">Most leaned on</p>`;
+    h += graph.hubs.map(x => `<div class="edge"><b>${esc(x.title.slice(0,54))}</b> <em>cited by</em> ${x.cited_by}</div>`).join('');
+  }
+  if (graph.edges?.length) {
+    h += `<p class="label spaced">Who cites whom</p>`;
+    h += graph.edges.slice(0,18).map(e =>
+      `<div class="edge">${esc(e.citing.slice(0,30))} <em>→</em> <b>${esc(e.cited.slice(0,30))}</b></div>`).join('');
+  }
+  h += `<p class="label spaced">&nbsp;</p><button class="linkish" onclick="rebuild()">rebuild threads</button>`;
+  el.innerHTML = h;
+}
+async function rebuild() {
+  await fetch('/api/library/rebuild?kinds=citations,clusters,contradictions', { method:'POST' });
+  say('Rebuilding threads. This takes a while.');
+  loadJobs();
+}
+
+/* ── the reader ───────────────────────────────────────────────────────── */
+async function openVolume(id) {
+  openDoc = id;
+  $('#tab-open').hidden = false;
+  setView('open');
+  const el = $('#view-open');
+  el.innerHTML = '<div class="empty">Fetching the volume…</div>';
+  const d = await (await fetch('/api/documents/' + id + '/read')).json();
+  $('#tab-open').textContent = shortTitle(d.title);
+  loadShelf();
+
+  const state = STATE[d.tier] || 'listed';
+  const toc = d.sections.filter(s => s.title).map((s, i) =>
+    `<li class="l${Math.min(s.level, 3)}"><a href="#sec-${i}">${esc(s.title)}</a></li>`).join('');
+
+  const body = d.sections.map((s, i) => {
+    let h = s.title
+      ? `<h3 id="sec-${i}">${esc(s.title)}${s.page_start ? `<small>p.${s.page_start}</small>` : ''}</h3>`
+      : '';
+    if (s.summary) h += `<p class="lead">${esc(s.summary)}</p>`;
+    h += s.passages.map(p =>
+      `<p class="pass">${esc(p.text)}</p><div class="gloss">${p.reflection ? `<span>${esc(p.reflection)}</span>` : ''}</div>`
+    ).join('');
+    return h;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="reader-h">
+      <h2 class="reader-t">${esc(d.title)}</h2>
+      <div class="reader-m">
+        <span>${state}</span>
+        ${d.page_count ? `<span>${d.page_count} pages</span>` : ''}
+        <span>${d.sections.length} sections</span>
+        ${d.tier === 0 ? `<button class="linkish" onclick="readDoc('${d.id}', 1)">have it read</button>` : ''}
+        ${d.tier === 1 ? `<button class="linkish" onclick="readDoc('${d.id}', 2)">annotate it</button>` : ''}
+        ${d.tier >= 2 ? `<span title="Reflections sit in the margin">marginalia in the margin</span>` : ''}
+      </div>
+    </div>
+    ${toc ? `<ul class="toc">${toc}</ul>` : ''}
+    <div class="page">${body}</div>`;
+  $('#pane').scrollTop = 0;
+}
+
+/* ── composer ─────────────────────────────────────────────────────────── */
+$('#composer').onsubmit = e => {
+  e.preventDefault();
+  const v = $('#entry').value.trim();
+  if (v.length < 2) return;
+  if (view === 'ask') { $('#entry').value = ''; ask(v); }
+  else runFind(v);
+};
+$('#entry').oninput = e => {
+  if (view !== 'find') return;
+  clearTimeout(findTimer);
+  const q = e.target.value.trim();
+  if (q.length < 2) { $('#view-find').innerHTML = ''; return; }
+  findTimer = setTimeout(() => runFind(q), 220);
+};
+
+async function loadModels() {
+  const m = await (await fetch('/api/chat/models')).json();
+  thinkingModels = m.thinking || {};
+  stanceMeta = m.stances || [];
+  $('#model').innerHTML = Object.entries(m.options)
+    .map(([k,v]) => `<option value="${v}" ${v === m.default ? 'selected' : ''}>${k}</option>`).join('');
+  $('#think').checked = showThinking;
+  syncThinkToggle();
+  renderStanceMenu();
+}
+
+function syncThinkToggle() {
+  // Only meaningful for a model that thinks; the others just answer.
+  $('#think-wrap').hidden = !thinkingModels[$('#model').value];
+}
+$('#model').addEventListener('change', syncThinkToggle);
+$('#think').addEventListener('change', e => {
+  showThinking = e.target.checked;
+  localStorage.setItem('showThinking', showThinking ? 'on' : 'off');
+});
+
+function renderStanceMenu() {
+  const byId = Object.fromEntries(stanceMeta.map(s => [s.id, s]));
+  const done = new Set();
+  let h = '<p>How the librarian reads</p>';
+  for (const s of stanceMeta) {
+    if (done.has(s.id)) continue;
+    const opt = x => `<button class="stance-opt" role="menuitemradio" aria-pressed="${stance === x.id}" onclick="setStance('${x.id}')">${esc(x.label)}</button>`;
+    if (s.counterpart && byId[s.counterpart]) {
+      h += `<div class="stance-pair">${opt(s)}<span class="vs">·</span>${opt(byId[s.counterpart])}</div>`;
+      done.add(s.id); done.add(s.counterpart);
+    } else { h += opt(s); done.add(s.id); }
+  }
+  h += `<button class="stance-opt" role="menuitemradio" aria-pressed="${stance === null}" onclick="setStance(null)">none <small>the librarian's default reserve</small></button>`;
+  $('#stance-menu').innerHTML = h;
+  const b = $('#stance-btn');
+  b.dataset.on = String(!!stance);
+  b.textContent = stance ? byId[stance]?.label || stance : 'stance';
+}
+function toggleStanceMenu(force) {
+  const m = $('#stance-menu'), open = force ?? m.dataset.open !== 'true';
+  m.dataset.open = String(open);
+  $('#stance-btn').setAttribute('aria-expanded', String(open));
+}
+function setStance(id) { stance = id; renderStanceMenu(); toggleStanceMenu(false); }
+document.addEventListener('click', e => { if (!e.target.closest('.stance')) toggleStanceMenu(false); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') toggleStanceMenu(false); });
+
+$('#view-ask').innerHTML = `<div class="empty invitation"><b>Ask the library something.</b>
+<span>It answers from what it has read, and marks in the margin exactly which page each claim
+came from. Anything unmarked is its own reasoning.</span></div>`;
+
+setView('ask'); loadModels(); holdings(); loadShelf(); loadSubjects(); loadJobs();
+setInterval(loadJobs, 4000);
+setInterval(() => { holdings(); }, 30000);
+</script>
+</body>
+</html>

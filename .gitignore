@@ -1,0 +1,20 @@
+# python / uv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# local runtime
+ops/logs/
+.env
+*.log
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
+
+# local working notes, not part of the project
+Specs.md
+TODO.md

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# The Library — one command to open it.
+#
+#   ./library            check services, migrate, start worker + API, open the browser
+#   ./library stop       stop the worker and API
+#   ./library restart
+#   ./library status
+#   ./library import <dir|file>... [--read]   bulk-import from disk; --read queues reading
+#
+# Ctrl-C in the foreground stops everything.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+PORT="${PORT:-8077}"
+URL="http://127.0.0.1:$PORT"
+OLLAMA="${LIBRARY_OLLAMA_URL:-http://localhost:11434}"
+LOGS=ops/logs; mkdir -p "$LOGS"
+
+running() { lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; }
+stop_all() {
+  pkill -f "uvicorn library_agent" 2>/dev/null || true
+  pkill -f "arq library_agent" 2>/dev/null || true
+}
+
+case "${1:-start}" in
+  stop)    stop_all; echo "The Library is closed."; exit 0 ;;
+  restart) stop_all; sleep 1 ;;
+  status)
+    running && echo "open at $URL" || echo "not running"
+    pgrep -f "arq library_agent" >/dev/null && echo "worker running" || echo "worker not running"
+    exit 0 ;;
+  start) ;;
+  import) shift; exec uv run python -m library_agent.ingest.bulk "$@" ;;
+  *) echo "usage: ./library [start|stop|restart|status|import <paths>... [--read]]"; exit 2 ;;
+esac
+
+if running; then
+  echo "Already open at $URL"
+  open "$URL" 2>/dev/null || true
+  exit 0
+fi
+
+# ── the things that must already be up ────────────────────────────────────
+fail() { echo "✗ $1"; exit 1; }
+pg_isready -q 2>/dev/null                  || fail "Postgres is not running"
+redis-cli ping >/dev/null 2>&1              || fail "Redis is not running"
+curl -sf "$OLLAMA/api/tags" >/dev/null 2>&1 || fail "Ollama is not reachable at $OLLAMA (tunnel up?)"
+
+# Warn about missing models rather than failing — chat works without the technical one.
+missing="$(uv run python - <<'PY'
+import json, urllib.request
+from library_agent.config import settings
+s = settings()
+have = {m["name"].removesuffix(":latest") for m in
+        json.load(urllib.request.urlopen(f"{s.ollama_url}/api/tags"))["models"]}
+need = {s.reader_model, s.chat_model, s.embed_model, *s.chat_model_options.values()}
+print(" ".join(sorted(m for m in need if m.removesuffix(":latest") not in have)))
+PY
+)"
+[ -n "$missing" ] && echo "! models not on this Ollama: $missing   (ollama pull ...)"
+
+# ── migrate, then bring it up ─────────────────────────────────────────────
+uv run alembic upgrade head >/dev/null 2>&1 || fail "database migration failed"
+
+uv run arq library_agent.worker.tasks.WorkerSettings >"$LOGS/worker.log" 2>&1 &
+WORKER=$!
+trap 'kill $WORKER 2>/dev/null; wait $WORKER 2>/dev/null; echo; echo "The Library is closed."' EXIT INT TERM
+
+( until curl -sf "$URL/api/health" >/dev/null 2>&1; do sleep 0.5; done
+  echo "The Library is open at $URL"
+  open "$URL" 2>/dev/null || true ) &
+
+exec uv run uvicorn library_agent.api.app:app --host 127.0.0.1 --port "$PORT" --log-level warning

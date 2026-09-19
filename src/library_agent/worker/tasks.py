@@ -1,0 +1,168 @@
+"""Background reading jobs.
+
+Tier 1 takes minutes per document, so it belongs on the queue rather than in a request.
+Jobs yield to interactive chat between sections -- never mid-call, since an in-flight
+generation cannot be interrupted cleanly."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import uuid
+from typing import Any, ClassVar
+
+from arq.connections import RedisSettings
+from sqlalchemy import select, update
+
+from library_agent.config import settings
+from library_agent.db.models import Document, Job, JobState
+from library_agent.db.session import session_scope
+from library_agent.llm.lease import reading_may_proceed, redis_client
+from library_agent.llm.ollama import Ollama
+from library_agent.reading.tier1 import run_tier1
+from library_agent.reading.tier2 import run_tier2
+
+log = logging.getLogger(__name__)
+
+# Tier 1 on a long book legitimately runs for many minutes; ARQ's 300s default would
+# kill it partway through.
+JOB_TIMEOUT = 60 * 60 * 3
+POLL_SECONDS = 15
+
+
+async def _set_job(job_id: uuid.UUID, **values: Any) -> None:
+    async with session_scope() as db:
+        await db.execute(update(Job).where(Job.id == job_id).values(**values))
+
+
+def _make_gate(job_id: uuid.UUID):
+    """Block while a chat session is active, recording why in the job row so the UI can
+    say 'waiting for chat' rather than looking stalled."""
+
+    async def gate() -> None:
+        r = redis_client()
+        try:
+            announced = False
+            while True:
+                ok, reason = await reading_may_proceed(r)
+                if ok:
+                    if announced:
+                        await _set_job(job_id, state=JobState.RUNNING, yielded_reason=None)
+                    return
+                if not announced:
+                    await _set_job(job_id, state=JobState.YIELDED, yielded_reason=reason)
+                    announced = True
+                await asyncio.sleep(POLL_SECONDS)
+        finally:
+            await r.aclose()
+
+    return gate
+
+
+async def read_document(ctx: dict, document_id: str, job_id: str, tier: int = 1) -> dict[str, Any]:
+    did, jid = uuid.UUID(document_id), uuid.UUID(job_id)
+    await _set_job(jid, state=JobState.RUNNING)
+
+    async def progress(current: int, total: int) -> None:
+        await _set_job(jid, progress_current=current, progress_total=total)
+
+    try:
+        async with Ollama() as client, session_scope() as db:
+            if tier >= 2:
+                # Annotation needs the orientation card from Tier 1; run it first if absent.
+                doc = await db.get(Document, did)
+                if doc and doc.tier < 1:
+                    await run_tier1(db, did, client=client, progress=progress, gate=_make_gate(jid))
+                r2 = await run_tier2(
+                    db, did, client=client, progress=progress, gate=_make_gate(jid)
+                )
+                await _set_job(jid, state=JobState.DONE, yielded_reason=None)
+                await schedule_library_rebuild(ctx["redis"])
+                return {"document_id": str(did), "reflections": r2.reflections}
+            result = await run_tier1(
+                db, did, client=client, progress=progress, gate=_make_gate(jid)
+            )
+        await _set_job(jid, state=JobState.DONE, yielded_reason=None)
+        await schedule_library_rebuild(ctx["redis"])
+        return {
+            "document_id": str(did),
+            "sections_read": result.sections_read,
+            "categories": result.categories,
+        }
+    except Exception as exc:
+        log.exception("tier1 failed for %s", did)
+        await _set_job(jid, state=JobState.ERROR, error=str(exc)[:2000])
+        async with session_scope() as db:
+            await db.execute(
+                update(Document).where(Document.id == did).values(error=str(exc)[:2000])
+            )
+        raise
+
+
+REBUILD_KEY = "library:rebuild_scheduled"
+
+
+async def build_library_layer(ctx: dict, kind: str) -> dict[str, Any]:
+    """Cross-document passes. `all` runs the three in dependency order; each one is also
+    available on its own. They hit the model, so contention with reading is real -- the
+    worker runs one job at a time for exactly that reason."""
+    from library_agent.library.citations import build_citation_graph
+    from library_agent.library.cluster import build_clusters
+    from library_agent.library.contradictions import find_contradictions
+
+    kinds = ["citations", "clusters", "contradictions"] if kind == "all" else [kind]
+    out: dict[str, Any] = {"kind": kind}
+    async with Ollama() as client:
+        for k in kinds:
+            async with session_scope() as db:
+                if k == "citations":
+                    r = await build_citation_graph(db)
+                    out["citations"] = {"matched": r.matched, "references": r.references_found}
+                elif k == "clusters":
+                    r = await build_clusters(db, client=client)
+                    out["clusters"] = {"clusters": r.clusters, "cross_document": r.cross_document}
+                elif k == "contradictions":
+                    out["contradictions"] = await find_contradictions(db, client=client)
+    return out
+
+
+async def schedule_library_rebuild(redis) -> bool:
+    """Debounced: the first read to finish in a quiet window schedules one rebuild for
+    `library_rebuild_delay_seconds` later; reads that finish inside the window do nothing.
+    Returns whether this call scheduled it."""
+    delay = settings().library_rebuild_delay_seconds
+    # SET NX with a TTL is the whole debounce: the key is the reservation.
+    if not await redis.set(REBUILD_KEY, "1", ex=delay, nx=True):
+        return False
+    await redis.enqueue_job("build_library_layer", "all", _defer_by=delay)
+    return True
+
+
+async def enqueue_read(redis, document_id: uuid.UUID, *, tier: int = 1) -> uuid.UUID:
+    """Create the Job row first so the UI has something to poll immediately."""
+    async with session_scope() as db:
+        job = Job(kind=f"tier{tier}", document_id=document_id, tier=tier, state=JobState.QUEUED)
+        db.add(job)
+        await db.flush()
+        job_id = job.id
+    await redis.enqueue_job("read_document", str(document_id), str(job_id), tier=tier)
+    return job_id
+
+
+async def backfill(ctx: dict, tier: int = 1) -> dict[str, Any]:
+    """Queue every document below `tier` for reading. This is the overnight path."""
+    async with session_scope() as db:
+        ids = list((await db.execute(select(Document.id).where(Document.tier < tier))).scalars())
+    for did in ids:
+        await enqueue_read(ctx["redis"], did, tier=tier)
+    return {"queued": len(ids)}
+
+
+class WorkerSettings:
+    functions: ClassVar[list] = [read_document, backfill, build_library_layer]
+    redis_settings = RedisSettings.from_dsn(settings().redis_url)
+    job_timeout = JOB_TIMEOUT
+    # One at a time: the models are a single shared resource, so concurrency here would
+    # only make every job slower and starve chat.
+    max_jobs = 1
+    keep_result = 3600

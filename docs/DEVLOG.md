@@ -1,0 +1,353 @@
+# Library Agent
+
+A local-only conversational interface to a personal library of papers, books, and docs.
+Everything runs on this machine: Ollama for generation and embeddings, Postgres + pgvector
+for storage and retrieval. No cloud calls.
+
+## Design in one paragraph
+
+Reading is a **quality tier, not a pipeline stage**. Tier 0 (extract → structure → chunk →
+embed, no LLM) makes a document searchable in seconds. Tier 1 adds structural summaries,
+entities, and categories in minutes. Tier 2 — the deep interpretive reflection pass — is
+reserved for documents that earn it. This is what turns a 500-document backfill from ~260
+GPU-hours into roughly one overnight.
+
+## Status
+
+- **Phase 0 — foundation**: done. 18 tables, pgvector 0.8.6, healthcheck green.
+- **Phase 1 — ingest + Tier 0 + search + UI**: done.
+- **Phase 2 — eval harness + retrieval tuning**: done.
+- **Phase 3 — Tier 1 reading**: done.
+- **Phase 4 — chat**: done.
+- **Phase 5 — library layer**: done.
+- **Phase 6 — Tier 2**: built and measured; kept as a reading artifact, cut from retrieval.
+- **Phase 7 — UI, filtering, ops**: done.
+
+## Setup
+
+```sh
+./scripts/bootstrap.sh      # once: pgvector, extensions, models, migrations
+./library                   # every time: checks services, migrates, starts worker + API, opens the browser
+```
+
+`./library stop`, `restart`, and `status` do what they say. For a first load,
+`./library import ~/papers ~/books --read` walks directories, skips anything already
+shelved, and queues reading — faster than dragging hundreds of files through the browser,
+though the drop zone walks folders too. Ctrl-C in the foreground closes
+everything. `scripts/run.sh` remains for API-only development with `--reload`.
+
+Requires Postgres 16 and Redis running locally, Ollama, and `uv`. Note that Homebrew's
+pgvector only ships for postgresql@17/@18, so bootstrap builds it from source against
+whatever `pg_config` you point at.
+
+## Verify
+
+```sh
+uv run python -m library_agent.healthcheck   # services, models, vector round-trip
+uv run pytest -q                             # ingestion invariants
+```
+
+## Models
+
+| Role | Model | Notes |
+|---|---|---|
+| Reading (pinned) | `qwen3:30b-a3b` | Fixed corpus-wide: artifacts from different models drift |
+| Chat — general | `qwen3:30b-a3b` | MoE, ~3B active |
+| Chat — technical | `huihui_ai/qwen3-coder-abliterated` | Per-conversation toggle |
+| Embeddings | `bge-m3` | 1024-dim, stored as `halfvec` |
+
+Both chat models are ~19GB and **cannot be co-resident** on a 48GB machine; switching costs
+a ~8-10s load. `keep_alive` is 30m rather than pinned, because this machine sits around
+34GB used before any model loads.
+
+## Notes
+
+- Chunk ids are `uuid5(content_hash, char_span)`, so re-ingestion is idempotent and crash
+  recovery is a replay rather than a cleanup.
+- `embedding.owner_id` and `artifact.target_id` are polymorphic and carry no FK, so
+  Postgres cannot cascade them. **Always delete documents via
+  `library_agent.db.purge.delete_document`**, never a bare `DELETE`. `gc_orphan_vectors()`
+  sweeps debris; `/api/health` reports the orphan count.
+- In raw `text()` SQL, write `cast(:p as uuid)` — SQLAlchemy's bind-param lexer cannot
+  handle `:p::uuid`.
+
+
+## Retrieval evaluation
+
+```sh
+uv run python -m library_agent.eval.harness --generate 72   # regenerate + run the ladder
+uv run python -m library_agent.eval.harness --config hybrid_rerank
+```
+
+Questions are generated *from* a known chunk, so the gold label comes free and recall@k
+needs no hand-labelling. Every run is persisted to `eval_run` / `eval_result`.
+
+**Two suites, because one query style cannot evaluate both halves of retrieval:**
+
+- `retrieval` — paraphrased natural questions. The generator is explicitly told not to
+  reuse distinctive phrasing, which is realistic for conversational use but strips out the
+  exact-term signal lexical search exists to capture.
+- `keyword` — short term-style queries ("ColBERT late interaction", "Hierarchical NSW").
+
+Measuring only the first suite would have led to deleting the lexical half outright. It
+loses on paraphrased questions at every weight and wins on keyword queries. `weight_lexical`
+defaults to **0.2** as the compromise; revisit it once real query logs exist, since the
+correct value depends entirely on how you actually type.
+
+### Findings worth remembering
+
+- `websearch_to_tsquery` and `plainto_tsquery` **AND every term**, so a natural-language
+  question matched *zero* chunks and the lexical half silently contributed nothing. Use the
+  `or_tsquery()` helper (added in migration `b1f3a9c0d2e4`) and let `ts_rank_cd` rank.
+- Postgres full-text ranking has **no IDF term**, so common words drag in noise. This is
+  why the lexical half needs down-weighting rather than equal fusion.
+- The cross-encoder is the largest single win **on natural questions** (recall@1
+  0.51 → 0.60, MRR 0.65 → 0.73) and a measurable **loss on keyword queries**
+  (recall@1 0.42 → 0.39). Cross-encoders are trained on natural query/passage pairs; a
+  2-6 word keyword string gives them too little signal and they override a correct dense
+  ranking. So chat enables reranking (`CHAT_RETRIEVAL`) and the raw search box does not
+  (`KEYWORD_RETRIEVAL`).
+- Reranking costs ~65ms per pair on MPS and scales linearly, so depth is the only latency
+  lever that matters. `rerank_depth=20` matches depth 30 on recall@1/MRR while lifting
+  recall@10 from 0.940 to 0.985, at 1.2s vs 2.0s per query. Depth 100 costs 6s and buys
+  nothing.
+- The **document router is untestable at this corpus size**: with 12 documents and
+  `router_top_documents=15` it selects everything and is a measured no-op. It is built for
+  500 documents and should be re-evaluated there, not trusted on this evidence.
+
+
+## Tier 1 reading
+
+```sh
+uv run arq library_agent.worker.tasks.WorkerSettings   # worker (run alongside the API)
+curl -X POST localhost:8077/api/read/backfill          # queue every tier-0 document
+curl -X POST localhost:8077/api/documents/{id}/read    # one document
+curl localhost:8077/api/jobs                           # progress
+```
+
+Per document: an orientation card, one structured call per section, a document summary, and
+category assignment — roughly 2 minutes for a 20-page paper. It then:
+
+- **rewrites every chunk's context prefix** with the document's one-line orientation and
+  re-embeds them, which is the contextual-retrieval payoff (a passage saying "the protocol
+  requires a 32-byte nonce" becomes findable because its prefix names the protocol);
+- **embeds the document summary**, which replaces the Tier 0 fingerprint as the router's
+  vector.
+
+Jobs yield to interactive chat between sections (never mid-call) via the Redis lease, and
+record `yielded_reason` so the UI shows "waiting for chat" rather than looking stalled.
+
+### Findings worth remembering
+
+- **A too-small `num_ctx` does not error — the model emits schema-shaped placeholders.**
+  Every field of the document summary came back as literally `"..."` at `num_ctx=8192`, and
+  it was written straight into the index. `Ollama.generate/structured` now size the context
+  from the prompt (`size_context`) and reject placeholder payloads (`is_placeholder`),
+  retrying with double the context. This is the single nastiest failure mode found so far,
+  because it is silent.
+- Categories are steered at creation time by passing the canonical list into the tagging
+  prompt. The periodic merge job stays a backstop rather than the primary mechanism.
+- `artifact` rows carry `(model, prompt_version)`, so bumping a version in
+  `settings().prompt_versions` marks only that artifact kind stale — see
+  `reading.tier1.stale_documents`.
+
+
+## Chat
+
+`POST /api/chat` streams SSE: `conversation` → `meta` → `sources` → `token`* → `done`.
+The UI at `/` has a Chat tab with a per-conversation model switch and a conversational toggle.
+
+**Citations are structural, not self-reported.** The spec proposed letting the model tag
+which parts of its answer are grounded. Local models are unreliable at that, so instead the
+retrieved passages are numbered, the model emits `[n]`, and a post-pass resolves every
+marker against the real sources — dropping any that don't resolve. `markers_resolved /
+markers_emitted` is stored on every message as a mechanical groundedness metric. The
+answering policy itself stays open per the spec: retrieval is context, not a cage, and
+uncited prose is visibly the model's own reasoning.
+
+### Latency: it was thinking mode all along
+
+Slow first tokens were repeatedly attributed to memory pressure and prefill. The actual
+cause: `chat_stream` never disabled thinking, so `qwen3:30b-a3b` generated a hidden
+reasoning chain -- often thousands of characters -- before its first visible token. On a
+real RAG prompt that is 30-100+ seconds of apparent silence.
+
+It cannot simply be switched off. Measured on this build:
+
+| | first token | hidden thinking | leaks into answer |
+|---|---|---|---|
+| `think: true` | 3.7s | 1,145 chars | no |
+| `think: false` | 0.0s | 0 | **yes** — "Hmm, the user is asking me to…" |
+| `think: false` + `/no_think` | 0.1s | 0 | **yes** |
+
+With thinking off the model still reasons, it just writes the reasoning into the visible
+answer. So thinking stays **on**, and the UI streams it as the librarian visibly
+*considering* — faint, italic, replaced the moment real prose arrives. The wait is now
+legible instead of a void. Prompt size (`chat_passages`, `chat_passage_chars`) still
+matters, but it is the second-order term.
+
+`think: true` combined with a JSON `format` schema returns an empty response, so
+`structured()` keeps `think: false`; its guards (`is_placeholder`, `echoes_prompt`) exist
+because that is exactly the mode in which reasoning leaks into fields.
+
+### Memory is the binding constraint on this machine
+
+With everything unloaded the machine sits at **35GB used / 12GB free**. A 19.3GB chat model
+does not fit in 12GB, so it runs compressed: prefill degrades from ~175 tok/s to ~66 tok/s
+and TTFT swings 27-44s. In that state measurements become meaningless — a 2.5GB model
+benchmarked *slower* than the 19GB one.
+
+Note that raising `iogpu.wired_limit_mb` would make this **worse**, not better: it lets
+Metal wire more memory, and wired pages cannot be compressed or paged out. The real options
+are a smaller chat model, fewer resident models, or closing other applications.
+
+
+## Library layer
+
+```sh
+curl -X POST 'localhost:8077/api/library/rebuild?kinds=citations,clusters,contradictions'
+curl localhost:8077/api/library/clusters      # cross-document themes
+curl localhost:8077/api/library/graph         # citation edges + hubs
+```
+
+Three cross-document passes, surfaced in the UI's Library tab.
+
+**Clustering runs on claims, not section summaries.** This was measured, and the difference
+is the whole feature:
+
+| clustered over | clusters | cross-document |
+|---|---|---|
+| section summaries | 29 | **2** |
+| extracted claims | 119 | **23** |
+
+A section summary ("this section describes RAPTOR's clustering algorithm") is irreducibly
+about its own paper, so sections cluster with their siblings. A claim ("bigger models are
+better") is atomic and comparable across documents. Claims are already extracted per
+section at Tier 1, so this costs nothing extra.
+
+**The citation graph needs no LLM at all** — reference sections are parsed with regex and
+matched against corpus titles. Use `word_similarity()`, not `similarity()`: a reference
+string is "Authors. Title. Venue Year", several times longer than a title, and plain
+trigram similarity penalises that length gap so hard nothing matches (0.51 for an exact
+title match versus 1.00 for `word_similarity`).
+
+### Findings worth remembering
+
+- **Constrained JSON generation emits properties in schema order, so a verdict field placed
+  before its reasoning is committed to before the model has reasoned.** The contradiction
+  detector returned `disagreement: false` while its own explanation said "they report
+  opposite effects". Moving the boolean after the reasoning fields fixed all five test
+  cases. `tests/test_reading.py::TestStructuredOutputOrdering` guards every schema against
+  this.
+- **Document-level context in chunk embeddings hurts.** Tier 1 originally appended the
+  document's one-line orientation to every chunk prefix and re-embedded. Measured against
+  the Phase 2 baseline this was flat-to-negative everywhere (keyword MRR -0.035). Appending
+  a document-constant string adds the same component to every one of that document's
+  vectors, making them *less* distinguishable. Anthropic's contextual retrieval generates
+  context *per chunk*; a document-constant line is the degenerate case. Disabled via
+  `orientation_in_chunk_prefix`; reverting restored the baseline exactly (+0.0000).
+- The cluster significance filter is too permissive — "GPU Configuration" and "Hugging Face
+  Integration" survive as themes when they are incidental. Prompt tuning, not architecture.
+
+
+## Tier 2 — built, measured, and half cut
+
+Tier 2 is the spec's original idea: the agent reads a document passage by passage and
+writes *reflections* — what a thoughtful reader thinks, not a summary. Reflections are
+genuinely good to read ("the abstract masks a deeper tension: it trades computational
+complexity for contextual depth", "this subtly assumes current knowledge is static").
+
+**It is far cheaper than the spec implied.** The spec called one LLM call per chunk; here a
+whole section goes in one structured call, which amortises prefill and lets a reflection
+reference its neighbours. Measured: **77s and 106s per paper** — not hours. The 810s outlier
+was contention, not cost.
+
+**But it does not improve retrieval, and that was measured twice.**
+
+| suite | variant | r@1 | MRR |
+|---|---|---|---|
+| chunk-derived | tier1 / tier2 | 0.5278 / +0.0000 | 0.6325 / +0.0052 |
+| chunk-derived + rerank | tier1 / tier2 | 0.6111 / +0.0000 | 0.6928 / −0.0069 |
+| **interpretive** | tier1 / tier2 | 0.4889 / +0.0000 | 0.6403 / **−0.0221** |
+| **interpretive** + rerank | tier1 / tier2 | 0.5778 / +0.0000 | 0.6743 / +0.0058 |
+
+The first suite is biased — its questions are generated from chunk text, so it favours
+literal passages. That is the same trap that nearly deleted lexical search in Phase 2, so a
+second *interpretive* suite was generated (from chunks, never from reflections, which would
+have been circular) asking about implications, assumptions and tensions. Reflections did not
+help there either.
+
+**Decision: `reflections_in_retrieval = False`.** Tier 2 stays as an opt-in reading pass
+whose output you browse (`GET /api/documents/{id}/reflections`, and the "reflections" button
+in the UI), promoted per document by `promotion_candidates()` — starred, frequently
+retrieved, or a citation hub.
+
+**What is still unmeasured:** whether including reflections in the *chat context* improves
+answer quality. That needs an LLM-judge answer eval, which does not exist yet. The retrieval
+eval cannot see it, and it would be wrong to claim either way.
+
+
+## Running it as a service
+
+```sh
+./ops/install.sh      # launchd user agents for API + worker, survive reboot
+./ops/uninstall.sh
+./ops/backup.sh [dest]            # pg_dump + the content-addressed document store
+./ops/backup.sh [dest] --no-vectors
+```
+
+Backup and **restore** are both verified: a 5.1MB dump plus 14MB of documents restores to
+12 docs / 546 chunks / 1062 vectors, with vector search and the `or_tsquery` function
+intact. Vectors are ~40% of the dump and are reproducible from the documents, but
+regenerating them means re-reading the corpus, so they are included by default.
+
+## Category filtering
+
+Category chips scope both search and chat. A chunk is in scope if **either** its document
+carries the category **or** the chunk itself does — the finer-grained half the spec asked
+for, so one chapter of a general book stays findable on its own terms.
+
+- `GET /api/search?q=…&categories=<id>,<id>`
+- `POST /api/chat` with `category_ids`, stored on the conversation so every turn is scoped
+  the same way.
+
+Worth noting: the chips existed from Phase 3 but were **decorative** — they toggled UI
+state and filtered nothing — until this phase. Verified by filtering to "Large Language
+Models" and watching Dense Passage Retrieval correctly drop out of the results, and by a
+nonexistent category id returning zero hits.
+
+
+## UI
+
+A single file, `web/index.html`, no build step. Three views — Ask, Find, Threads — over a
+shelf of volumes. Two design decisions carry it:
+
+**The citation apparatus.** An answer is a reading column; every `[n]` resolves into a
+note in the margin beside the paragraph that cites it, with the volume, page, and section.
+Hovering a marker lights its note and vice versa. This is the one thing a generic chat UI
+cannot do, because this is the one chat that has mechanically verified page-level
+provenance to show.
+
+**Three accents, one meaning each, never traded:** madder red for a claim traced to your
+shelf (the apparatus and nothing else — a flash of red always means provenance); verdigris
+for system state (reading progress, selection, focus); amber for things wanting attention
+(paused work, duplicates, sources that disagree). Serif for what the librarian says, sans
+for the machinery, mono for the apparatus. Reading state is a filled square: empty is
+*listed*, half is *read*, full is *annotated*.
+
+Verified in Chrome: dark and light, the considering → answer → apparatus sequence, hover
+linking, Find with page numbers and ranks, Threads with conflicts and citation edges.
+
+
+## Remote Ollama
+
+```sh
+LIBRARY_OLLAMA_URL=http://your-box:11434     # every model call follows this
+LIBRARY_OLLAMA_API_KEY=...                   # optional; sent as a Bearer header for a proxy
+LIBRARY_KEEP_ALIVE=-1                        # pin models resident once the box has the RAM
+```
+
+Pull the models on the remote first (`bootstrap.sh` only pulls locally). Postgres, Redis and
+the cross-encoder reranker stay on the API host — the reranker is in-process torch and was
+never the constrained piece. The Redis lease that lets chat pre-empt background reading
+still holds, since both still contend for the one remote instance.

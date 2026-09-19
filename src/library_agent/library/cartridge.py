@@ -70,6 +70,13 @@ from library_agent.db.models import (
 from library_agent.db.purge import delete_document
 from library_agent.ingest.dedup import find_exact
 from library_agent.library import taxonomy
+from library_agent.library.cartridge_design import (
+    clamp_design,
+    constellation_points,
+    render_constellation,
+    sanitize_art,
+    store_art,
+)
 from library_agent.llm.embed import embed_texts
 from library_agent.llm.ollama import Ollama
 
@@ -589,6 +596,8 @@ async def build_cartridge(
     cartridge_id: uuid.UUID | None = None,
     version: int = 1,
     out_dir: Path | None = None,
+    design: dict | None = None,
+    art_png: bytes | None = None,
 ) -> Path:
     """Write the zip and return its path. `cartridge_id` is stable across versions of the
     same cartridge; a fresh export gets a fresh id."""
@@ -610,6 +619,13 @@ async def build_cartridge(
         parts.append((f"vectors/{kind}.f16.npy", arr))
     for arcname, path in b.originals:
         parts.append((arcname, path.read_bytes()))
+    # The label: the maker's upload, or the cartridge's own constellation.
+    design = clamp_design(design)
+    if art_png is None:
+        pts = await constellation_points(db, document_ids)
+        art_png = render_constellation(pts, colour or PALETTE[0])
+        design["art"] = "generated"
+    parts.append(("art/label.png", art_png))
 
     manifest = {
         "format_version": FORMAT_VERSION,
@@ -626,6 +642,8 @@ async def build_cartridge(
         "reader_model": cfg.reader_model,
         "prompt_versions": dict(cfg.prompt_versions),
         "counts": b.counts(),
+        "design": design,
+        "art": "art/label.png",
         "content_hash": _digest(parts),
         "signature": None,
     }
@@ -813,6 +831,13 @@ async def import_cartridge(
         row.manifest = manifest
         row.content_hash = manifest["content_hash"]
         row.document_count = len(docs)
+        row.design = clamp_design(manifest.get("design"))
+        art_name = manifest.get("art") or "art/label.png"
+        if art_name in z.namelist():
+            try:
+                row.art_path = str(store_art(cid, sanitize_art(z.read(art_name))))
+            except ValueError:
+                row.art_path = None  # bad art is dropped, not fatal
         if not existing:
             db.add(row)
         await db.flush()
@@ -1155,6 +1180,10 @@ async def eject_cartridge(db: AsyncSession, cartridge_id: uuid.UUID) -> EjectRes
             res.documents_removed += 1
         else:
             res.documents_kept += 1
+    if cart.art_path:
+        import shutil
+
+        shutil.rmtree(Path(cart.art_path).parent, ignore_errors=True)
     await db.delete(cart)
     await db.flush()
     return res
@@ -1184,6 +1213,8 @@ async def list_cartridges(db: AsyncSession) -> list[dict]:
             "reader_model": c.reader_model,
             "document_count": n,
             "imported_at": c.imported_at.isoformat() if c.imported_at else None,
+            "design": clamp_design(c.design),
+            "has_art": bool(c.art_path and Path(c.art_path).exists()),
         }
         for c, n in rows
     ]

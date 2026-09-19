@@ -10,13 +10,23 @@ from typing import Annotated
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from library_agent.config import settings
+from library_agent.db.models import Cartridge, CartridgeDocument
 from library_agent.db.session import SessionDep
 from library_agent.library import cartridge as cart
+from library_agent.library.cartridge_design import (
+    ART_MAX_BYTES,
+    constellation_points,
+    decode_data_url,
+    render_constellation,
+    sanitize_art,
+    store_art,
+)
 from library_agent.worker.tasks import schedule_library_rebuild
 
 router = APIRouter(prefix="/api/cartridges", tags=["cartridges"])
@@ -34,6 +44,8 @@ class ExportRequest(Selection):
     colour: str | None = None
     icon_svg: str | None = Field(default=None, max_length=20_000)
     made_by: str | None = Field(default=None, max_length=120)
+    design: dict | None = None
+    art: str | None = Field(default=None, max_length=ART_MAX_BYTES * 2)  # data URL, or absent
 
 
 @router.get("")
@@ -72,6 +84,12 @@ async def export(req: ExportRequest, db: SessionDep) -> FileResponse:
     )
     if not ids:
         raise HTTPException(422, "nothing selected")
+    art_png = None
+    if req.art:
+        try:
+            art_png = sanitize_art(decode_data_url(req.art))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     try:
         path = await cart.build_cartridge(
             db,
@@ -81,10 +99,69 @@ async def export(req: ExportRequest, db: SessionDep) -> FileResponse:
             colour=req.colour,
             icon_svg=req.icon_svg,
             made_by=req.made_by,
+            design=req.design,
+            art_png=art_png,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return FileResponse(path, media_type="application/zip", filename=path.name)
+
+
+@router.post("/art/preview")
+async def art_preview(
+    sel: Selection, db: SessionDep, colour: str = "#2f6f8f", points: bool = False
+) -> Response:
+    """The generated label for a selection, before any cartridge exists -- or, with
+    `points`, just the constellation's positions for the 3D preview to float inside."""
+    ids = await cart.resolve_selection(
+        db,
+        document_ids=sel.document_ids,
+        category_ids=sel.category_ids,
+        cartridge_ids=sel.cartridge_ids,
+    )
+    pts = await constellation_points(db, ids)
+    if points:
+        return JSONResponse({"points": pts})
+    png = render_constellation(pts, colour)
+    return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/{cartridge_id}/constellation")
+async def constellation(cartridge_id: uuid.UUID, db: SessionDep) -> dict:
+    ids = list(
+        (
+            await db.execute(
+                select(CartridgeDocument.document_id).where(
+                    CartridgeDocument.cartridge_id == cartridge_id
+                )
+            )
+        ).scalars()
+    )
+    return {"points": await constellation_points(db, ids)}
+
+
+@router.get("/{cartridge_id}/art")
+async def art(cartridge_id: uuid.UUID, db: SessionDep) -> Response:
+    """The label. Stored art if the cartridge shipped with any; otherwise its constellation,
+    drawn once and kept."""
+    row = await db.get(Cartridge, cartridge_id)
+    if not row:
+        raise HTTPException(404, "no such cartridge")
+    if row.art_path and Path(row.art_path).exists():
+        return FileResponse(row.art_path, media_type="image/png")
+    ids = list(
+        (
+            await db.execute(
+                select(CartridgeDocument.document_id).where(
+                    CartridgeDocument.cartridge_id == cartridge_id
+                )
+            )
+        ).scalars()
+    )
+    png = render_constellation(await constellation_points(db, ids), row.colour)
+    row.art_path = str(store_art(cartridge_id, png))
+    await db.commit()
+    return Response(png, media_type="image/png")
 
 
 @router.post("/import")

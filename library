@@ -5,7 +5,7 @@
 #   ./library stop       stop the worker and API
 #   ./library restart
 #   ./library status
-#   ./library import <dir|file>... [--read]   bulk-import from disk; --read queues reading
+#   ./library import <dir|file>... [--read] [--cartridge "Name"]   bulk-import; --read queues reading
 #   ./library export --name "…" [--level readings] --subject "…"   make a cartridge
 #   ./library insert <cartridge.zip>          put a cartridge on the rack
 #

@@ -299,6 +299,10 @@ class Cartridge(Base):
     content_hash: Mapped[str] = mapped_column(String(64))
     document_count: Mapped[int] = mapped_column(Integer, default=0)
     imported_at: Mapped[datetime] = _now()
+    # The maker's design: material, dials, art. It travels in the manifest and is not
+    # editable after insertion -- a cartridge looks the same on every rack.
+    design: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    art_path: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 class CartridgeDocument(Base):

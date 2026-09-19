@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 
 from library_agent.api.routes import (
@@ -112,6 +113,14 @@ async def health(db: SessionDep) -> HealthOut:
         embed_model=cfg.embed_model,
         chat_model=cfg.chat_model,
     )
+
+
+app.mount("/vendor", StaticFiles(directory=WEB_DIR / "vendor"), name="vendor")
+
+
+@app.get("/cartridge3d.js", include_in_schema=False)
+async def cartridge3d() -> FileResponse:
+    return FileResponse(WEB_DIR / "cartridge3d.js", media_type="text/javascript")
 
 
 @app.get("/", include_in_schema=False)

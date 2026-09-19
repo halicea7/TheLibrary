@@ -508,3 +508,32 @@ serif with the shelf beneath -- and moves to the next every three seconds, the m
 row lit in the list. Hovering a row takes the wheel; leaving hands it back after a beat.
 The camera eases at ~95% in half a second, which is fast enough to feel like a cut and
 slow enough to read as motion.
+
+
+## Follow-on: the cartridge as an object
+
+Art, materials, dials, and "lock the design and have it carry over across instances."
+
+`library/cartridge_design.py` holds the design (material preset, four dials, art source),
+clamped on the way in and out; it travels in the manifest and is not editable after
+insertion. Art ships as `art/label.png`; uploads and shipped art alike are re-encoded
+through Pillow (metadata gone, 1024px cap, refused if it does not decode), same posture
+as the SVG icons. The default label is generated: the cartridge's own constellation, its
+volumes laid out by PCA of their document vectors and knitted by nearest neighbours in
+the cartridge's colour -- deterministic, no image model.
+
+`web/cartridge3d.js` is the object: a rounded slab from an extruded shape, grip ridges,
+an edge connector with gold pins, a recessed label plate carrying a canvas texture
+composed from the art and the name. Materials are MeshPhysicalMaterial presets:
+transmission for clear and smoke (attenuation colour and distance carry the tint and
+opacity dials), iridescence plus a cloud of additive sprites for glitter, metalness for
+metallic. A see-through shell shows the constellation floating inside it -- the same
+points as the label, spread through the plastic. Two things learned: three.js only
+refracts the opaque pass, so the inner points must not be `transparent` (alphaTest keeps
+the sprite edge); and refraction needs something behind it, so a rounded plate in the
+page colour sits behind the object -- over the nebula it reads as a display case. One
+vendored dependency, three r170, the first library the UI has used.
+
+`./library import --cartridge` puts a folder on the rack directly, introducing its
+volumes, which is how HackTricks arrived: 1,044 volumes in 564 s, a green translucent
+cartridge with a thousand points inside.

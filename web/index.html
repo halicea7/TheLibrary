@@ -518,6 +518,27 @@ select, .toggle {
 #tab-settings { margin-left:6px; }
 #inc-badge { display:inline-block; margin-left:6px; min-width:16px; padding:2px 5px; border-radius:99px; background:var(--amber); color:var(--bg); font:600 10px/1 var(--mono); text-align:center; vertical-align:middle; }
 
+/* ── the cartridge as an object ───────────────────────────────────────── */
+/* The make panel keeps its column; the object turns in the space to the right. On the
+   rack, hovering a spine lifts the cartridge into the same space. */
+#mk-stage { position:absolute; right:24px; top:70px; width:min(46vw, 560px); height:min(70vh, 620px); pointer-events:none; }
+#mk-stage canvas { width:100%; height:100%; display:block; }
+.dials { display:grid; grid-template-columns:1fr; gap:8px; padding-top:4px; }
+.dial { display:grid; grid-template-columns:86px 1fr 34px; gap:10px; align-items:center; font:11.5px/1.4 var(--sans); color:var(--dim); }
+.dial input[type=range] { width:100%; accent-color:var(--verdigris); }
+.dial output { font:10.5px/1 var(--mono); color:var(--faint); text-align:right; }
+.mats { display:flex; flex-wrap:wrap; gap:6px; padding-top:4px; }
+.mats button { font:11.5px/1 var(--sans); padding:5px 10px; border:1px solid var(--rule); border-radius:99px; background:var(--sunk); color:var(--dim); cursor:pointer; }
+.mats button[aria-pressed=true] { color:var(--fg); border-color:var(--fg); }
+.artpick { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font:12px/1.5 var(--sans); color:var(--dim); }
+.artpick img { width:52px; height:52px; object-fit:cover; border-radius:3px; border:1px solid var(--rule); }
+#inspect { position:absolute; right:24px; top:60px; width:400px; height:520px; z-index:4; pointer-events:none; opacity:0; transition:opacity .25s ease; }
+#inspect[data-on=true] { opacity:1; }
+#inspect canvas { width:100%; height:440px; display:block; }
+#inspect .who { text-align:center; font:600 15px/1.4 var(--serif); color:var(--fg); }
+#inspect .meta { text-align:center; font:10.5px/1.6 var(--mono); color:var(--faint); }
+.make .locked { font:11px/1.5 var(--mono); color:var(--faint); }
+
 /* ── make a cartridge ─────────────────────────────────────────────────── */
 .make { max-width:62ch; }
 .make h2 { font:600 20px/1.3 var(--serif); margin:0 0 4px; }
@@ -624,6 +645,8 @@ select, .toggle {
       <div id="view-make" hidden></div>
       <div id="view-settings" hidden></div>
     </div>
+    <div id="mk-stage" hidden><canvas id="mk-canvas"></canvas></div>
+    <div id="inspect" data-on="false" aria-hidden="true"><canvas id="inspect-canvas"></canvas><div class="who" id="inspect-who"></div><div class="meta" id="inspect-meta"></div></div>
 
     <form class="composer" id="composer" autocomplete="off">
       <input id="entry" placeholder="Ask the library something" aria-label="Ask the library"/>
@@ -948,6 +971,7 @@ function setView(v) {
   e.placeholder = placeholderFor(v);
   $('#subjects').hidden = v === 'threads' || v === 'open' || v === 'settings';
   $('#deskbar').hidden = v !== 'ask';
+  $('#mk-stage').hidden = v !== 'make';
   if (v !== 'ask') $('#history').hidden = true;
   if (v === 'threads') loadThreads();
   if (v === 'make') renderMake();
@@ -1086,7 +1110,7 @@ async function loadRack(justInserted) {
   $('#rack').innerHTML = r.cartridges.map(c => `
     <button class="spine ${c.id === justInserted ? 'inserting' : ''}" style="--c:${esc(c.colour)}; --w:${26 + Math.round(Math.min(c.document_count, 80) / 80 * 16)}px" data-level="${c.level}"
             aria-pressed="${cartridges.has(c.id)}" title="${esc(c.name)} · ${c.level} · ${c.document_count} volumes · v${c.version}${c.made_by ? ' · made by ' + esc(c.made_by) : ''}"
-            onclick="toggleCartridge('${c.id}')">
+            onclick="toggleCartridge('${c.id}')" onmouseenter="inspectShow('${c.id}')" onmouseleave="inspectHide()">
       <span class="eject" onclick="event.stopPropagation(); ejectCartridge('${c.id}', this)" title="Take it off the rack">eject</span>
       <span class="swatch">${c.icon_svg || ''}</span>
       <span class="t">${esc(c.name)}</span>
@@ -1096,6 +1120,28 @@ async function loadRack(justInserted) {
   const room = roomName();
   $('#rack-note').textContent = room ? `in ${room}'s shelf` : cartridges.size ? `${cartridges.size} rooms` : r.cartridges.length ? '' : 'nothing inserted yet — drop a cartridge, or make one';
 }
+// Hovering a spine lifts the cartridge up into the reading pane, turning.
+const inspect = { ctrl: null, timer: null, id: null };
+async function inspectShow(id) {
+  clearTimeout(inspect.timer);
+  const c = rackIndex[id]; if (!c || !window.Cartridge3D) return;
+  inspect.timer = setTimeout(async () => {
+    const el = $('#inspect');
+    if (!inspect.ctrl) inspect.ctrl = window.Cartridge3D.mount($('#inspect-canvas'));
+    const fresh = inspect.id !== id; inspect.id = id;
+    $('#inspect-who').textContent = c.name;
+    $('#inspect-meta').textContent = `${c.level} · ${c.document_count} volumes · v${c.version}${c.made_by ? ' · made by ' + c.made_by : ''}`;
+    let points = [];
+    try { points = (await (await fetch(`/api/cartridges/${id}/constellation`)).json()).points || []; } catch {}
+    inspect.ctrl.set({ design: c.design || {}, colour: c.colour, name: c.name, sub: `${c.level} · ${c.document_count} volumes`, points, artUrl: `/api/cartridges/${id}/art`, flip: fresh });
+    el.dataset.on = 'true';
+  }, 140);
+}
+function inspectHide() {
+  clearTimeout(inspect.timer);
+  inspect.timer = setTimeout(() => { $('#inspect').dataset.on = 'false'; }, 260);
+}
+
 function toggleCartridge(id) {
   cartridges.has(id) ? cartridges.delete(id) : cartridges.add(id);
   loadRack(); loadShelf();
@@ -1823,9 +1869,11 @@ const GLYPHS = {
   gear:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>',
   leaf:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 19C5 9 11 4 20 4c0 9-5 15-15 15z"/><path d="M5 19l8-8"/></svg>',
 };
-const make = { name:'', colour:null, glyph:'book', level:'readings', timer:null };
+const make = { name:'', colour:null, glyph:'book', level:'readings', timer:null,
+  design: { material:'clear', tint:.55, opacity:.35, sparkle:.5, roughness:.25, art:'generated' }, artUrl:null, artData:null, points:[], stage:null };
+const MATERIALS = [['solid','Solid'],['clear','Clear'],['smoke','Smoke'],['glitter','Glitter'],['metallic','Metallic']];
 function openMake() { $('#tab-make').hidden = false; setView('make'); }
-function renderMake() {
+function renderMake(flip) {
   const el = $('#view-make');
   if (!palette.length) palette = ['#2f6f8f','#7a5c2e','#4f7a3a','#8a3d5e','#3e6b6b','#9a6b1f','#5a4b8a','#6f6f6f'];
   make.colour ||= palette[Object.keys(rackIndex).length % palette.length];
@@ -1840,6 +1888,20 @@ function renderMake() {
       `<button style="--c:${c}" aria-pressed="${c === make.colour}" title="${c}" onclick="make.colour='${c}'; renderMake()"></button>`).join('')}</div></div>
     <div class="row"><label>Icon</label><div class="glyphs">${Object.entries(GLYPHS).map(([k, svg]) =>
       `<button aria-pressed="${k === make.glyph}" title="${k}" onclick="make.glyph='${k}'; renderMake()">${svg}</button>`).join('')}</div></div>
+    <div class="row"><label>Material</label><div><div class="mats">${MATERIALS.map(([v, l]) =>
+      `<button aria-pressed="${make.design.material === v}" onclick="make.design.material='${v}'; renderMake(true)">${l}</button>`).join('')}</div>
+      <div class="dials">
+        ${[['tint','Tint'],['opacity','Opacity'],['sparkle','Sparkle'],['roughness','Roughness']].map(([k, l]) => `<label class="dial"><span>${l}</span>
+          <input type="range" min="0" max="1" step=".01" value="${make.design[k]}" oninput="make.design.${k}=+this.value; this.nextElementSibling.value=Math.round(this.value*100); stageUpdate()"/><output>${Math.round(make.design[k]*100)}</output></label>`).join('')}
+      </div>
+      <div class="locked">The design is sealed into the cartridge: it looks like this on every rack.</div></div></div>
+    <div class="row"><label>Art</label><div class="artpick">
+      ${make.artUrl ? `<img src="${make.artUrl}" alt=""/>` : ''}
+      <span>${make.design.art === 'upload' ? 'your image' : 'its own constellation, drawn from the volumes'}</span>
+      <button class="linkish" onclick="$('#mk-art').click()">upload an image</button>
+      ${make.design.art === 'upload' ? `<button class="linkish" onclick="make.design.art='generated'; make.artData=null; renderMake(true)">use the constellation</button>` : ''}
+      <input type="file" id="mk-art" accept="image/*" hidden onchange="pickArt(this.files[0])"/>
+    </div></div>
     <div class="row"><label>Level</label><div class="levels">
       ${[['full','Full','The originals, every passage, and every reading. The receiver can open the pages.'],
          ['readings','Readings','What this library wrote about each section, and its margin notes. Searchable and citable; the text itself never leaves.'],
@@ -1852,6 +1914,38 @@ function renderMake() {
     <button class="go" id="mk-go" onclick="exportCartridge()" ${make.name.trim() ? '' : 'disabled'}>make it</button>
   </div>`;
   previewMake();
+  stageShow();
+  if (flip) stageUpdate(true);
+}
+// The object in the right-hand space, turning as the dials move.
+async function stageShow() {
+  const st = $('#mk-stage'); st.hidden = false;
+  if (!window.Cartridge3D) return;
+  if (!make.stage) make.stage = window.Cartridge3D.mount($('#mk-canvas'));
+  stageUpdate(true);
+  // art + constellation for the current selection
+  const sel = makeSelection();
+  const body = JSON.stringify(sel.category_ids.length || sel.cartridge_ids.length ? sel : { ...sel, document_ids: await allDocumentIds() });
+  try {
+    const pts = (await (await fetch(`/api/cartridges/art/preview?points=1`, { method:'POST', headers:{'Content-Type':'application/json'}, body })).json()).points || [];
+    make.points = pts;
+    if (make.design.art !== 'upload') {
+      const blob = await (await fetch(`/api/cartridges/art/preview?colour=${encodeURIComponent(make.colour)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body })).blob();
+      if (make.artUrl && make.artUrl.startsWith('blob:')) URL.revokeObjectURL(make.artUrl);
+      make.artUrl = URL.createObjectURL(blob);
+    }
+    stageUpdate();
+  } catch {}
+}
+function stageUpdate(flip) {
+  if (!make.stage) return;
+  make.stage.set({ design: { ...make.design }, colour: make.colour, name: make.name.trim() || 'Cartridge', sub: `${make.level} · ${(make.points || []).length} volumes`, points: make.points, artUrl: make.artUrl, flip: !!flip });
+}
+function pickArt(file) {
+  if (!file) return;
+  const rd = new FileReader();
+  rd.onload = () => { make.artData = rd.result; make.artUrl = rd.result; make.design.art = 'upload'; renderMake(true); };
+  rd.readAsDataURL(file);
 }
 function makeSelection() {
   return { category_ids:[...subjects], cartridge_ids:[...cartridges], document_ids:[], level:make.level };
@@ -1879,7 +1973,7 @@ async function allDocumentIds() {
 async function exportCartridge() {
   const sel = makeSelection();
   if (!sel.category_ids.length && !sel.cartridge_ids.length) sel.document_ids = await allDocumentIds();
-  const body = { ...sel, name:make.name.trim(), colour:make.colour, icon_svg:GLYPHS[make.glyph] };
+  const body = { ...sel, name:make.name.trim(), colour:make.colour, icon_svg:GLYPHS[make.glyph], design:make.design, art: make.design.art === 'upload' ? make.artData : null };
   $('#mk-go').disabled = true; $('#mk-go').textContent = 'making…';
   try {
     const r = await fetch('/api/cartridges/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
@@ -1951,6 +2045,11 @@ web.init();
 setInterval(loadJobs, 4000);
 incidentBadge();
 setInterval(() => { holdings(); incidentBadge(); }, 30000);
+</script>
+<script type="module">
+  // The cartridge as an object. Loaded as a module (it imports three.js); if WebGL is
+  // unavailable the rest of the library does not care.
+  try { const m = await import('/cartridge3d.js'); window.Cartridge3D = m; } catch (e) { console.warn('3D cartridges unavailable', e); }
 </script>
 </body>
 </html>

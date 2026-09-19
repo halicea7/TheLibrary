@@ -112,6 +112,10 @@ At `readings`, each section's summary stands in as its passage, so retrieval, th
   <img src="docs/cartridge.jpg" alt="Making a cartridge: name, colour, icon, level, and a live preview of what would leave. On the left, the shelf open two levels deep: Cybersecurity, Deserialization Flaws, the volumes." width="900"/>
 </p>
 
+**A cartridge is an object.** It has art on its label — an image you upload, or by default its own *constellation*: the volumes it holds laid out from their vectors in its colour — and a material: solid, clear, smoke, glitter or metallic, with dials for tint, opacity, sparkle and roughness. A clear shell shows the constellation floating inside the plastic. The design is sealed into the manifest, so a cartridge looks the same on every rack it lands on; only its maker sets it. The make panel shows it turning as you work; hovering a spine on the rack lifts the cartridge into view. Rendered with one vendored library (three.js, in `web/vendor/`), so nothing is fetched from a network. Uploaded and shipped art is re-encoded on the way in.
+
+A folder can also arrive as a cartridge directly: `./library import ~/hacktricks --cartridge "HackTricks"`.
+
 Click a spine on the rack to walk into that room: the composer becomes *Ask Security's shelf*, and Find, the shelf and follow-ups stay inside it. Eject removes what the cartridge brought and leaves what was already yours. A document that arrives from two cartridges is one document with two memberships; subjects merge by name; vectors ship as float16 and are loaded directly when the embedding model matches, re-embedded from the shipped text when it doesn't. Clusters and contradictions are never shipped — the receiver recomputes them across the new whole, which is the point. Content is hash-verified; there is no signing.
 
 ## Models

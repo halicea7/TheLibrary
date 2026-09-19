@@ -27,6 +27,7 @@ dependencies = [
     "pymupdf>=1.25",
     "markdown-it-py>=3.0",
     "tiktoken>=0.8",
+    "pillow>=12.3.0",
 ]
 
 [project.optional-dependencies]

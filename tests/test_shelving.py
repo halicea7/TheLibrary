@@ -121,11 +121,10 @@ class TestPlacementEvidence:
     """What the placer is told about a volume: never its current shelf, and never nothing."""
 
     async def test_unsummarised_stub_offers_its_opening(self, db):
-        from library_agent.library.shelving import _summary_and_tags
-
         from sqlalchemy import delete
 
         from library_agent.db.models import Artifact, ArtifactKind
+        from library_agent.library.shelving import _summary_and_tags
 
         doc = await make_document(
             db, title="Git", body="Git is a distributed version control system. " * 8, tier=1

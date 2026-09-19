@@ -67,6 +67,8 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
   <img src="docs/write.jpg" alt="Write. A brief at the top; below it the document the library composed: title, the plan's reasoning, the outline, and each section with its own margin notes." width="900"/>
 </p>
 
+**Reading** — click a volume and it opens as a page: sections in order, the section summary as an italic lead, reflections in the margin beside their passage, and the **figures** of a PDF set into the section whose pages hold them, each with its caption from the page (click one to widen it). Figures are found from the original's drawings and images and rendered on first view, so nothing is extracted at ingest and nothing is added to the database; the renders are a cache that goes with the document. Images referenced from a Markdown volume are not fetched — they stay as their alt text, since the file was shelved, not the site it came from.
+
 **Conversations** — the desk bar names the current one, starts a new one, and lists earlier ones; opening one replays it with its margin notes, and asking again continues it.
 
 <p align="center">
@@ -121,7 +123,7 @@ The point is sharing between people who can't share the documents. A confidentia
 | `readings` | no | no | yes | search and cite *your reading* of each section; never sees the text |
 | `catalogue` | no | no | summaries and subjects only | knows the material exists, asks you for it |
 
-At `readings`, each section's summary stands in as its passage, so retrieval, the citation apparatus and the reader work unchanged — a note from such a source reads *Security's reading of …* rather than quoting a page. Levels control what leaves, not what happens after import.
+At `readings`, each section's summary stands in as its passage, so retrieval, the citation apparatus and the reader work unchanged — a note from such a source reads *Security's reading of …* rather than quoting a page. Levels control what leaves, not what happens after import. Figures travel with the original, so a `full` cartridge shows them in the receiver's reader and the other two levels do not, with no field to get wrong.
 
 ```sh
 ./library export --name "Security" --level readings --subject "Network Security"

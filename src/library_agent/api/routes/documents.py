@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import shutil
 import tempfile
 import time
 import uuid
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,9 +30,12 @@ from library_agent.db.models import (
 )
 from library_agent.db.purge import delete_document
 from library_agent.db.session import SessionDep
+from library_agent.ingest import figures
 from library_agent.ingest.extract import SUPPORTED
 from library_agent.ingest.tier0 import ingest
 from library_agent.library.cartridge import cartridge_provenance
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -427,4 +434,32 @@ async def read_document(document_id: uuid.UUID, db: SessionDep) -> dict:
         "cartridge": (await cartridge_provenance(db, [doc.id])).get(doc.id),
         "page_count": doc.page_count,
         "sections": out_sections,
+        # Figures are read from the original, so a readings-only volume has none.
+        "figures": [asdict(f) for f in _figures(doc)],
     }
+
+
+def _figures(doc: Document) -> list:
+    if doc.readings_only or not doc.source_path:
+        return []
+    try:
+        return figures.index(doc.content_hash, Path(doc.source_path))
+    except Exception:
+        log.debug("figure index failed for %s", doc.id, exc_info=True)
+        return []
+
+
+@router.get("/{document_id}/figures/{n}.png")
+async def figure_png(document_id: uuid.UUID, n: int, db: SessionDep) -> FileResponse:
+    """One figure, rendered from the original at 2x on first request and cached."""
+    doc = (
+        await db.execute(select(Document).where(Document.id == document_id))
+    ).scalar_one_or_none()
+    if not doc or doc.readings_only or not doc.source_path:
+        raise HTTPException(404, "no such figure")
+    path = await asyncio.to_thread(figures.render, doc.content_hash, Path(doc.source_path), n)
+    if not path:
+        raise HTTPException(404, "no such figure")
+    return FileResponse(
+        path, media_type="image/png", headers={"Cache-Control": "private, max-age=86400"}
+    )

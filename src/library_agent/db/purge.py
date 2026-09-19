@@ -57,12 +57,18 @@ async def delete_document(db: AsyncSession, document_id: uuid.UUID) -> tuple[int
     how a quarantined test string (EICAR, from a payload collection) stayed on disk after
     its document was gone and tripped the endpoint agent."""
     counts = await purge_document_dependents(db, document_id)
-    path = (
+    row = (
         await db.execute(
-            text("select source_path from document where id = :d"), {"d": str(document_id)}
+            text("select source_path, content_hash from document where id = :d"),
+            {"d": str(document_id)},
         )
-    ).scalar()
+    ).first()
+    path, chash = (row[0], row[1]) if row else (None, None)
     await db.execute(text("delete from document where id = :d"), {"d": str(document_id)})
+    if chash:
+        from library_agent.ingest.figures import forget
+
+        forget(chash)
     if path:
         from library_agent.config import settings
 

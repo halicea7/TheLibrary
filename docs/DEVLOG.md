@@ -721,3 +721,18 @@ library's note beneath each -- judged blind by the reader model on groundedness 
 usefulness, with citation validity alongside as the metric that needs no judge.
 `render_context` takes an optional `reflections` map to make the B arm possible; nothing
 uses it in the chat path until the A/B says it should.
+
+**Figures.** "Is there any way to include images, or would that bloat?" It does not
+have to. Extraction already finds the drawing and image regions on a page (to keep
+their labels out of the prose), so `ingest/figures.py` reads the same regions the other
+way: each one large enough to be a figure -- between 3% and 85% of the page, not a rule
+or a logo -- becomes a figure, with the nearest caption block beneath it, and the reader
+renders it from the stored original at 2x on first view. No table, no migration, no
+extraction at ingest; the renders and index are a cache under `~/.library-agent/figures/`
+that the document's deletion removes. Cartridges came free: `full` ships the original so
+the receiver's reader finds the same figures, `readings` and `catalogue` ship none. On
+BERT, ResNet and DPR the captions attached to the right figures first try; the clip
+stops above the caption so the text stays selectable beneath the image. Markdown images
+are deliberately not fetched -- a shelved file should not phone the site it came from.
+Reading figures with a vision model into caption chunks stays open; it needs a model
+pulled on the GH.

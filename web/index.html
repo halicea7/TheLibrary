@@ -479,6 +479,12 @@ select, .toggle {
 .page .pass.md > *:first-child { margin-top:0; }
 .page .pass.md p, .page .pass.md li { font:15px/1.72 var(--serif); }
 .page .gloss { grid-column:2; align-self:start; padding-top:.2em; }
+.page figure { grid-column:1; margin:6px 0 18px; padding:10px 12px 8px; border:1px solid var(--line); border-radius:4px; background:rgba(255,255,255,.55); }
+.page figure img { display:block; max-width:100%; height:auto; cursor:zoom-in; }
+.page figure.wide img { cursor:zoom-out; }
+.page figure figcaption { font:italic 12.5px/1.5 var(--serif); color:var(--dim); margin-top:8px; }
+.page figure figcaption small { font:10.5px/1 var(--mono); font-style:normal; color:var(--faint); margin-left:6px; }
+.page figure.wide { grid-column:1 / -1; }
 .page .gloss span {
   display:block; font:12px/1.5 var(--serif); color:var(--dim);
   padding:2px 0 2px 10px; border-left:1px solid var(--rubric); margin-bottom:6px;
@@ -1868,6 +1874,17 @@ async function openVolume(id) {
   const toc = d.sections.filter(s => s.title).map((s, i) =>
     `<li class="l${Math.min(s.level, 3)}"><a href="#sec-${i}">${esc(s.title)}</a></li>`).join('');
 
+  // Figures sit in the section whose pages hold them: the last section that starts on or
+  // before the figure's page. Anything before the first section goes with the first.
+  const figs = d.figures || [];
+  const figHome = f => {
+    let home = 0;
+    d.sections.forEach((s, i) => { if (s.page_start && s.page_start <= f.page) home = i; });
+    return home;
+  };
+  const figHtml = f => `<figure onclick="this.classList.toggle('wide')">
+      <img src="/api/documents/${d.id}/figures/${f.n}.png" width="${f.width}" height="${f.height}" loading="lazy" alt="${esc(f.caption || 'Figure on page ' + f.page)}">
+      <figcaption>${f.caption ? esc(f.caption) : 'Figure'}<small>p.${f.page}</small></figcaption></figure>`;
   const body = d.sections.map((s, i) => {
     let h = s.title
       ? `<h3 id="sec-${i}">${esc(s.title)}${s.page_start ? `<small>p.${s.page_start}</small>` : ''}</h3>`
@@ -1880,6 +1897,7 @@ async function openVolume(id) {
       const body = isMd ? `<div class="pass md">${mdBlocks(p.text).join('')}</div>` : `<p class="pass">${esc(p.text)}</p>`;
       return `${body}<div class="gloss">${notes}</div>`;
     }).join('');
+    h += figs.filter(f => figHome(f) === i).map(figHtml).join('');
     return h;
   }).join('');
 
@@ -1891,6 +1909,7 @@ async function openVolume(id) {
         ${d.cartridge ? `<span><span class="dot" style="--c:${esc(d.cartridge.colour)}"></span>from ${esc(d.cartridge.name)}</span>` : ''}
         ${d.page_count ? `<span>${d.page_count} pages</span>` : ''}
         <span>${d.sections.length} sections</span>
+        ${figs.length ? `<span>${figs.length} figure${figs.length === 1 ? '' : 's'}</span>` : ''}
         ${d.tier === 0 ? `<button class="linkish" onclick="readDoc('${d.id}', 1)">have it read</button>` : ''}
         ${d.tier === 1 ? `<button class="linkish" onclick="readDoc('${d.id}', 2)">annotate it</button>` : ''}
         ${d.tier >= 2 ? `<span title="Reflections sit in the margin">marginalia in the margin</span>` : ''}

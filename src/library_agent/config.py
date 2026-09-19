@@ -114,6 +114,18 @@ class Settings(BaseSettings):
     # Troubleshooting leans on the technical model when one is configured.
     troubleshoot_model: str | None = None
 
+    # --- other tools talking to the library ---
+    # The UI is trusted from loopback with no token, as it always was. Anything arriving
+    # from off the machine must carry "Authorization: Bearer <token>" with one of these;
+    # with none configured, off-box requests are refused. Bind stays loopback unless told.
+    api_tokens: str = ""  # comma-separated; a plain string so the env var stays simple
+    bind: str = "127.0.0.1"
+    port: int = 8077
+
+    @property
+    def tokens(self) -> set[str]:
+        return {t.strip() for t in self.api_tokens.split(",") if t.strip()}
+
     # --- prompt versioning ---
     # Bumping a version marks matching artifacts stale so only those regenerate.
     prompt_versions: dict[str, str] = Field(

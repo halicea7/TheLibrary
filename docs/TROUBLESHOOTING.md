@@ -168,6 +168,19 @@ cartridge room) excluded everything relevant.
 Do: clear the chips and the rack scope and ask again; try *Find* with the exact term
 to see whether the passage exists at all.
 
+## Another tool gets 401 or 403 from the API
+
+Symptom: a script or agent on another machine gets `403 this library is not open to other
+machines` or `401 a bearer token is required`.
+
+Cause: requests from off the machine must carry `Authorization: Bearer <token>` matching
+one in `LIBRARY_API_TOKENS`; with none configured, they are refused. Loopback needs nothing.
+
+Do: set `LIBRARY_API_TOKENS=<token>` and `LIBRARY_BIND=<address>` in `.env`, then
+`./library restart`. Check with `curl -s -H "Authorization: Bearer <token>"
+http://<host>:8077/api/v1/shelves`. The MCP server reads `LIBRARY_URL` and
+`LIBRARY_TOKEN` to reach the library.
+
 ## When to open an issue
 
 Open one when the steps above do not explain it, or when a traceback points into the

@@ -132,6 +132,26 @@ A folder can also arrive as a cartridge directly: `./library import ~/hacktricks
 
 Inside a room, eject removes what the cartridge brought and leaves what was already yours. A document that arrives from two cartridges is one document with two memberships; subjects merge by name; vectors ship as float16 and are loaded directly when the embedding model matches, re-embedded from the shipped text when it doesn't. Clusters and contradictions are never shipped — the receiver recomputes them across the new whole, which is the point. Content is hash-verified; there is no signing.
 
+## Connecting other tools
+
+Other programs — a script, an internal tool, an agent — can talk to the library the way a person at the desk does, and get the same verified citations back.
+
+**One rule about who may ask.** The browser on the same machine needs nothing, as it always has. Anything arriving from *off* the machine must send `Authorization: Bearer <token>` with a token from `LIBRARY_API_TOKENS` (comma-separated); with no tokens configured, off-box requests are refused. The port stays on loopback until you set `LIBRARY_BIND` (a LAN or Tailscale address, or `0.0.0.0`). Two deliberate steps to open it, none to keep it closed.
+
+**Plain JSON** (`/api/v1/…`), for anything that can make an HTTP call:
+
+```sh
+curl -s -X POST http://library:8077/api/v1/ask -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"question":"What does Kerberoasting require?","room":"HackTricks","model":"technical"}'
+```
+
+returns `{answer, citations[{n,title,page,section,document_id,cartridge}], verified{emitted,resolved}, conversation_id}` — every `[n]` in the answer is a citation below, and anything the model cited that could not be verified against the shelf was stripped before you saw it. `room` is a cartridge by name, so a tool can be told *ask only our docs*; `subjects` are shelf names; `conversation_id` continues a thread. Also `GET /api/v1/search?q=…&room=…`, `GET /api/v1/shelves` (what there is to ask about), `GET /api/v1/volumes/{id}`.
+
+**MCP**, for anything that is an agent. `./library mcp` serves four tools — `list_shelves`, `search_library`, `ask_library`, `read_volume` — over stdio; `./library mcp --http 8078` serves them over streamable HTTP for an agent on another machine. It is a thin client of the JSON API (`LIBRARY_URL`, `LIBRARY_TOKEN`), so one Ollama, one job at a time, and one door stay one thing. For Claude Desktop or Claude Code, point the MCP config at `./library mcp` in this directory.
+
+A team's documentation comes in as its own cartridge (`./library import ~/docs --cartridge "Ops"`) with a clearance set, and the tool is told to ask that room. Note that everything answers through one model instance, one generation at a time: two people and an agent are fine; an agent in a tight loop queues behind itself.
+
 ## Models
 
 | Role | Default | Notes |
@@ -168,6 +188,8 @@ src/library_agent/
   retrieval/            hybrid search, router, reranked pipeline
   library/              clusters, citation graph, contradictions, taxonomy, shelving, cartridges
   ops/                  incidents and troubleshooting against the docs
+  api/routes/v1.py      plain JSON for other programs; api/auth.py the door
+  mcp_server.py         the library as MCP tools
   chat/                 citations, query rewriting, stances, streaming
   eval/                 question generation, recall@k harness
   api/  worker/  db/

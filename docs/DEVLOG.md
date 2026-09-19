@@ -584,3 +584,22 @@ socket. Two bugs on the way: `ShapeGeometry` needs a `Shape`, not a `Path`, for 
 groove floors; and a label plane coplanar with the top of its own sticker edge z-fights
 into stripes. Through a clear shell you now see the board, and the constellation floating
 between it and the front.
+
+## Follow-on: other tools at the desk
+
+Someone else's tool wants to talk to the documentation through the library. Two doors,
+one rule. The rule (`api/auth.py`): loopback is the UI and needs nothing, as it always
+did; anything from off the machine must carry a bearer token from `LIBRARY_API_TOKENS`,
+and with none configured it is refused. Bind stays loopback until `LIBRARY_BIND` says
+otherwise -- two deliberate steps to open it, none to keep it closed.
+
+Door one is `/api/v1` (`api/routes/v1.py`): plain JSON, no streaming. `ask` collects a
+whole chat turn -- the same retrieval, generation and citation verification the UI gets
+-- and returns the answer with only the citations that survived verification. Rooms and
+shelves are addressed by name, since a tool should be able to say "our docs" without
+learning our ids. Door two is MCP (`mcp_server.py`, mcp 2.x): four tools over stdio or
+streamable HTTP, a thin client of door one, so the one-generation-at-a-time lease and the
+door itself stay in one place. Checked with the SDK's own client over stdio, and the
+JSON ask against HackTricks came back on the technical model with 7 of 8 citations
+resolved -- the eighth was the model citing a number it had not been given, stripped
+before the caller saw it, which is the whole point of the apparatus.

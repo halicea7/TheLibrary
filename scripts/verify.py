@@ -173,6 +173,18 @@ async def main():
         msgs = (await c.get(f"/api/conversations/{convs[0]['id']}")).json()
         ok("a conversation replays with its sources", msgs and msgs[0]["role"] == "user" and any(m["role"] == "assistant" and isinstance(m["sources"], dict) for m in msgs))
 
+    print("== other tools: /api/v1 ==")
+    async with httpx.AsyncClient(base_url=API, timeout=600) as c:
+        shv = (await c.get("/api/v1/shelves")).json()
+        ok("v1 shelves", shv["volumes"] > 0 and isinstance(shv["shelves"], list) and isinstance(shv["rooms"], list), f"{shv['volumes']} volumes, {len(shv['rooms'])} rooms")
+        se = (await c.get("/api/v1/search", params={"q":"reciprocal rank fusion","limit":3})).json()
+        ok("v1 search", se["hits"] and all("document_id" in h and "page" in h for h in se["hits"]))
+        r = await c.post("/api/v1/ask", json={"question":"In one sentence, what is reciprocal rank fusion?","remember":False})
+        a = r.json()
+        ok("v1 ask returns an answer with resolved citations", r.status_code==200 and a["answer"] and a["verified"]["resolved"]>=1 and all(c_["n"] for c_ in a["citations"]), f"{len(a.get('citations',[]))} citations, {a.get('verified')}")
+        bad = await c.post("/api/v1/ask", json={"question":"anything","room":"No Such Room"})
+        ok("v1 unknown room is a clean 404", bad.status_code==404)
+
     print("== settings & incidents ==")
     async with httpx.AsyncClient(base_url=API, timeout=600) as c:
         st = (await c.get("/api/settings")).json()

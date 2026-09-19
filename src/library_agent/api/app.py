@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 
+from library_agent.api.auth import BearerOrLoopback
 from library_agent.api.routes import (
     cartridges,
     chat,
@@ -19,6 +20,7 @@ from library_agent.api.routes import (
     library,
     reading,
     search,
+    v1,
 )
 from library_agent.api.routes import (
     settings as settings_routes,
@@ -58,6 +60,7 @@ def _warm_reranker() -> None:
 
 
 app = FastAPI(title="Library Agent", version="0.1.0", lifespan=lifespan)
+app.add_middleware(BearerOrLoopback)
 
 
 @app.exception_handler(Exception)
@@ -78,6 +81,7 @@ app.include_router(chat.router)
 app.include_router(library.router)
 app.include_router(cartridges.router)
 app.include_router(settings_routes.router)
+app.include_router(v1.router)
 
 
 @app.get("/api/health", response_model=HealthOut)

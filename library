@@ -8,12 +8,13 @@
 #   ./library import <dir|file>... [--read] [--cartridge "Name"]   bulk-import; --read queues reading
 #   ./library export --name "…" [--level readings] --subject "…"   make a cartridge
 #   ./library insert <cartridge.zip>          put a cartridge on the rack
+#   ./library mcp [--http PORT]               an MCP server other agents can use (stdio by default)
 #
 # Ctrl-C in the foreground stops everything.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PORT="${PORT:-8077}"
+PORT="${LIBRARY_PORT:-${PORT:-8077}}"
 URL="http://127.0.0.1:$PORT"
 OLLAMA="${LIBRARY_OLLAMA_URL:-http://localhost:11434}"
 LOGS=ops/logs; mkdir -p "$LOGS"
@@ -34,6 +35,7 @@ case "${1:-start}" in
   start) ;;
   import) shift; exec uv run python -m library_agent.ingest.bulk "$@" ;;
   export|insert) exec uv run python -m library_agent.library.cartridge_cli "$@" ;;
+  mcp) shift; exec uv run python -m library_agent.mcp_server "$@" ;;
   *) echo "usage: ./library [start|stop|restart|status|import <paths>... [--read]|export …|insert <zip>]"; exit 2 ;;
 esac
 
@@ -73,4 +75,4 @@ trap 'kill $WORKER 2>/dev/null; wait $WORKER 2>/dev/null; echo; echo "The Librar
   echo "The Library is open at $URL"
   open "$URL" 2>/dev/null || true ) &
 
-exec uv run uvicorn library_agent.api.app:app --host 127.0.0.1 --port "$PORT" --log-level warning
+exec uv run uvicorn library_agent.api.app:app --host "${LIBRARY_BIND:-127.0.0.1}" --port "$PORT" --log-level warning

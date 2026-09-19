@@ -28,6 +28,7 @@ dependencies = [
     "markdown-it-py>=3.0",
     "tiktoken>=0.8",
     "pillow>=12.3.0",
+    "mcp>=2.2.0",
 ]
 
 [project.optional-dependencies]

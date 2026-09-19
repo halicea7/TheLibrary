@@ -560,3 +560,13 @@ being used. Two things learned: MeshBasicMaterial goes through tone mapping like
 everything else, so a backplate meant to match the page needs `toneMapped: false`; and
 Chrome stops animation frames in a background tab, which makes a mid-motion screenshot
 look like a bug.
+
+**Clear backplates.** The refraction plate showed as an outline over the nebula. It only
+needs to exist for three.js's offscreen transmission pass, so it now writes colour only
+when a render target is bound (`onBeforeRender` checks `renderer.getRenderTarget()`) and
+is invisible on screen: the glass still has something to bend, the page shows through
+around it. Reflections on clear shells are dialled down so the tint reads without a lit
+plate behind. Also found: the nebula's `extent` smoothing was a no-op from zero, so the
+view was always scaled to the maximum radius -- unnoticed at 176 volumes, a blob at
+1,219. It now starts from the first measurement and uses the 92nd-percentile distance,
+so outliers cannot shrink the cloud.

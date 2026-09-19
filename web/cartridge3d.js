@@ -129,7 +129,7 @@ function makeCartridge() {
     Object.assign(m, { transmission: 0, opacity: 1, transparent: false, metalness: 0, clearcoat: 0, iridescence: 0, thickness: 0, attenuationDistance: Infinity, envMapIntensity: 1 });
     m.roughness = 0.08 + (d.roughness ?? .25) * 0.7;
     const tint = d.tint ?? .55, opacity = d.opacity ?? .35;
-    const tinted = new THREE.Color(0xffffff).lerp(col, .3 + .7 * tint);
+    const tinted = new THREE.Color(0xffffff).lerp(col, .45 + .55 * tint);
     switch (d.material || 'clear') {
       case 'solid': m.color.copy(col); m.clearcoat = .35; m.clearcoatRoughness = .3; break;
       case 'metallic': m.color.copy(new THREE.Color(0x9aa3ad).lerp(col, tint)); m.metalness = .92; m.roughness = 0.12 + (d.roughness ?? .25) * .45; m.envMapIntensity = 1.4; break;
@@ -141,6 +141,9 @@ function makeCartridge() {
         m.attenuationColor = col.clone().lerp(new THREE.Color(0xffffff), (1 - tint) * .6);
         m.attenuationDistance = dark ? .35 + (1 - opacity) * .8 : .5 + (1 - opacity) * 1.6;
         m.clearcoat = .6; m.clearcoatRoughness = .1;
+        // With the page behind it rather than a lit plate, reflections would wash the
+        // tint out; keep them modest so the colour reads.
+        m.envMapIntensity = .45;
         if (d.material === 'glitter') { m.iridescence = .55; m.iridescenceIOR = 1.3; }
       }
     }
@@ -197,6 +200,19 @@ function makeCartridge() {
   };
 }
 
+// A plate that only exists for refraction. three.js draws its opaque objects into an
+// offscreen target first (that is what a transmissive surface samples), then draws the
+// scene to the screen. This plate writes colour only into the offscreen pass -- the
+// render target is set then, and null for the screen -- so the glass has something to
+// bend, and the page behind the canvas stays visible around and through it.
+function refractionPlate(renderer, geometry) {
+  const mat = new THREE.MeshBasicMaterial({ color: pageBg(), toneMapped: false, depthWrite: false });
+  const mesh = new THREE.Mesh(geometry, mat);
+  mesh.onBeforeRender = () => { mat.colorWrite = renderer.getRenderTarget() !== null; };
+  mesh.onAfterRender = () => { mat.colorWrite = true; };
+  return mesh;
+}
+
 function makeRenderer(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
   renderer.setClearColor(0x000000, 0);
@@ -224,10 +240,8 @@ export function mount(canvas) {
   const scene = new THREE.Scene(); scene.environment = makeEnvironment(renderer);
   const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50); camera.position.set(0, 0.25, 8.2);
   lights(scene);
-  // Refraction needs something behind it: a rounded plate in the page colour, which over
-  // the nebula reads as a display case rather than a hole.
-  const backdrop = new THREE.Mesh(new THREE.ShapeGeometry(roundedRect(4.4, 5.6, .5)), new THREE.MeshBasicMaterial({ color: pageBg(), toneMapped: false }));
-  backdrop.position.z = -1.6; scene.add(backdrop);
+  const backdrop = refractionPlate(renderer, new THREE.PlaneGeometry(30, 30));
+  backdrop.position.z = -6; scene.add(backdrop);
   const cart = makeCartridge(); scene.add(cart.group);
   let spin = 0, theta = 0, t0 = performance.now(), frame = null, alive = true;
   const size = sizer(renderer, camera, canvas);
@@ -261,7 +275,8 @@ export function mountRack(canvas, handlers = {}) {
   const scene = new THREE.Scene(); scene.environment = makeEnvironment(renderer);
   const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 60); camera.position.set(0, 1.5, 7.6); camera.lookAt(0, 0.7, 0);
   lights(scene);
-  const backplate = new THREE.Mesh(new THREE.PlaneGeometry(12, 8), new THREE.MeshBasicMaterial({ color: panelBg(), toneMapped: false }));  // exact page colour, untouched by tone mapping
+  const backplate = refractionPlate(renderer, new THREE.PlaneGeometry(12, 8));
+  backplate.material.color.copy(panelBg());
   backplate.position.set(0, 2, -2.2); scene.add(backplate);
   // the socket: a block with a slot cut into its top
   const socket = new THREE.Group(); scene.add(socket);

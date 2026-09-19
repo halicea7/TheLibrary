@@ -787,7 +787,7 @@ const web = {
         const b = N[j]; let dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
         const d2 = Math.max(400, dx * dx + dy * dy + dz * dz);
         if (d2 > 48000) continue;
-        const k = a.sub && a.sub === b.sub ? 140 : 420;   // same shelf sits closer
+        const k = a.sub && a.sub === b.sub ? 220 : 420;   // same shelf sits closer
         const f = k / d2; dx *= f; dy *= f; dz *= f;
         a.vx -= dx; a.vy -= dy; a.vz -= dz; b.vx += dx; b.vy += dy; b.vz += dz;
       }
@@ -801,17 +801,20 @@ const web = {
       const f = (d - want) / d * (.03 + .04 * e.w);
       e.a.vx += dx * f; e.a.vy += dy * f; e.a.vz += dz * f; e.b.vx -= dx * f; e.b.vy -= dy * f; e.b.vz -= dz * f;
     }
-    let ext = 40;
+    const dists = [];
     for (const n of N) {
       n.vx *= .8; n.vy *= .8; n.vz *= .8;
       const sp = Math.hypot(n.vx, n.vy, n.vz); if (sp > 6) { const k = 6 / sp; n.vx *= k; n.vy *= k; n.vz *= k; }
       n.x += n.vx * this.alpha; n.y += n.vy * this.alpha; n.z += n.vz * this.alpha;
       const d = Math.hypot(n.x, n.y, n.z); if (d > this.R) { const k = this.R / d; n.x *= k; n.y *= k; n.z *= k; }
-      if (d < this.R && d > ext) ext = d;
+      dists.push(d);
       n.r += (n.target - n.r) * .08;
     }
-    // Scale the view to the cloud as it actually is, not the radius it may grow to.
-    this.extent += ((Math.min(ext, this.R)) - (this.extent || ext)) * .05;
+    // Scale the view to where most of the cloud is: a few outliers must not shrink it.
+    dists.sort((a, b) => a - b);
+    const ext = Math.max(40, dists[Math.floor(dists.length * .92)] || 40);
+    const target = Math.min(ext, this.R);
+    this.extent = this.extent ? this.extent + (target - this.extent) * .05 : target;
     this.alpha *= .992;
   },
   project(n) {

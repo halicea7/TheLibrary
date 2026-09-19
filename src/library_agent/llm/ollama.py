@@ -235,8 +235,10 @@ class Ollama:
         *,
         temperature: float = 0.6,
         num_ctx: int = 16384,
+        seed: int | None = None,
     ) -> AsyncIterator[tuple[str, str]]:
-        """Yields ("thinking", text) and ("content", text) pieces.
+        """Yields ("thinking", text) and ("content", text) pieces. A `seed` with
+        temperature 0 makes the same messages produce the same text.
 
         Thinking is left ON deliberately. Measured on qwen3:30b-a3b: with think=false the
         model still reasons, it just writes the reasoning into the visible answer ("Hmm,
@@ -252,6 +254,8 @@ class Ollama:
             "keep_alive": settings().keep_alive,
             "options": {"temperature": temperature, "num_ctx": num_ctx},
         }
+        if seed is not None:
+            payload["options"]["seed"] = seed
         # Only ask a model to think if it can; the others just answer.
         if await self.supports_thinking(model):
             payload["think"] = True

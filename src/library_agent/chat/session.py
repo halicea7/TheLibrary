@@ -19,6 +19,7 @@ from library_agent.db.models import Conversation, Document, Message
 from library_agent.db.session import session_scope
 from library_agent.library.cartridge import cartridge_provenance
 from library_agent.llm.lease import mark_chat_active, mark_chat_done, redis_client
+from library_agent.llm.liveness import Busy, gate, liveness
 from library_agent.llm.ollama import Ollama
 from library_agent.ops.incidents import record_exception
 from library_agent.retrieval.hybrid import SearchHit
@@ -72,14 +73,39 @@ async def run_turn(
     *,
     document_ids: list[uuid.UUID] | None = None,
     stance: str | None = None,
+    temperature: float | None = None,
+    seed: int | None = None,
+    caller: str = "ui",
 ) -> AsyncIterator[dict]:
-    """Yields SSE-shaped events: meta → sources → thinking* → token* → done."""
+    """Yields SSE-shaped events: meta → sources → thinking* → token* → done.
+
+    `caller` identifies who is asking for the gate (loopback UI, or a token); `temperature`
+    and `seed` let the JSON API ask for cooler or reproducible answers."""
     cfg = settings()
     redis = redis_client()
     client = Ollama()
     state = TurnState(question=question)
+    held = False
 
     try:
+        if not liveness.alive:
+            yield {
+                "event": "error",
+                "data": f"the model is not answering: {liveness.detail}. See Settings › services.",
+                "code": 503,
+            }
+            return
+        try:
+            await gate.acquire(caller)
+            held = True
+        except Busy as b:
+            yield {
+                "event": "error",
+                "data": f"{b}; try again in {b.retry_after}s",
+                "code": 429,
+                "retry_after": b.retry_after,
+            }
+            return
         # The lease is taken for the whole turn -- retrieval and generation both compete
         # with background reading for the same models.
         await mark_chat_active(redis)
@@ -173,7 +199,8 @@ async def run_turn(
             foreign=any(s.cartridge for s in state.sources),
         )
         # A stance is an invitation to interpret; give the sampler room to take it.
-        temperature = 0.85 if stance else 0.6
+        if temperature is None:
+            temperature = 0.85 if stance else 0.6
         buffer: list[str] = []
 
         # Prefill on a local model can exceed the lease TTL before the first token
@@ -187,7 +214,7 @@ async def run_turn(
         heartbeat = asyncio.create_task(keepalive())
         try:
             async for kind, piece in answer_mod.stream_answer(
-                client, model, messages, temperature=temperature
+                client, model, messages, temperature=temperature, seed=seed
             ):
                 if kind == "thinking":
                     yield {"event": "thinking", "data": piece}
@@ -249,6 +276,8 @@ async def run_turn(
         log.exception("chat turn failed")
         yield {"event": "error", "data": str(exc)[:500]}
     finally:
+        if held:
+            gate.release(caller)
         await client.aclose()
         await mark_chat_done(redis)
         await redis.aclose()

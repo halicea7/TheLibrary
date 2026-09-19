@@ -31,6 +31,7 @@ from library_agent.config import settings
 from library_agent.db.models import Chunk, Document, Embedding
 from library_agent.db.purge import count_orphans
 from library_agent.db.session import SessionDep, session_scope
+from library_agent.llm.liveness import gate, liveness
 from library_agent.llm.ollama import Ollama
 from library_agent.ops import incidents
 
@@ -43,10 +44,12 @@ WEB_DIR = Path(__file__).resolve().parents[3] / "web"
 async def lifespan(_: FastAPI):
     settings().storage_dir.mkdir(parents=True, exist_ok=True)
     incidents.install_handler("api")
+    liveness.start()
     # Load the cross-encoder off the request path. It takes ~45s from cold and would
     # otherwise be paid by whoever runs the first reranked query.
     task = asyncio.create_task(asyncio.to_thread(_warm_reranker))
     yield
+    liveness.stop()
     task.cancel()
 
 
@@ -110,6 +113,9 @@ async def health(db: SessionDep) -> HealthOut:
         resident, reachable = [], False
     cfg = settings()
     return HealthOut(
+        model_answering=liveness.alive,
+        model_liveness=liveness.snapshot(),
+        generations=gate.snapshot(),
         ok=reachable and all(v == 0 for v in orphans.values()),
         documents=docs,
         chunks=chunks,

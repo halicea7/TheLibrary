@@ -32,6 +32,7 @@ from library_agent.db.models import Document
 from library_agent.db.session import session_scope
 from library_agent.library.cartridge import cartridge_provenance
 from library_agent.llm.lease import mark_chat_active, mark_chat_done, redis_client
+from library_agent.llm.liveness import Busy, gate, liveness
 from library_agent.llm.ollama import Ollama
 from library_agent.reading.prompts import SYSTEM_LIBRARIAN
 from library_agent.retrieval.hybrid import SearchHit
@@ -164,6 +165,7 @@ async def compose(
     category_ids: list[uuid.UUID] | None = None,
     cartridge_ids: list[uuid.UUID] | None = None,
     scope_label: str = "",
+    caller: str = "ui",
 ) -> AsyncIterator[dict]:
     """Yields SSE-shaped events: plan → for each section (section, sources, token*,
     section_done) → done. The lease is held throughout: this is one long piece of work
@@ -174,7 +176,21 @@ async def compose(
     redis = redis_client()
     client = Ollama()
     comp = Composition(brief=brief)
+    held = False
     try:
+        if not liveness.alive:
+            yield {
+                "event": "error",
+                "data": f"the model is not answering: {liveness.detail}",
+                "code": 503,
+            }
+            return
+        try:
+            await gate.acquire(caller)
+            held = True
+        except Busy as b:
+            yield {"event": "error", "data": f"{b}; try again in {b.retry_after}s", "code": 429}
+            return
         await mark_chat_active(redis)
         scope = f"Scope: only {scope_label}." if scope_label else "Scope: the whole library."
         plan = await client.structured(
@@ -357,6 +373,8 @@ async def compose(
         await record_exception(exc, source="chat", context={"compose": brief[:200]})
         yield {"event": "error", "data": str(exc)[:500]}
     finally:
+        if held:
+            gate.release(caller)
         await client.aclose()
         await mark_chat_done(redis)
         await redis.aclose()

@@ -15,6 +15,7 @@ from library_agent.db.models import Document
 from library_agent.db.purge import count_orphans, gc_orphan_vectors, gc_store
 from library_agent.db.session import SessionDep
 from library_agent.llm import rerank
+from library_agent.llm.liveness import gate, liveness
 from library_agent.ops import incidents
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -54,6 +55,9 @@ async def show(db: SessionDep) -> dict:
             "postgres": True,  # we answered this request through it
             "redis": redis_ok,
             "ollama": ollama_ok,
+            "model_answering": liveness.alive,
+            "model_liveness": liveness.snapshot(),
+            "generations": gate.snapshot(),
             "ollama_url": cfg.ollama_url,
             "resident_models": resident,
             "reranker": rerank.available(),

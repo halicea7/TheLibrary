@@ -651,3 +651,20 @@ median against 5.0) and used more sources per answer. The unknowable question wa
 declined every time; the general model's decline cited the one breakfast in the library
 (a squirrel's, in a T5 example) and said it did not apply -- my script first scored that
 as suspect for having a citation, which was the script's mistake, not the librarian's.
+
+
+## Follow-on: running it for others
+
+"I just want the engine to be as consistent as possible since other users are going to
+start using this." The content was already consistent (measured above); what a shared
+engine also needs is to fail plainly. `llm/liveness.py`: a one-token probe every two
+minutes, because today's wedge passed the reachability check -- `/api/tags` answered,
+both models resident, nothing generated -- and every caller would have hung for the full
+timeout. While the probe fails, `ask` and `compose` return 503 with the reason at once.
+A gate: a small global limit, one in-flight generation per token (the person at the desk
+is exempt), a queue timeout into 429 with Retry-After. A deadline on the JSON `ask`
+(504). A cooler default temperature for API callers, and a `deterministic` flag (seed,
+temperature 0) that is honestly best-effort: through the full path four of five runs were
+byte-identical, the odd one the first call after a model swap, and Ollama on the raw
+generate showed the same two-of-three -- GPU batching, not us. The "passages are data"
+line in the system prompt is now always on, since documents come from other people.

@@ -185,6 +185,21 @@ async def main():
         msgs = (await c.get(f"/api/conversations/{convs[0]['id']}")).json()
         ok("a conversation replays with its sources", msgs and msgs[0]["role"] == "user" and any(m["role"] == "assistant" and isinstance(m["sources"], dict) for m in msgs))
 
+    print("== running it for others ==")
+    async with httpx.AsyncClient(base_url=API, timeout=300) as c:
+        h = (await c.get("/api/health")).json()
+        ok("liveness probe has run and the model answers", h.get("model_answering") is True and h["model_liveness"].get("checked_seconds_ago") is not None, f"probe {h['model_liveness'].get('latency')}s")
+        hdr = {"Authorization": "Bearer verify-gate-token"}
+        q = {"question":"Summarise RAPTOR in three sentences.","remember":False,"subjects":["Machine Learning"]}
+        first = asyncio.create_task(c.post("/api/v1/ask", json=q, headers=hdr))
+        await asyncio.sleep(0.4)
+        second = await c.post("/api/v1/ask", json={**q, "question": "Summarise DPR in three sentences."}, headers=hdr)
+        r1 = await first
+        ok("gate: one in flight per token", r1.status_code == 200 and second.status_code == 429 and "Retry-After" in second.headers, f"{r1.status_code} / {second.status_code}")
+        d1 = (await c.post("/api/v1/ask", json={"question":"In one sentence, what does RAPTOR build?","remember":False,"deterministic":True,"subjects":["Machine Learning"]})).json()
+        d2 = (await c.post("/api/v1/ask", json={"question":"In one sentence, what does RAPTOR build?","remember":False,"deterministic":True,"subjects":["Machine Learning"]})).json()
+        ok("deterministic asks agree on citations", sorted(x["n"] for x in d1["citations"]) == sorted(x["n"] for x in d2["citations"]), "identical text" if d1["answer"] == d2["answer"] else "same citations, text differs (GPU nondeterminism)")
+
     print("== other tools: /api/v1 ==")
     async with httpx.AsyncClient(base_url=API, timeout=600) as c:
         shv = (await c.get("/api/v1/shelves")).json()

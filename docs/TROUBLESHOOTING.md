@@ -38,6 +38,32 @@ Do: re-open the tunnel in its own terminal, then confirm with
 `curl -sf localhost:11434/api/tags`. Reading jobs resume on their own; a chat turn that
 failed must be asked again. Do not start, stop or kill a local Ollama.
 
+## The masthead says "the model is not answering" / API returns 503
+
+Symptom: `/api/health` shows `model_answering: false`; `ask` returns 503 immediately;
+Settings › services shows the probe's last result and how long ago.
+
+Cause: the one-token liveness probe failed. Ollama's HTTP is up but generations do not
+return -- the wedge described below -- or the tunnel dropped mid-session.
+
+Do: check the tunnel (`curl -sf localhost:11434/api/tags`), then whether a generation
+returns at all (`curl -s --max-time 30 localhost:11434/api/generate -d
+'{"model":"qwen3:30b-a3b","prompt":"hi","stream":false}'`). If the tunnel is fine and
+nothing generates, Ollama must be restarted on the remote box. The probe re-checks every
+30 s while down and the library recovers on its own once generations return.
+
+## API returns 429 "the model is busy"
+
+Symptom: a tool gets 429 with a `Retry-After` header.
+
+Cause: the gate. One generation in flight per token, a small global limit, and a queue
+timeout. The caller either already has a generation running or waited longer than the
+timeout for a slot.
+
+Do: honour `Retry-After`; do not fan out concurrent requests from one token. Raise
+`LIBRARY_MAX_CONCURRENT_GENERATIONS` only if the Ollama host has headroom -- it
+serialises generations regardless, so more slots mostly means longer waits.
+
 ## Ollama is reachable but a call hangs or times out
 
 Symptom: `ReadTimeout` after 300 s on a structured call, or a chat that never produces a

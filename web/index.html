@@ -1069,7 +1069,8 @@ async function holdings() {
     $('#holdings').innerHTML =
       `${h.documents} volumes<span class="sep">/</span>${h.chunks.toLocaleString()} passages` +
       `<span class="sep">/</span>${h.embeddings.toLocaleString()} vectors` +
-      (orphans ? `<span class="sep">/</span><span style="color:var(--amber)">${orphans} orphaned</span>` : '');
+      (orphans ? `<span class="sep">/</span><span style="color:var(--amber)">${orphans} orphaned</span>` : '') +
+      (h.model_answering === false ? `<span class="sep">/</span><span style="color:var(--amber)" title="${esc(h.model_liveness?.detail || '')}">the model is not answering</span>` : '');
   } catch { $('#holdings').textContent = 'the library is not answering'; }
 }
 
@@ -1996,6 +1997,7 @@ async function loadSettings() {
         <span data-ok="${sv.postgres}">Postgres</span>
         <span data-ok="${sv.redis}">Redis</span>
         <span data-ok="${sv.ollama}">Ollama · ${esc(sv.ollama_url)}${sv.ollama && sv.resident_models.length ? ' · resident: ' + sv.resident_models.map(esc).join(', ') : ''}</span>
+        <span data-ok="${sv.model_answering}" title="${esc(sv.model_liveness?.detail || '')}">Model answering${sv.model_liveness?.latency != null ? ' · probe ' + sv.model_liveness.latency + 's' : ''}${sv.model_liveness?.checked_seconds_ago != null ? ' · checked ' + sv.model_liveness.checked_seconds_ago + 's ago' : ''}${sv.generations ? ' · ' + sv.generations.in_flight + ' in flight' : ''}</span>
         <span data-ok="${sv.reranker}">Reranker (local)</span>
       </div>
     </div>

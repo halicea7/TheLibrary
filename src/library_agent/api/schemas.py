@@ -74,6 +74,9 @@ class SearchResponse(BaseModel):
 
 class HealthOut(BaseModel):
     ok: bool
+    model_answering: bool = True  # the liveness probe, not mere reachability
+    model_liveness: dict = {}
+    generations: dict = {}
     documents: int
     chunks: int
     embeddings: int

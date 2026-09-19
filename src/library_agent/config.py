@@ -126,6 +126,21 @@ class Settings(BaseSettings):
     def tokens(self) -> set[str]:
         return {t.strip() for t in self.api_tokens.split(",") if t.strip()}
 
+    # --- running it for others ---
+    # A one-token probe every so often: reachability is not liveness (a wedged Ollama still
+    # answers /api/tags). When the probe fails, generations are refused with a 503 at once.
+    liveness_interval_seconds: int = 120
+    liveness_timeout_seconds: float = 25.0
+    # The gate: how many generations may be in flight at once across everyone, how many
+    # per client, and how long a caller waits for a slot before a 429.
+    max_concurrent_generations: int = 2
+    max_generations_per_client: int = 1
+    queue_timeout_seconds: int = 60
+    # Callers of the JSON API get a cooler default than the UI: they want the same answer
+    # twice more than they want a lively one.
+    api_temperature: float = 0.3
+    api_deadline_seconds: int = 240
+
     # --- prompt versioning ---
     # Bumping a version marks matching artifacts stale so only those regenerate.
     prompt_versions: dict[str, str] = Field(

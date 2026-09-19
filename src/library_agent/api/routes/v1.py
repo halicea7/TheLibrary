@@ -7,9 +7,11 @@ should be able to say "ask our docs" without first learning our ids."""
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -33,6 +35,14 @@ class AskIn(BaseModel):
     stance: str | None = None
     conversation_id: uuid.UUID | None = None
     remember: bool = Field(default=True, description="keep the thread for follow-ups")
+    temperature: float | None = Field(
+        default=None, ge=0, le=1.5, description="default LIBRARY_API_TEMPERATURE"
+    )
+    deterministic: bool = Field(
+        default=False,
+        description="temperature 0 and a fixed seed: the same question gives the same text",
+    )
+    deadline_seconds: int | None = Field(default=None, ge=10, le=1800)
 
 
 class Citation(BaseModel):
@@ -96,10 +106,20 @@ def _model(name: str | None) -> str | None:
     return cfg.chat_model_options.get(name, name)
 
 
+def _caller(request: Request) -> str:
+    """Who is asking, for the gate: the bearer token if one was sent, else the address."""
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return "token:" + hashlib.sha256(auth[7:].strip().encode()).hexdigest()[:12]
+    host = request.client.host if request.client else ""
+    return "ui" if host in ("127.0.0.1", "::1", "localhost") else f"addr:{host}"
+
+
 @router.post("/ask", response_model=AskOut)
-async def ask(req: AskIn) -> AskOut:
+async def ask(req: AskIn, request: Request) -> AskOut:
     """One whole turn, as JSON. Every `[n]` in the answer is a citation below; anything
-    the model cited that could not be verified against the shelf has been stripped."""
+    the model cited that could not be verified against the shelf has been stripped.
+    503 when the model is not answering, 429 when the gate is full, 504 past the deadline."""
     if req.stance and req.stance not in STANCES:
         raise HTTPException(422, f"unknown stance {req.stance!r}; one of {sorted(STANCES)}")
     async with session_scope() as db:
@@ -116,19 +136,44 @@ async def ask(req: AskIn) -> AskOut:
         conv.cartridge_ids = [str(room)] if room else None
         conversation_id = conv.id
 
-    answer, sources, model, done, error = "", [], "", {}, None
-    async for ev in run_turn(conversation_id, req.question, stance=req.stance):
-        kind, data = ev["event"], ev["data"]
-        if kind == "meta":
-            model = data.get("model", "")
-        elif kind == "sources":
-            sources = data
-        elif kind == "done":
-            answer, done = data["answer"], data
-        elif kind == "error":
-            error = data
+    cfg = settings()
+    answer, sources, model, done, error, code, retry = "", [], "", {}, None, 502, None
+    temperature = (
+        0.0
+        if req.deterministic
+        else (req.temperature if req.temperature is not None else cfg.api_temperature)
+    )
+    seed = 7 if req.deterministic else None
+
+    async def collect() -> None:
+        nonlocal answer, sources, model, done, error, code, retry
+        async for ev in run_turn(
+            conversation_id,
+            req.question,
+            stance=req.stance,
+            temperature=temperature,
+            seed=seed,
+            caller=_caller(request),
+        ):
+            kind, data = ev["event"], ev["data"]
+            if kind == "meta":
+                model = data.get("model", "")
+            elif kind == "sources":
+                sources = data
+            elif kind == "done":
+                answer, done = data["answer"], data
+            elif kind == "error":
+                error, code, retry = data, ev.get("code", 502), ev.get("retry_after")
+
+    budget = req.deadline_seconds or cfg.api_deadline_seconds
+    try:
+        await asyncio.wait_for(collect(), timeout=budget)
+    except TimeoutError as exc:
+        raise HTTPException(
+            504, f"no answer within {budget}s; the model may be busy or wedged"
+        ) from exc
     if error:
-        raise HTTPException(502, error)
+        raise HTTPException(code, error, headers={"Retry-After": str(retry)} if retry else None)
     cited = set(done.get("cited") or [])
     return AskOut(
         answer=answer,
@@ -257,7 +302,7 @@ class ComposeIn(BaseModel):
 
 
 @router.post("/compose")
-async def compose_json(req: ComposeIn) -> dict:
+async def compose_json(req: ComposeIn, request: Request) -> dict:
     """A whole document, written from the library with verified citations, as JSON:
     the markdown, its references, and the citation tally. Slow -- one retrieval and one
     generation per section -- so expect minutes, not seconds."""
@@ -269,7 +314,7 @@ async def compose_json(req: ComposeIn) -> dict:
         room = await _room_id(db, req.room)
         subjects = await _subject_ids(db, req.subjects)
     result: dict | None = None
-    error = None
+    error, code = None, 502
     async for ev in comp.compose(
         req.brief,
         model=_model(req.model),
@@ -277,13 +322,14 @@ async def compose_json(req: ComposeIn) -> dict:
         category_ids=subjects or None,
         cartridge_ids=[room] if room else None,
         scope_label=req.room or ", ".join(req.subjects),
+        caller=_caller(request),
     ):
         if ev["event"] == "done":
             result = ev["data"]
         elif ev["event"] == "error":
-            error = ev["data"]
+            error, code = ev["data"], ev.get("code", 502)
     if error or not result:
-        raise HTTPException(502, error or "composition produced nothing")
+        raise HTTPException(code if error else 502, error or "composition produced nothing")
     out = {
         "title": result["title"],
         "markdown": result["markdown"],

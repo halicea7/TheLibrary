@@ -500,3 +500,11 @@ attribute, so the desk bar leaked into Find -- a global `[hidden] { display:none
 waited its turn was recorded as an incident twice (explicit call plus the log handler).
 An exception recorded explicitly is now marked so the handler skips it, and a document
 that is gone by the time its job runs is not an incident at all.
+
+**The tour.** "Be dramatic." When a search lands, the camera takes a beat on the whole
+region, then dives on the first finding -- tight zoom, a spin impulse that decays so it
+arrives with a swing, the dot ringed and pulsing, a leader line to the title set at 19px
+serif with the shelf beneath -- and moves to the next every three seconds, the matching
+row lit in the list. Hovering a row takes the wheel; leaving hands it back after a beat.
+The camera eases at ~95% in half a second, which is fast enough to feel like a cut and
+slow enough to read as motion.

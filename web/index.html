@@ -412,7 +412,7 @@ select, .toggle {
 /* ── search results ───────────────────────────────────────────────────── */
 .hit { padding:13px 10px; margin:0 -10px; border-bottom:1px solid var(--rule-soft); max-width:calc(76ch + 20px); cursor:pointer; border-radius:3px;
        background:linear-gradient(90deg, color-mix(in srgb, var(--bg) 78%, transparent) 0 80%, transparent); transition:background .12s; }
-.hit:hover { background:color-mix(in srgb, var(--verdigris) 9%, var(--bg)); }
+.hit:hover, .hit.current { background:color-mix(in srgb, var(--verdigris) 9%, var(--bg)); box-shadow:inset 2px 0 0 var(--verdigris); }
 .hit:last-child { border-bottom:0; }
 .hit-h { display:flex; align-items:baseline; gap:9px; }
 .hit-t { font:500 13.5px/1.4 var(--serif); }
@@ -678,6 +678,9 @@ const web = {
   scanning: false, scanT: 0, hueOf: {}, theta: 0, last: 0, R: 240, extent: 0,
   // The camera: where it looks and how close. Find moves it to the hits; Ask leaves it wide.
   cam: { x: 0, y: 0, z: 0, zoom: 1 }, camTo: { x: 0, y: 0, z: 0, zoom: 1 }, hovered: null,
+  // The tour: findings visited one after another, each with a quick spin into view. A
+  // hover takes the wheel; letting go hands it back.
+  tour: { ids: [], i: -1, timer: null, manual: false, at: null }, spinV: 0, anchor: .55,
   HUES: [206, 34, 96, 326, 172, 44, 262, 0],
   reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
   async load() {
@@ -768,20 +771,55 @@ const web = {
     const E = this.extent || this.R;
     const f = 720, s = f / (f + z + E * .6);
     const fit = Math.min(this.w / (E * 2.6), this.h / (E * 2.3)) * c.zoom;
-    return { x: this.w * .55 + x * s * fit, y: this.h * .5 + y * s * fit, s: s * fit, depth: (z + this.R) / (2 * this.R) };
+    return { x: this.w * this.anchor + x * s * fit, y: this.h * .5 + y * s * fit, s: s * fit, depth: (z + this.R) / (2 * this.R) };
   },
   // Glide the camera to the centroid of these volumes, close enough that their spread
   // fills the view. No ids: back out to the whole cloud.
   focus(ids) {
-    const ns = (ids || []).map(id => this.byId[id]).filter(Boolean);
-    if (!ns.length) { this.camTo = { x: 0, y: 0, z: 0, zoom: 1 }; this.wake(); return; }
+    clearTimeout(this.tour.timer);
+    const list = [...new Set((ids || []).filter(id => this.byId[id]))];
+    this.tour = { ids: list, i: -1, timer: null, manual: false, at: null };
+    if (!list.length) { this.camTo = { x: 0, y: 0, z: 0, zoom: 1 }; this.anchor = .55; this.hovered = null; this.wake(); return; }
+    // A beat on the whole region first, then the tour begins.
+    const ns = list.map(id => this.byId[id]);
     const cx = ns.reduce((a, n) => a + n.x, 0) / ns.length, cy = ns.reduce((a, n) => a + n.y, 0) / ns.length, cz = ns.reduce((a, n) => a + n.z, 0) / ns.length;
     const spread = Math.max(30, ...ns.map(n => Math.hypot(n.x - cx, n.y - cy, n.z - cz)));
     const E = this.extent || this.R;
-    this.camTo = { x: cx, y: cy, z: cz, zoom: Math.max(1, Math.min(3.4, E / (spread * 1.6 + 40))) };
+    this.camTo = { x: cx, y: cy, z: cz, zoom: Math.max(1.2, Math.min(3.4, E / (spread * 1.6 + 40))) };
+    this.anchor = .62;
+    this.tour.timer = setTimeout(() => this.next(), 900);
     this.wake();
   },
-  hover(id) { this.hovered = id ? this.byId[id] || null : null; this.wake(); },
+  // Dive on one volume: tight, off to the right so the list stays clear, with a quick
+  // spin so it arrives rather than merely enlarges.
+  look(id, { spin = true } = {}) {
+    const n = this.byId[id]; if (!n) return;
+    const E = this.extent || this.R;
+    this.camTo = { x: n.x, y: n.y, z: n.z, zoom: Math.max(3.2, Math.min(6, E / 55)) };
+    this.anchor = .68;
+    this.hovered = n; this.tour.at = id;
+    if (spin && !this.reduced) this.spinV = 2.4 * (Math.random() < .5 ? -1 : 1);
+    n.lit = Math.max(n.lit, 1);
+    for (const el of document.querySelectorAll('.hit')) el.classList.toggle('current', el.dataset.doc === id);
+    this.wake();
+  },
+  next() {
+    const tr = this.tour;
+    if (!tr.ids.length || tr.manual || view !== 'find') return;
+    tr.i = (tr.i + 1) % tr.ids.length;
+    this.look(tr.ids[tr.i]);
+    clearTimeout(tr.timer);
+    tr.timer = setTimeout(() => this.next(), 3200);
+  },
+  // Hovering a finding takes the wheel; leaving gives the tour a moment, then it resumes.
+  hover(id) {
+    const tr = this.tour;
+    clearTimeout(tr.timer);
+    if (id) { tr.manual = true; tr.i = Math.max(0, tr.ids.indexOf(id)); this.look(id); return; }
+    tr.manual = false;
+    if (tr.ids.length) tr.timer = setTimeout(() => this.next(), 1800);
+    else { this.hovered = null; this.wake(); }
+  },
   draw(now) {
     const c = this.ctx; c.clearRect(0, 0, this.w, this.h);
     const dark = !document.documentElement.dataset.theme ? matchMedia('(prefers-color-scheme: dark)').matches : document.documentElement.dataset.theme === 'dark';
@@ -822,16 +860,31 @@ const web = {
       if (n.tier >= 2) { c.lineWidth = .7; c.strokeStyle = c.fillStyle; c.beginPath(); c.arc(p.x, p.y, n.r * p.s + 2, 0, Math.PI * 2); c.stroke(); }
     }
     c.globalAlpha = 1;
-    // the hovered finding: picked out in verdigris, named
+    // the finding under the eye: ringed in verdigris, a pulse, a leader line, and the
+    // title set large enough to read from across the room
     if (this.hovered && P.has(this.hovered)) {
-      const n = this.hovered, p = P.get(n), r = Math.max(3, n.r * p.s + 4);
-      c.strokeStyle = verd; c.lineWidth = 1.5; c.globalAlpha = .95;
+      const n = this.hovered, p = P.get(n), r = Math.max(4, n.r * p.s + 5);
+      const pulse = (now / 900) % 1;
+      c.strokeStyle = verd; c.lineWidth = 1.6; c.globalAlpha = .95;
       c.beginPath(); c.arc(p.x, p.y, r, 0, Math.PI * 2); c.stroke();
-      c.beginPath(); c.arc(p.x, p.y, r + 6, 0, Math.PI * 2); c.globalAlpha = .35; c.stroke();
-      c.globalAlpha = .9; c.fillStyle = verd; c.font = '11px ui-monospace, Menlo, monospace';
-      const label = (n.t || '').slice(0, 48); const tw = c.measureText(label).width;
-      const lx = Math.min(this.w - tw - 8, p.x + r + 8), ly = p.y - r - 6;
-      c.fillText(label, lx, Math.max(12, ly));
+      c.lineWidth = 1; c.globalAlpha = .5 * (1 - pulse);
+      c.beginPath(); c.arc(p.x, p.y, r + 4 + pulse * 26, 0, Math.PI * 2); c.stroke();
+      // label block: to the right of the dot when there is room, else to the left
+      const fg = css.getPropertyValue('--fg').trim(), dim = css.getPropertyValue('--dim').trim();
+      const title = (n.t || '').slice(0, 60), sub = [n.top, n.sub].filter(Boolean).join(' › ');
+      c.font = '600 19px "Iowan Old Style", Charter, Georgia, serif';
+      const tw = c.measureText(title).width;
+      c.font = '11px ui-monospace, Menlo, monospace';
+      const sw = c.measureText(sub).width;
+      const bw = Math.max(tw, sw), right = p.x + r + 44 + bw < this.w - 12;
+      const lx = right ? p.x + r + 44 : p.x - r - 44 - bw, ly = p.y - 8;
+      c.strokeStyle = verd; c.globalAlpha = .7; c.lineWidth = 1;
+      c.beginPath(); c.moveTo(right ? p.x + r + 2 : p.x - r - 2, p.y); c.lineTo(right ? lx - 10 : lx + bw + 10, p.y); c.stroke();
+      c.globalAlpha = .96; c.fillStyle = fg;
+      c.font = '600 19px "Iowan Old Style", Charter, Georgia, serif';
+      c.fillText(title, lx, ly);
+      c.fillStyle = dim; c.font = '11px ui-monospace, Menlo, monospace';
+      c.fillText(sub, lx, ly + 18);
       c.globalAlpha = 1;
     }
     // retrieval: a ring travelling out through the cloud, verdigris
@@ -847,12 +900,14 @@ const web = {
     this.size();
     const dt = this.last ? Math.min(.1, (now - this.last) / 1000) : 0; this.last = now;
     if (!this.reduced && this.canvas.dataset.on === 'true') this.theta += dt * (2 * Math.PI / 110);  // one turn in ~two minutes
+    // The spin: an impulse that decays, so a dive arrives with a swing and settles.
+    this.theta += this.spinV * dt; this.spinV *= Math.pow(.05, dt);
     if (this.alpha > .003) this.tick();
-    const c = this.cam, g = this.camTo, k = 1 - Math.pow(.02, dt || .016);
+    const c = this.cam, g = this.camTo, k = 1 - Math.pow(.004, dt || .016);  // ~95% of the way in half a second
     c.x += (g.x - c.x) * k; c.y += (g.y - c.y) * k; c.z += (g.z - c.z) * k; c.zoom += (g.zoom - c.zoom) * k;
     this.draw(now);
     const on = this.canvas.dataset.on === 'true';
-    const moving = Math.abs(this.cam.zoom - this.camTo.zoom) > .002 || Math.hypot(this.cam.x - this.camTo.x, this.cam.y - this.camTo.y, this.cam.z - this.camTo.z) > .5;
+    const moving = Math.abs(this.cam.zoom - this.camTo.zoom) > .002 || Math.hypot(this.cam.x - this.camTo.x, this.cam.y - this.camTo.y, this.cam.z - this.camTo.z) > .5 || Math.abs(this.spinV) > .01;
     if (on || this.alpha > .003 || moving) this.frame = requestAnimationFrame(t => this.loop(t));
     else this.last = 0;
   },
@@ -898,7 +953,7 @@ function setView(v) {
   if (v === 'make') renderMake();
   if (v === 'settings') loadSettings();
   $('#web').dataset.on = String((v === 'ask' || v === 'find') && web.nodes.length > 0);
-  if (v !== 'find') { web.focus(null); web.hover(null); }
+  if (v !== 'find') { clearTimeout(web.tour.timer); web.focus(null); }
   web.wake();
   e.focus();
 }
@@ -1530,7 +1585,7 @@ async function runFind(q) {
   const found = [...new Set(r.hits.map(h => h.document_id))];
   web.focus(found); web.light(found); web.hover(null);
   $('#view-find').innerHTML = r.hits.length ? r.hits.map(h => `
-    <div class="hit" onmouseenter="web.hover('${h.document_id}')" onmouseleave="web.hover(null)" onclick="openVolume('${h.document_id}')" title="Open the volume">
+    <div class="hit" data-doc="${h.document_id}" onmouseenter="web.hover('${h.document_id}')" onmouseleave="web.hover(null)" onclick="openVolume('${h.document_id}')" title="Open the volume">
       <div class="hit-h">
         <span class="hit-t">${esc(h.document_title)}</span>
         ${h.page ? `<span class="hit-pg">p.${h.page}</span>` : ''}

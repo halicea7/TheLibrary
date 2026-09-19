@@ -166,6 +166,13 @@ async def main():
         ok("no orphans after eject", sum(h2["orphan_vectors"].values())==0 and h2["orphan_vectors"].get("stray_files",0)==0, f"{h2['orphan_vectors']}")
         ok("document count restored", h2["documents"]==h["documents"])
 
+    print("== conversations ==")
+    async with httpx.AsyncClient(base_url=API, timeout=60) as c:
+        convs = (await c.get("/api/conversations?limit=10")).json()
+        ok("conversations list with titles and times", convs and all(x["title"] and x["last_at"] and x["messages"] >= 2 for x in convs), f"{len(convs)} listed")
+        msgs = (await c.get(f"/api/conversations/{convs[0]['id']}")).json()
+        ok("a conversation replays with its sources", msgs and msgs[0]["role"] == "user" and any(m["role"] == "assistant" and isinstance(m["sources"], dict) for m in msgs))
+
     print("== settings & incidents ==")
     async with httpx.AsyncClient(base_url=API, timeout=600) as c:
         st = (await c.get("/api/settings")).json()

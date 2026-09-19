@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncIterator
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sse_starlette.sse import EventSourceResponse
 
 from library_agent.chat.answer import STANCES
@@ -39,6 +40,9 @@ class ConversationOut(BaseModel):
     conversational: bool
     model: str | None
     messages: int
+    created_at: datetime | None = None
+    last_at: datetime | None = None
+    stance: str | None = None
 
 
 class MessageOut(BaseModel):
@@ -85,6 +89,9 @@ async def chat(req: ChatRequest) -> EventSourceResponse:
             conv.model = req.model
         if req.conversational != conv.conversational:
             conv.conversational = req.conversational
+        if not conv.title:
+            # The first question names the conversation; nothing cleverer is needed.
+            conv.title = " ".join(req.message.split())[:90]
         # Stored on the conversation so every turn is scoped the same way.
         cat_ids = await expand_category_ids(db, req.category_ids or [])
         conv.category_ids = [str(x) for x in cat_ids] if cat_ids else None
@@ -119,19 +126,59 @@ async def list_conversations(db: SessionDep, limit: int = 20) -> list[Conversati
     )
     out = []
     for c in convs:
-        n = len(
-            list(
-                (
-                    await db.execute(select(Message.id).where(Message.conversation_id == c.id))
-                ).scalars()
+        n, last = (
+            await db.execute(
+                select(func.count(), func.max(Message.created_at)).where(
+                    Message.conversation_id == c.id
+                )
             )
-        )
+        ).one()
+        if not n:
+            continue  # a conversation nobody spoke in is not worth listing
+        last_stance = (
+            await db.execute(
+                select(Message.sources["stance"].astext)
+                .where(Message.conversation_id == c.id, Message.role == "assistant")
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            )
+        ).scalar()
+        title = c.title
+        if not title:
+            # Conversations from before titles existed: name them after their first question.
+            title = (
+                await db.execute(
+                    select(Message.content)
+                    .where(Message.conversation_id == c.id, Message.role == "user")
+                    .order_by(Message.created_at)
+                    .limit(1)
+                )
+            ).scalar()
+            title = " ".join((title or "").split())[:90] or None
         out.append(
             ConversationOut(
-                id=c.id, title=c.title, conversational=c.conversational, model=c.model, messages=n
+                id=c.id,
+                title=title,
+                conversational=c.conversational,
+                model=c.model,
+                messages=n,
+                created_at=c.created_at,
+                last_at=last,
+                stance=last_stance,
             )
         )
+    out.sort(key=lambda x: x.last_at or x.created_at, reverse=True)
     return out
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: uuid.UUID, db: SessionDep) -> dict[str, bool]:
+    conv = await db.get(Conversation, conversation_id)
+    if not conv:
+        raise HTTPException(404, "no such conversation")
+    await db.delete(conv)  # messages cascade
+    await db.commit()
+    return {"deleted": True}
 
 
 @router.get("/conversations/{conversation_id}", response_model=list[MessageOut])

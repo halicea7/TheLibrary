@@ -278,7 +278,7 @@ select, .toggle {
    edges where volumes cite each other, share a thread, or sit close in meaning. It
    thickens as the library grows and lights where passages are being retrieved. */
 #web { position:absolute; left:0; right:0; z-index:0; pointer-events:none; opacity:0; transition:opacity 1.2s ease; }
-.views { position:relative; z-index:1; }
+.views { position:relative; z-index:3; }  /* above the pane, so its menus are too */
 #web[data-on=true] { opacity:1; }
 .turn { position:relative; }
 /* A faint wash behind the reading column keeps the text legible over the web. */
@@ -295,6 +295,22 @@ select, .toggle {
 .subject:hover { color:var(--fg); border-color:var(--faint); }
 .subject[aria-pressed=true] { color:var(--bg); background:var(--verdigris); border-color:var(--verdigris); }
 .subject i { font-style:normal; font-family:var(--mono); font-size:10px; opacity:.65; margin-left:4px; }
+
+/* ── the desk bar: which conversation, new, history ───────────────────── */
+.deskbar { display:flex; align-items:baseline; gap:14px; margin:-4px 0 14px; font:11.5px/1.5 var(--sans); color:var(--faint); }
+.deskbar .title { font:italic 12.5px/1.5 var(--serif); color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:52ch; }
+.deskbar .right { margin-left:auto; display:flex; gap:12px; }
+.history { margin:0 0 18px; border:1px solid var(--rule); border-radius:4px; background:color-mix(in srgb, var(--panel) 85%, transparent); max-width:78ch; }
+.history .row { display:grid; grid-template-columns:1fr auto auto; gap:6px 14px; align-items:baseline; padding:9px 12px; border-bottom:1px solid var(--rule-soft); cursor:pointer; }
+.history .row:last-child { border-bottom:0; }
+.history .row:hover { background:var(--sunk); }
+.history .row[data-current=true] .t { color:var(--verdigris); }
+.history .t { font:14px/1.45 var(--serif); color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.history .m { font:10.5px/1.5 var(--mono); color:var(--faint); white-space:nowrap; }
+.history .m i { font-style:normal; color:var(--opinion); }
+.history .del { font:11px/1 var(--sans); color:var(--faint); background:none; border:0; cursor:pointer; padding:0; }
+.history .del:hover { color:var(--amber); }
+.history .none { padding:12px; font:12.5px/1.6 var(--sans); color:var(--faint); }
 
 /* ── the conversation ─────────────────────────────────────────────────── */
 .turn { margin-bottom:26px; max-width:none; }
@@ -590,6 +606,14 @@ select, .toggle {
 
     <div class="pane" id="pane">
       <div class="subjects" id="subjects"></div>
+      <div class="deskbar" id="deskbar">
+        <span class="title" id="conv-title">New conversation</span>
+        <span class="right">
+          <button class="linkish" onclick="newChat()" title="Start a fresh conversation; the library forgets this one's thread">new</button>
+          <button class="linkish" id="hist-btn" onclick="toggleHistory()" title="Earlier conversations">history</button>
+        </span>
+      </div>
+      <div class="history" id="history" hidden></div>
       <div id="view-ask"></div>
       <div id="view-find" hidden></div>
       <div id="view-threads" hidden></div>
@@ -834,6 +858,8 @@ function setView(v) {
   const e = $('#entry');
   e.placeholder = placeholderFor(v);
   $('#subjects').hidden = v === 'threads' || v === 'open' || v === 'settings';
+  $('#deskbar').hidden = v !== 'ask';
+  if (v !== 'ask') $('#history').hidden = true;
   if (v === 'threads') loadThreads();
   if (v === 'make') renderMake();
   if (v === 'settings') loadSettings();
@@ -1298,6 +1324,8 @@ function renderAnswer(el, text) {
 async function ask(text) {
   if (busy) return;
   busy = true;
+  $('#history').hidden = true;
+  if (!convId) $('#conv-title').textContent = text.slice(0, 90);
   const intro = $('#view-ask .empty'); if (intro) intro.remove();
   const wrap = document.createElement('div');
   wrap.className = 'turn';
@@ -1380,6 +1408,73 @@ async function ask(text) {
     desk('');
   }
   busy = false;
+}
+
+/* ── conversations ────────────────────────────────────────────────────── */
+const INVITATION = `<div class="empty invitation"><b>Ask the library something.</b>
+<span>It answers from what it has read, and marks in the margin exactly which page each claim
+came from. Anything unmarked is its own reasoning.</span></div>`;
+function newChat() {
+  if (busy) return;
+  convId = null;
+  $('#view-ask').innerHTML = INVITATION;
+  $('#conv-title').textContent = 'New conversation';
+  $('#history').hidden = true;
+  murmur.stop();
+  setView('ask');
+}
+async function toggleHistory() {
+  const h = $('#history');
+  if (!h.hidden) { h.hidden = true; return; }
+  h.hidden = false;
+  h.innerHTML = '<div class="none">Looking back…</div>';
+  let convs = [];
+  try { convs = await (await fetch('/api/conversations?limit=40')).json(); } catch { h.innerHTML = '<div class="none">The library is not answering.</div>'; return; }
+  h.innerHTML = convs.length ? convs.map(c => `
+    <div class="row" data-current="${c.id === convId}" onclick="openChat('${c.id}')">
+      <span class="t">${esc(c.title || 'Untitled')}</span>
+      <span class="m">${Math.floor(c.messages / 2)} turn${c.messages >= 4 ? 's' : ''}${c.stance ? ` · <i>${esc(c.stance)}</i>` : ''}${c.model && c.model !== $('#model').value ? ' · ' + esc(shortModel(c.model)) : ''} · ${fmtWhen(c.last_at || c.created_at)}</span>
+      <button class="del" onclick="event.stopPropagation(); deleteChat('${c.id}', this)" title="Forget this conversation">forget</button>
+    </div>`).join('') : '<div class="none">No conversations yet.</div>';
+}
+function shortModel(m) { return (m || '').split('/').pop().split(':')[0]; }
+async function openChat(id) {
+  if (busy) return;
+  let msgs;
+  try { msgs = await (await fetch('/api/conversations/' + id)).json(); } catch { return; }
+  convId = id;
+  $('#history').hidden = true;
+  const view = $('#view-ask');
+  view.innerHTML = '';
+  let asked = null;
+  for (const m of msgs) {
+    if (m.role === 'user') {
+      asked = document.createElement('div'); asked.className = 'turn';
+      asked.innerHTML = `<div class="asked">${esc(m.content)}${m.rewritten_query ? `<span class="rewrote">looked for: ${esc(m.rewritten_query)}</span>` : ''}</div>`;
+      view.appendChild(asked);
+      continue;
+    }
+    // An answer: rebuild its apparatus from the sources it was saved with.
+    const wrap = asked || Object.assign(document.createElement('div'), { className: 'turn' });
+    if (!asked) view.appendChild(wrap);
+    const st = m.sources?.stance;
+    if (st) { wrap.dataset.stance = st; wrap.insertAdjacentHTML('afterbegin', `<div class="stanced">${esc(stanceMeta.find(s => s.id === st)?.label || st)}</div>`); }
+    const said = document.createElement('div'); said.className = 'said';
+    wrap.appendChild(said);
+    sources = (m.sources?.cited || []).map(c => ({ n: c.n, title: c.title, page: c.page, document_id: c.document_id, section: '' }));
+    renderAnswer(said, m.content);
+    asked = null;
+  }
+  const first = msgs.find(m => m.role === 'user');
+  $('#conv-title').textContent = first ? first.content.slice(0, 90) : 'Conversation';
+  setView('ask');
+  $('#pane').scrollTop = 0;
+}
+async function deleteChat(id, btn) {
+  if (btn.dataset.armed !== '1') { btn.dataset.armed = '1'; btn.textContent = 'forget — sure?'; setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'forget'; }, 4000); return; }
+  await fetch('/api/conversations/' + id, { method: 'DELETE' });
+  if (convId === id) newChat();
+  $('#history').hidden = true; toggleHistory();
 }
 
 /* ── find ─────────────────────────────────────────────────────────────── */
@@ -1748,9 +1843,7 @@ function setStance(id) { stance = id; renderStanceMenu(); toggleStanceMenu(false
 document.addEventListener('click', e => { if (!e.target.closest('.stance')) toggleStanceMenu(false); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') toggleStanceMenu(false); });
 
-$('#view-ask').innerHTML = `<div class="empty invitation"><b>Ask the library something.</b>
-<span>It answers from what it has read, and marks in the margin exactly which page each claim
-came from. Anything unmarked is its own reasoning.</span></div>`;
+$('#view-ask').innerHTML = INVITATION;
 
 setView('ask'); loadModels(); holdings(); loadRack().then(loadShelf); loadSubjects(); loadJobs();
 web.init();

@@ -736,3 +736,15 @@ stops above the caption so the text stays selectable beneath the image. Markdown
 are deliberately not fetched -- a shelved file should not phone the site it came from.
 Reading figures with a vision model into caption chunks stays open; it needs a model
 pulled on the GH.
+
+**A shelf that collected the wrong things.** Twelve volumes under *Machine Learning ›
+Information Retrieval* turned out to be Git, Mercurial, Twitter, MSSQL Server -- one-page
+stubs from the payload collection. Two causes, both in what the placer was told. A stub
+with no document summary was placed from its title alone, and "Git" from its title alone
+"aligns with Information Retrieval"; the placer now offers the volume's opening text when
+there is no summary. And the volume's own current shelf was passed back to it as a tag,
+so a wrong placement was its own evidence on every re-placement; the current shelf is now
+excluded from the tags. A dry run on the four worst placed three of them correctly
+(Attack Techniques, Database Injection, Security Misconfigurations). `reshelve` takes a
+`category_id` to re-place one shelf's volumes without rebuilding the taxonomy, and the
+shelf header grows a *re-shelve these N* button when one shelf is chosen.

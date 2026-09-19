@@ -14,15 +14,21 @@ def paper(tmp_path: Path) -> Path:
     """A one-page paper: a paragraph, a drawn chart, its caption, more prose."""
     doc = pymupdf.open()
     page = doc.new_page(width=595, height=842)
-    page.insert_text((72, 90), "Retrieval quality is measured by mean reciprocal rank.", fontsize=11)
+    page.insert_text(
+        (72, 90), "Retrieval quality is measured by mean reciprocal rank.", fontsize=11
+    )
     shape = page.new_shape()
     shape.draw_rect(pymupdf.Rect(90, 140, 500, 420))
     for i in range(6):
         shape.draw_line((110 + i * 60, 400 - i * 35), (170 + i * 60, 380 - i * 30))
     shape.finish(color=(0, 0, 0), width=1.2)
     shape.commit()
-    page.insert_text((90, 445), "Figure 1: Recall against depth for three fusion weights.", fontsize=9)
-    page.insert_text((72, 520), "The curve flattens after depth twenty in every setting.", fontsize=11)
+    page.insert_text(
+        (90, 445), "Figure 1: Recall against depth for three fusion weights.", fontsize=9
+    )
+    page.insert_text(
+        (72, 520), "The curve flattens after depth twenty in every setting.", fontsize=11
+    )
     # A thin rule: too small to be a figure.
     r = page.new_shape()
     r.draw_line((72, 780), (520, 780))

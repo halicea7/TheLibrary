@@ -36,6 +36,7 @@ from library_agent.db.models import (
     Artifact,
     ArtifactKind,
     Category,
+    Chunk,
     ChunkCategory,
     Document,
     DocumentCategory,
@@ -487,12 +488,25 @@ async def _summary_and_tags(db: AsyncSession, doc: Document) -> tuple[str, list[
             )
         )
     ).scalars().first() or ""
+    if not summary:
+        # A one-page stub may never have earned a summary; its opening is better than a
+        # bare title, which had "Git" shelved under Information Retrieval.
+        summary = (
+            await db.execute(
+                select(Chunk.text)
+                .where(Chunk.document_id == doc.id)
+                .order_by(Chunk.order_index)
+                .limit(1)
+            )
+        ).scalar() or ""
+        summary = " ".join(summary.split())[:1200]
     tags = list(
         (
             await db.execute(
                 select(Category.name)
                 .join(DocumentCategory, DocumentCategory.category_id == Category.id)
                 .where(DocumentCategory.document_id == doc.id)
+                .where(Category.id != doc.shelf_id)  # its current shelf is not evidence
             )
         ).scalars()
     )
@@ -755,8 +769,14 @@ async def reshelve(
     rebuild: bool = True,
     progress=None,
     gate=None,
+    category_id: uuid.UUID | None = None,
 ) -> ReshelveResult:
-    """Build (or keep) the taxonomy, then place every read volume that needs a place."""
+    """Build (or keep) the taxonomy, then place every read volume that needs a place.
+
+    With `category_id`, keep the taxonomy and re-place just that shelf's volumes -- the
+    remedy when one sub-shelf has collected things that do not belong on it."""
+    if category_id:
+        rebuild = False
     own = client is None
     c = client or Ollama()
     res = ReshelveResult()
@@ -769,7 +789,9 @@ async def reshelve(
         if tx.empty():
             return res
         q = select(Document.id).where(Document.tier >= 1)
-        if not rebuild:
+        if category_id:
+            q = q.where(Document.shelf_id.in_(await expand_category_ids(db, [category_id])))
+        elif not rebuild:
             # Unshelved, or on a shelf that is no longer under a top shelf.
             homed = select(Category.id).where(Category.parent_id.is_not(None))
             q = q.where(Document.shelf_id.is_(None) | Document.shelf_id.not_in(homed))

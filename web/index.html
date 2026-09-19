@@ -1183,7 +1183,18 @@ function shelfActs(shown) {
   const where = roomName() ? `in ${roomName()}'s shelf` : subjects.size === 1 ? 'on this shelf' : subjects.size ? 'in these subjects' : 'on the whole shelf';
   el.innerHTML = (unread ? `<button class="linkish" onclick="backfill(this, 1, ${unread})" title="Queue Tier 1 reading for every unread volume ${where}">read the ${unread} unread</button>` : '')
     + (read ? `<button class="linkish" onclick="backfill(this, 2, ${read})" title="Queue Tier 2 annotation for every read volume ${where}">annotate the ${read} read</button>` : '')
-    + (!unread && !read && shown.length ? `<span>everything here is annotated</span>` : '');
+    + (!unread && !read && shown.length ? `<span>everything here is annotated</span>` : '')
+    + (subjects.size === 1 && shown.length ? `<button class="linkish" onclick="reshelveHere(this, ${shown.length})" title="Re-place these volumes on the shelf, keeping the shelves as they are">re-shelve these ${shown.length}</button>` : '');
+}
+async function reshelveHere(btn, n) {
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1'; btn.textContent = `re-shelve ${n} — a minute or so of background work, sure?`;
+    setTimeout(() => { btn.dataset.armed = ''; loadShelf(); }, 6000);
+    return;
+  }
+  await fetch('/api/shelf/reshelve?' + new URLSearchParams({ category_id: [...subjects][0] }), { method: 'POST' });
+  say(`Re-shelving ${n} volumes. Each is placed again from what it says, not where it sits; the shelf redraws as they land.`);
+  loadJobs();
 }
 async function backfill(btn, tier, n) {
   const mins = Math.round(n * (tier === 2 ? 1.5 : 2.5));

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from conftest import make_document
 from sqlalchemy import select
 
 from library_agent.db.models import Category, Document, DocumentStatus
@@ -114,3 +115,39 @@ class TestWithDatabase:
             await db.execute(select(Document.shelf_id).where(Document.id == doc.id))
         ).scalar_one()
         assert got == sub.id
+
+
+class TestPlacementEvidence:
+    """What the placer is told about a volume: never its current shelf, and never nothing."""
+
+    async def test_unsummarised_stub_offers_its_opening(self, db):
+        from library_agent.library.shelving import _summary_and_tags
+
+        from sqlalchemy import delete
+
+        from library_agent.db.models import Artifact, ArtifactKind
+
+        doc = await make_document(
+            db, title="Git", body="Git is a distributed version control system. " * 8, tier=1
+        )
+        await db.execute(
+            delete(Artifact).where(
+                Artifact.kind == ArtifactKind.DOCUMENT_SUMMARY, Artifact.target_id == doc.id
+            )
+        )
+        summary, _ = await _summary_and_tags(db, doc)
+        assert summary.startswith("Git is a distributed version control")
+
+    async def test_current_shelf_is_not_a_tag(self, db):
+        from library_agent.db.models import DocumentCategory
+        from library_agent.library.shelving import _summary_and_tags
+
+        doc = await make_document(db, title="Twitter", body="Accounts worth following. " * 8)
+        shelf = await taxonomy.get_or_create(db, "Information Retrieval")
+        other = await taxonomy.get_or_create(db, "Security Research")
+        doc.shelf_id = shelf.id
+        db.add(DocumentCategory(document_id=doc.id, category_id=shelf.id))
+        db.add(DocumentCategory(document_id=doc.id, category_id=other.id))
+        await db.flush()
+        _, tags = await _summary_and_tags(db, doc)
+        assert "Information Retrieval" not in tags and "Security Research" in tags

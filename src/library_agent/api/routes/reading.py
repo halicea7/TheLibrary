@@ -184,12 +184,15 @@ async def list_categories(db: SessionDep) -> list[CategoryOut]:
 
 
 @router.post("/shelf/reshelve")
-async def reshelve(db: SessionDep, rebuild: bool = True) -> dict[str, str]:
+async def reshelve(
+    db: SessionDep, rebuild: bool = True, category_id: uuid.UUID | None = None
+) -> dict[str, str]:
     """Organise the shelf into top shelves and sub-shelves and give every read volume
-    one place. `rebuild=false` keeps the current shelves and only places the unshelved."""
+    one place. `rebuild=false` keeps the current shelves and only places the unshelved;
+    `category_id` keeps them and re-places just that shelf's volumes."""
     redis = await _redis()
     try:
-        job_id = await enqueue_reshelve(redis, rebuild=rebuild)
+        job_id = await enqueue_reshelve(redis, rebuild=rebuild, category_id=category_id)
     finally:
         await redis.aclose()
     return {"job_id": str(job_id)}

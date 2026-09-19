@@ -155,7 +155,9 @@ async def build_library_layer(ctx: dict, kind: str) -> dict[str, Any]:
     return out
 
 
-async def reshelve_library(ctx: dict, job_id: str, rebuild: bool = True) -> dict[str, Any]:
+async def reshelve_library(
+    ctx: dict, job_id: str, rebuild: bool = True, category_id: str | None = None
+) -> dict[str, Any]:
     """Organise the shelf into two levels and put every read volume in one place."""
     from library_agent.library.shelving import reshelve
 
@@ -168,7 +170,12 @@ async def reshelve_library(ctx: dict, job_id: str, rebuild: bool = True) -> dict
     try:
         async with Ollama() as client, session_scope() as db:
             r = await reshelve(
-                db, client=client, rebuild=rebuild, progress=progress, gate=_make_gate(jid)
+                db,
+                client=client,
+                rebuild=rebuild,
+                progress=progress,
+                gate=_make_gate(jid),
+                category_id=uuid.UUID(category_id) if category_id else None,
             )
         await _set_job(jid, state=JobState.DONE, yielded_reason=None)
         return r.__dict__
@@ -179,13 +186,20 @@ async def reshelve_library(ctx: dict, job_id: str, rebuild: bool = True) -> dict
         raise
 
 
-async def enqueue_reshelve(redis, *, rebuild: bool = True) -> uuid.UUID:
+async def enqueue_reshelve(
+    redis, *, rebuild: bool = True, category_id: uuid.UUID | None = None
+) -> uuid.UUID:
     async with session_scope() as db:
         job = Job(kind="reshelve", state=JobState.QUEUED)
         db.add(job)
         await db.flush()
         job_id = job.id
-    await redis.enqueue_job("reshelve_library", str(job_id), rebuild=rebuild)
+    await redis.enqueue_job(
+        "reshelve_library",
+        str(job_id),
+        rebuild=rebuild,
+        category_id=str(category_id) if category_id else None,
+    )
     return job_id
 
 

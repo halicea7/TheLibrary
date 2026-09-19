@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from library_agent.chat import answer as answer_mod
+from library_agent.chat import effort as effort_mod
 from library_agent.chat.citations import Source, build_sources, citation_validity, validate
 from library_agent.chat.rewrite import rewrite_query
 from library_agent.config import settings
@@ -23,7 +24,7 @@ from library_agent.llm.liveness import Busy, gate, liveness
 from library_agent.llm.ollama import Ollama
 from library_agent.ops.incidents import record_exception
 from library_agent.retrieval.hybrid import SearchHit
-from library_agent.retrieval.pipeline import CHAT_RETRIEVAL, retrieve
+from library_agent.retrieval.pipeline import retrieve
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ async def run_turn(
     temperature: float | None = None,
     seed: int | None = None,
     caller: str = "ui",
+    effort: str | None = None,
 ) -> AsyncIterator[dict]:
     """Yields SSE-shaped events: meta → sources → thinking* → token* → done.
 
@@ -86,6 +88,7 @@ async def run_turn(
     client = Ollama()
     state = TurnState(question=question)
     held = False
+    lvl = effort_mod.get(effort)
 
     try:
         if not liveness.alive:
@@ -124,9 +127,13 @@ async def run_turn(
 
         query = question
         needs_retrieval = True
-        if conversational and history:
+        if conversational and history and lvl.rewrite:
             query, needs_retrieval = await rewrite_query(client, model, question, history)
             state.rewritten = query if query != question else None
+        # Deep: several searches behind one question, unioned before reranking.
+        queries = [query]
+        if needs_retrieval and lvl.multi_query:
+            queries = await effort_mod.split_question(client, model, query)
 
         yield {
             "event": "meta",
@@ -137,20 +144,33 @@ async def run_turn(
                 "categories": len(category_ids) if category_ids else 0,
                 "cartridges": len(cartridge_ids) if cartridge_ids else 0,
                 "stance": stance,
+                "effort": lvl.name,
+                "searches": queries if len(queries) > 1 else None,
             },
         }
 
         if needs_retrieval:
             async with session_scope() as db:
-                state.hits = await retrieve(
-                    db,
-                    query,
-                    config=CHAT_RETRIEVAL,
-                    client=client,
-                    limit=cfg.chat_passages,
-                    category_ids=category_ids,
-                    cartridge_ids=cartridge_ids,
-                )
+                seen: set = set()
+                merged: list[SearchHit] = []
+                for q in queries:
+                    for h in await retrieve(
+                        db,
+                        q,
+                        config=lvl.config,
+                        client=client,
+                        limit=lvl.passages
+                        if len(queries) == 1
+                        else max(3, lvl.passages // len(queries) + 2),
+                        category_ids=category_ids,
+                        cartridge_ids=cartridge_ids,
+                    ):
+                        if h.chunk_id not in seen:
+                            seen.add(h.chunk_id)
+                            merged.append(h)
+                # Across several searches, keep the strongest; within one, retrieve() already did.
+                merged.sort(key=lambda h: -h.score)
+                state.hits = merged[: lvl.passages]
                 if document_ids:
                     state.hits = [h for h in state.hits if h.document_id in set(document_ids)]
                 state.sources = build_sources(state.hits)
@@ -197,6 +217,7 @@ async def run_turn(
             history,
             stance=stance,
             foreign=any(s.cartridge for s in state.sources),
+            max_passage_chars=effort_mod.passage_chars(lvl),
         )
         # A stance is an invitation to interpret; give the sampler room to take it.
         if temperature is None:
@@ -214,7 +235,7 @@ async def run_turn(
         heartbeat = asyncio.create_task(keepalive())
         try:
             async for kind, piece in answer_mod.stream_answer(
-                client, model, messages, temperature=temperature, seed=seed
+                client, model, messages, temperature=temperature, seed=seed, num_ctx=lvl.num_ctx
             ):
                 if kind == "thinking":
                     yield {"event": "thinking", "data": piece}

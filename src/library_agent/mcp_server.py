@@ -67,7 +67,7 @@ async def search_library(
 
 
 @server.tool(
-    description="Ask the library a question and get an answer with verified citations. room: a cartridge name to stay inside. conversation_id: pass back to continue a thread. stance: opinionated | contrarian | charitable | cynical | optimistic."
+    description="Ask the library a question and get an answer with verified citations. room: a cartridge name to stay inside. conversation_id: pass back to continue a thread. stance: opinionated | contrarian | charitable | cynical | optimistic. effort: quick (a lookup) | normal | deep (several searches behind the question; for comparisons and multi-part questions)."
 )
 async def ask_library(
     question: str,
@@ -76,6 +76,7 @@ async def ask_library(
     conversation_id: str | None = None,
     stance: str | None = None,
     model: str | None = None,
+    effort: str | None = None,
 ) -> dict[str, Any]:
     body = {
         "question": question,
@@ -84,6 +85,7 @@ async def ask_library(
         "conversation_id": conversation_id,
         "stance": stance,
         "model": model,
+        "effort": effort,
     }
     async with _client() as c:
         r = await c.post("/api/v1/ask", json=body)

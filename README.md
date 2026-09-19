@@ -51,6 +51,8 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
 
 **Ask** — talk to the collection. Narrow it by subject with the chips or by clicking a subject on the shelf. Switch models per conversation. Set a **stance** to loosen the librarian's reserve: *opinionated*, *contrarian · charitable*, *cynical · optimistic*. Answers given under a stance are labelled in violet so you always know which ones were the librarian speaking for itself.
 
+**Effort** — a dial in the tab bar: *quick* (3 passages, no reranker — a lookup, ~3 s), *normal* (5 passages, reranked, follow-ups rewritten, ~10 s), *deep* (the question is first broken into two to four searches, each retrieved, the union reranked to ten passages, a larger context — for comparisons and multi-part questions, ~25 s). The model has no clean effort knob of its own on these builds, so effort is the work around it, which is where answers actually change: on *compare SSTI and SQL injection*, quick and normal cite only the SSTI volumes; deep is the first level with both sides in hand. Also `effort` on `/api/v1/ask` and the MCP tool.
+
 **Find** — plain retrieval, showing each passage's dense and lexical rank. The nebula stays up behind it: when results land, the camera dives on each finding in turn with a spin and a large label, advancing every few seconds; hovering a row takes over, and clicking opens the volume.
 
 <p align="center">

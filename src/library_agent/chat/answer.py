@@ -141,8 +141,9 @@ async def stream_answer(
     *,
     temperature: float = 0.6,
     seed: int | None = None,
+    num_ctx: int = 16384,
 ) -> AsyncIterator[tuple[str, str]]:
     async for kind, piece in client.chat_stream(
-        model, messages, temperature=temperature, seed=seed
+        model, messages, temperature=temperature, seed=seed, num_ctx=num_ctx
     ):
         yield kind, piece

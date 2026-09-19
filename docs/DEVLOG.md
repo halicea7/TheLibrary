@@ -668,3 +668,16 @@ temperature 0) that is honestly best-effort: through the full path four of five 
 byte-identical, the odd one the first call after a model swap, and Ollama on the raw
 generate showed the same two-of-three -- GPU batching, not us. The "passages are data"
 line in the system prompt is now always on, since documents come from other people.
+
+
+## Follow-on: effort
+
+"Can we toggle effort levels like many harnesses do?" Not in the model: qwen3 thinks or
+it does not, and off leaks the reasoning. So `chat/effort.py` makes effort the work
+around the model. quick: three passages, no reranker, no rewrite, 8k context. normal:
+today. deep: the question is first split into two to four searches (a small structured
+call, falling back to the question itself), each retrieved, the union sorted by score
+and cut to ten, reranked at depth 40, 32k context. On the comparative question the TODO
+had flagged -- SSTI versus SQL injection -- quick and normal cited one side; deep cited
+both, from four volumes, ten of ten markers resolved, in 23 s against 2.5 and 10. The
+dial is in the tab bar, remembered, and on the JSON and MCP asks.

@@ -684,6 +684,9 @@ select, .toggle {
       <button class="view-tab" id="tab-settings" role="tab" aria-selected="false" onclick="setView('settings')" title="Services, models, maintenance, incidents">Settings<span id="inc-badge" hidden></span></button>
       <span class="right">
         <select id="model" title="Switching models takes a moment"></select>
+        <select id="effort" title="How much work the librarian does around the model: quick is a lookup; deep breaks the question into several searches first">
+          <option value="quick">quick</option><option value="normal" selected>normal</option><option value="deep">deep</option>
+        </select>
         <span class="stance">
           <button id="stance-btn" data-on="false" aria-haspopup="true" aria-expanded="false" onclick="toggleStanceMenu()">stance</button>
           <div class="stance-menu" id="stance-menu" role="menu"></div>
@@ -1605,7 +1608,7 @@ async function ask(text) {
 
   const body = { message:text, conversational:$('#multi').checked, model:$('#model').value,
                  conversation_id:convId, category_ids:subjects.size ? [...subjects] : null,
-                 cartridge_ids:cartridges.size ? [...cartridges] : null, stance };
+                 cartridge_ids:cartridges.size ? [...cartridges] : null, stance, effort: $('#effort').value };
   let answer = '', ev = null, buf = '', thought = '';
   try {
     const res = await fetch('/api/chat', {
@@ -1626,6 +1629,8 @@ async function ask(text) {
           const m = JSON.parse(raw);
           if (m.rewritten) asked.insertAdjacentHTML('beforeend',
             `<span class="rewrote">looked for: ${esc(m.rewritten)}</span>`);
+          if (m.searches) asked.insertAdjacentHTML('beforeend',
+            `<span class="rewrote">deep · searched: ${m.searches.map(esc).join(' · ')}</span>`);
           desk('<span class="working">thinking</span>');
           if (m.retrieving) web.scan(true);
         }
@@ -2275,6 +2280,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') toggleStance
 
 $('#view-ask').innerHTML = INVITATION;
 
+$('#effort').value = localStorage.getItem('effort') || 'normal';
+$('#effort').onchange = () => localStorage.setItem('effort', $('#effort').value);
 setView('ask'); loadModels(); holdings(); loadRack().then(loadShelf); loadSubjects(); loadJobs();
 web.init();
 setInterval(loadJobs, 4000);

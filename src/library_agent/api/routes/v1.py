@@ -43,6 +43,7 @@ class AskIn(BaseModel):
         description="temperature 0 and a fixed seed: the same question gives the same text",
     )
     deadline_seconds: int | None = Field(default=None, ge=10, le=1800)
+    effort: str | None = Field(default=None, description="quick | normal | deep")
 
 
 class Citation(BaseModel):
@@ -154,6 +155,7 @@ async def ask(req: AskIn, request: Request) -> AskOut:
             temperature=temperature,
             seed=seed,
             caller=_caller(request),
+            effort=req.effort,
         ):
             kind, data = ev["event"], ev["data"]
             if kind == "meta":

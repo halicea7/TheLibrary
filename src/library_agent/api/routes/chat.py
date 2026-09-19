@@ -32,6 +32,7 @@ class ChatRequest(BaseModel):
     category_ids: list[uuid.UUID] | None = None
     cartridge_ids: list[uuid.UUID] | None = None
     stance: str | None = None
+    effort: str | None = None  # quick | normal | deep
 
 
 class ConversationOut(BaseModel):
@@ -71,6 +72,7 @@ async def chat_models() -> dict[str, object]:
             {"id": k, "label": v["label"], "counterpart": v.get("counterpart")}
             for k, v in STANCES.items()
         ],
+        "efforts": ["quick", "normal", "deep"],
     }
 
 
@@ -104,7 +106,11 @@ async def chat(req: ChatRequest) -> EventSourceResponse:
             "data": json.dumps({"conversation_id": str(conversation_id)}),
         }
         async for ev in run_turn(
-            conversation_id, req.message, document_ids=req.document_ids, stance=req.stance
+            conversation_id,
+            req.message,
+            document_ids=req.document_ids,
+            stance=req.stance,
+            effort=req.effort,
         ):
             payload = ev["data"]
             yield {

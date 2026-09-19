@@ -184,7 +184,18 @@ Retrieval is evaluated on a generated question set (a question per gold passage,
 
 Two days earlier, at 176 volumes, hybrid RRF measured MRR 0.65 and recall@10 0.94 — so a sevenfold larger corpus cost almost nothing. Lexical search alone collapses on this material (short technical titles, heavy overlap between documents); dense carries it and fusion adds a little on top. The reranker does not help on generated questions, which read like keyword queries; it is kept for chat, where questions are sentences. The router hurts slightly and stays off by default.
 
-Answer quality is checked separately by `scripts/consistency.py`: a set of questions with known answers in the collection, each asked several times without memory, scored on whether the right volume was cited, whether the answer contains what a correct answer must, whether every emitted citation resolved, and whether the runs agree — plus a question the library cannot know, to confirm it says so rather than inventing a source. `uv run python scripts/verify.py` exercises every surface end to end.
+Answer quality is checked separately by `scripts/consistency.py`: questions with known answers in the collection, each asked three times without memory, scored on whether the right volume was cited, whether the answer contains what a correct answer must, whether every emitted citation resolved, and whether the runs agree — plus a question the library cannot know, to confirm it says so rather than inventing a source. On the current corpus, both chat models:
+
+| | general (qwen3 30B) | technical (qwen3-coder 30B) |
+|---|---|---|
+| correct terms present | 15/15 | 15/15 |
+| expected volume cited | 15/15 | 15/15 |
+| citations verified | 84/84 | 78/78 |
+| runs agree per question | 6/6 | 6/6 |
+| unknowable question declined | 3/3 | 3/3 |
+| median seconds per answer | 5.0 | 2.6 |
+
+The one detail worth knowing: asked what the owner ate for breakfast, the general model declined *and* cited the only breakfast in the library — a squirrel's, in an example from the T5 paper — while saying it was unrelated. That is the behaviour the apparatus is for. `uv run python scripts/verify.py` exercises every surface end to end.
 
 ## Layout
 

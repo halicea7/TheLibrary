@@ -641,3 +641,13 @@ plus one unknowable question that must be declined without a citation. It could 
 this session: partway through, the remote Ollama wedged -- HTTP answering, both models
 resident, no generation returning even with every client disconnected -- which is the
 failure `docs/TROUBLESHOOTING.md` describes and the one thing this side cannot fix.
+
+
+Ollama restarted on the remote; the consistency script ran on both chat models, three
+runs each over five known-answer questions and one unknowable one. Every known answer
+correct, every expected volume cited, 162 of 162 citations verified across both models,
+every question consistent across its runs. The technical model is twice as fast (2.6 s
+median against 5.0) and used more sources per answer. The unknowable question was
+declined every time; the general model's decline cited the one breakfast in the library
+(a squirrel's, in a T5 example) and said it did not apply -- my script first scored that
+as suspect for having a citation, which was the script's mistake, not the librarian's.

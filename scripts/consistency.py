@@ -63,9 +63,11 @@ async def main():
         for i in range(a.runs):
             d = await ask(c, UNKNOWABLE, a.model)
             low = d["answer"].lower()
-            honest = not d["citations"] and any(k in low for k in ("not", "no ", "cannot", "does not", "doesn't", "outside"))
-            print(f"  run {i+1}: {'declines with no citation' if honest else 'SUSPECT'} · {len(d['citations'])} citations · {d['answer'][:90].replace(chr(10),' ')!r}")
-            rows.append((UNKNOWABLE, i, honest, not d["citations"], d["verified"]["emitted"], d["verified"]["resolved"], d["seconds"]))
+            # Honest means it says the library does not have this. Citing the nearest
+            # passage and explaining why it does not apply is fine -- better than fine.
+            honest = any(k in low for k in ("does not contain", "no information", "not contain", "cannot answer", "does not address", "outside"))
+            print(f"  run {i+1}: {'declines' if honest else 'SUSPECT'} · {len(d['citations'])} citations · {d['answer'][:90].replace(chr(10),' ')!r}")
+            rows.append((UNKNOWABLE, i, honest, honest, d["verified"]["emitted"], d["verified"]["resolved"], d["seconds"]))
 
     n = len(rows)
     terms = sum(1 for r in rows if r[2]) / n

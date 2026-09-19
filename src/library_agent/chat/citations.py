@@ -52,21 +52,29 @@ def build_sources(hits: list[SearchHit]) -> list[Source]:
 
 
 def render_context(
-    hits: list[SearchHit], sources: list[Source], *, max_chars: int | None = None
+    hits: list[SearchHit],
+    sources: list[Source],
+    *,
+    max_chars: int | None = None,
+    reflections: dict[str, str] | None = None,
 ) -> str:
     """Numbered passages, in the order the model is told to cite them.
 
     Passages are truncated because every character here is prefill latency the user waits
-    through before seeing a word."""
+    through before seeing a word. `reflections` (chunk id -> the library's Tier 2 note on
+    that passage) are attached beneath their passage when given; whether that helps
+    answers is what the A/B in scripts/reflections_ab.py measures."""
     blocks = []
     for src, hit in zip(sources, hits, strict=True):
         loc = f", p.{src.page}" if src.page else ""
         body = hit.text.strip()
         if max_chars and len(body) > max_chars:
             body = body[:max_chars].rsplit(" ", 1)[0] + " …"
+        note = (reflections or {}).get(str(hit.chunk_id))
         blocks.append(
             f"[{src.n}] {src.document_title}{loc}"
             f"{f' — {src.section_path}' if src.section_path else ''}\n{body}"
+            + (f"\n(the library's note on this passage: {note.strip()[:500]})" if note else "")
         )
     return "\n\n".join(blocks)
 

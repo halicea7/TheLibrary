@@ -108,6 +108,7 @@ def build_messages(
     max_passage_chars: int | None = None,
     stance: str | None = None,
     foreign: bool = False,
+    reflections: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     system = SYSTEM
     # Documents come from other people now -- cartridges, shared folders. Their text is
@@ -124,7 +125,11 @@ def build_messages(
         messages.append({"role": role, "content": text})
 
     cap = max_passage_chars or settings().chat_passage_chars
-    context = render_context(hits, sources, max_chars=cap) if hits else _NO_CONTEXT
+    context = (
+        render_context(hits, sources, max_chars=cap, reflections=reflections)
+        if hits
+        else _NO_CONTEXT
+    )
     messages.append(
         {
             "role": "user",

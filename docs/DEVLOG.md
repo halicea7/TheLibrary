@@ -690,3 +690,34 @@ and idempotent: volumes already queued or running are skipped. First press queue
 where the button had promised 12, because the endpoint counted tag membership expanded
 to child shelves while the button counted shelf placement; the queue was cleared and the
 server now uses the button's rule (shelved under it, or tagged with exactly it).
+
+
+## Follow-on: making the engine repeatable
+
+Three TODO items about consistency, worked through in order.
+
+**Normal mode citing one side.** At k=5 a question that spans two volumes could come back
+with five passages from one of them, so the answer cited one side of a comparison. After
+fusion the pipeline now caps passages per document (two in chat, three in deep) and
+back-fills from the rest of the ranking, so the second volume reaches the model. The
+cap is a reorder of what fusion already ranked, not a new retrieval source; the eval
+harness ladder gained `hybrid_rerank_diverse` so the cost is measured, and on the
+57-question set it is neutral (the questions there are single-volume).
+
+**Contradictions that changed every rebuild.** Identical runs at temperature 0.1
+returned 0, 1, 3, 4 and 7 findings: the borderline clusters are coin flips. Each cluster
+is now judged up to three times at temperature 0 with seeds 1, 2, 3, and a finding
+needs two votes; a first clean *no* ends it early, since most clusters are clean, so the
+pass costs about a third more rather than three times. Cluster significance got the
+same treatment the cheap way: a cluster the first vote would hide gets a second vote
+with another seed and is shown if they disagree. `seed` is now plumbed through
+`Ollama.generate` and `structured`.
+
+**Reflections in the answer.** Retrieval said twice that reflections do not help find
+passages. Whether they help *write* the answer is a different question, and
+`scripts/reflections_ab.py` asks it: questions generated from annotated passages,
+retrieval done once and shared, the same passages sent twice -- bare, and with the
+library's note beneath each -- judged blind by the reader model on groundedness and
+usefulness, with citation validity alongside as the metric that needs no judge.
+`render_context` takes an optional `reflections` map to make the B arm possible; nothing
+uses it in the chat path until the A/B says it should.

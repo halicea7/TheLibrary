@@ -133,27 +133,43 @@ async def find_contradictions(
                 continue
             body = "\n".join(f"- {str(x)[:220]}" for x in claims[:16])
             body += "\n\nDocuments involved: " + ", ".join(row.titles)
-            try:
-                out = await c.structured(
-                    cfg.reader_model,
-                    PROMPT.format(label=row.label or "(unlabelled)", claims=body),
-                    SCHEMA,
-                    temperature=0.1,
-                    instructions=PROMPT,
-                )
-            except Exception:
-                log.warning("contradiction check failed for cluster %s", row.id, exc_info=True)
+            # Identical runs used to return 0, 1, 3, 4 and 7 findings at temperature 0.1:
+            # which borderline pairs fire is a coin flip. So each cluster is judged up to
+            # three times at temperature 0 with different seeds and a finding needs a
+            # majority; a first clean "no" ends it early, since most clusters are clean.
+            votes: list[dict] = []
+            for seed in (1, 2, 3):
+                try:
+                    out = await c.structured(
+                        cfg.reader_model,
+                        PROMPT.format(label=row.label or "(unlabelled)", claims=body),
+                        SCHEMA,
+                        temperature=0.0,
+                        instructions=PROMPT,
+                        seed=seed,
+                    )
+                except Exception:
+                    log.warning("contradiction check failed for cluster %s", row.id, exc_info=True)
+                    continue
+                if out.get("disagreement") and _explanation_is_junk(out.get("explanation")):
+                    # No usable explanation means no usable verdict.
+                    out["disagreement"] = False
+                if out.get("disagreement") and _explanation_denies(out.get("explanation")):
+                    # The model can still answer true while its own reasoning says no --
+                    # "the claims are not in conflict because..." with disagreement=true was
+                    # observed even with the verdict field last. The reasoning wins.
+                    out["disagreement"] = False
+                votes.append(out)
+                yes = sum(1 for v in votes if v.get("disagreement"))
+                no = len(votes) - yes
+                if yes >= 2 or no >= 2:
+                    break
+            if not votes:
                 continue
-
-            if out.get("disagreement") and _explanation_is_junk(out.get("explanation")):
-                # No usable explanation means no usable verdict.
-                log.warning("cluster %s: verdict without a real explanation; ignoring", row.id)
-                out["disagreement"] = False
-            if out.get("disagreement") and _explanation_denies(out.get("explanation")):
-                # The model can still answer true while its own reasoning says no --
-                # "the claims are not in conflict because..." with disagreement=true was
-                # observed even with the verdict field last. The reasoning wins.
-                out["disagreement"] = False
+            yes_votes = [v for v in votes if v.get("disagreement")]
+            out = yes_votes[0] if len(yes_votes) >= 2 else votes[0]
+            out["disagreement"] = len(yes_votes) >= 2
+            out["votes"] = f"{len(yes_votes)}/{len(votes)}"
             if out.get("disagreement"):
                 found += 1
                 await db.execute(

@@ -192,12 +192,30 @@ async def build_clusters(
                         cfg.reader_model,
                         CLUSTER_PROMPT.format(members=members),
                         CLUSTER_SCHEMA,
-                        temperature=0.3,
+                        temperature=0.0,
                         instructions=CLUSTER_PROMPT,
+                        seed=1,
                     )
                 except Exception:
                     log.warning("cluster summary failed for %s", cluster.id, exc_info=True)
                     continue
+                if not out.get("significant", True):
+                    # "Not a real theme" is the sampling-dependent call. Confirm it once
+                    # with a different seed before hiding the cluster; when the two
+                    # disagree, the cluster is shown.
+                    try:
+                        again = await c.structured(
+                            cfg.reader_model,
+                            CLUSTER_PROMPT.format(members=members),
+                            CLUSTER_SCHEMA,
+                            temperature=0.0,
+                            instructions=CLUSTER_PROMPT,
+                            seed=2,
+                        )
+                        if again.get("significant", True):
+                            out = again
+                    except Exception:  # noqa: BLE001
+                        log.debug("second significance vote failed; keeping the first")
                 cluster.label = (out.get("label") or "").strip()[:120]
                 cluster.has_contradiction = False
                 if not out.get("significant", True):

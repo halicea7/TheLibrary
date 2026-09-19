@@ -90,6 +90,7 @@ class Ollama:
         think: bool = False,
         timeout: float = 300.0,
         num_predict: int = 1500,
+        seed: int | None = None,
     ) -> str:
         """`timeout` is per request and deliberately much shorter than the client default.
         Ollama occasionally wedges on a single generation and never returns; it aborts
@@ -106,6 +107,8 @@ class Ollama:
         }
         if system:
             payload["system"] = system
+        if seed is not None:
+            payload["options"]["seed"] = seed
         if schema:
             payload["format"] = schema
             # Grammar-constrained sampling can run away on a long free-text field and
@@ -129,6 +132,7 @@ class Ollama:
         instructions: str | None = None,
         num_predict: int = 1500,
         think: bool = False,
+        seed: int | None = None,
     ) -> dict[str, Any]:
         """Generate and parse JSON. Retries on malformed output — even with a schema,
         small models occasionally emit a stray prefix.
@@ -167,6 +171,7 @@ class Ollama:
                     temperature=temperature,
                     num_ctx=ctx,
                     num_predict=num_predict,
+                    seed=seed,
                 )
             parsed: dict[str, Any] | None = None
             try:

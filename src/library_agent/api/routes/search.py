@@ -10,6 +10,7 @@ from fastapi import APIRouter, Query
 
 from library_agent.api.schemas import SearchHitOut, SearchResponse
 from library_agent.db.session import SessionDep
+from library_agent.library.shelving import expand_category_ids
 from library_agent.retrieval.pipeline import RetrievalConfig, retrieve
 
 router = APIRouter(prefix="/api", tags=["search"])
@@ -23,14 +24,19 @@ async def search(
     rerank: Annotated[bool, Query()] = False,
     router: Annotated[bool, Query()] = False,
     categories: Annotated[str | None, Query(description="comma-separated category ids")] = None,
+    cartridges: Annotated[str | None, Query(description="comma-separated cartridge ids")] = None,
 ) -> SearchResponse:
     started = time.time()
     cat_ids = [uuid.UUID(x) for x in categories.split(",") if x.strip()] if categories else None
+    if cat_ids:
+        cat_ids = await expand_category_ids(db, cat_ids)
+    cart_ids = [uuid.UUID(x) for x in cartridges.split(",") if x.strip()] if cartridges else None
     hits = await retrieve(
         db,
         q,
         limit=limit,
         category_ids=cat_ids,
+        cartridge_ids=cart_ids,
         config=RetrievalConfig(name="api", use_reranker=rerank, use_router=router),
     )
     return SearchResponse(

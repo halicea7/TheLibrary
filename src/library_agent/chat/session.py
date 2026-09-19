@@ -17,6 +17,7 @@ from library_agent.chat.rewrite import rewrite_query
 from library_agent.config import settings
 from library_agent.db.models import Conversation, Document, Message
 from library_agent.db.session import session_scope
+from library_agent.library.cartridge import cartridge_provenance
 from library_agent.llm.lease import mark_chat_active, mark_chat_done, redis_client
 from library_agent.llm.ollama import Ollama
 from library_agent.retrieval.hybrid import SearchHit
@@ -89,6 +90,9 @@ async def run_turn(
             model = conv.model or cfg.chat_model
             conversational = conv.conversational
             category_ids = [uuid.UUID(x) for x in conv.category_ids] if conv.category_ids else None
+            cartridge_ids = (
+                [uuid.UUID(x) for x in conv.cartridge_ids] if conv.cartridge_ids else None
+            )
             history = await _history(db, conversation_id) if conversational else []
 
         query = question
@@ -104,6 +108,7 @@ async def run_turn(
                 "rewritten": state.rewritten,
                 "retrieving": needs_retrieval,
                 "categories": len(category_ids) if category_ids else 0,
+                "cartridges": len(cartridge_ids) if cartridge_ids else 0,
                 "stance": stance,
             },
         }
@@ -117,12 +122,13 @@ async def run_turn(
                     client=client,
                     limit=cfg.chat_passages,
                     category_ids=category_ids,
+                    cartridge_ids=cartridge_ids,
                 )
                 if document_ids:
                     state.hits = [h for h in state.hits if h.document_id in set(document_ids)]
                 state.sources = build_sources(state.hits)
-                titles = {
-                    d.id: d.title
+                docs = {
+                    d.id: d
                     for d in (
                         await db.execute(
                             select(Document).where(
@@ -133,8 +139,13 @@ async def run_turn(
                         )
                     ).scalars()
                 }
+                provenance = await cartridge_provenance(db, list(docs))
             for s in state.sources:
-                s.document_title = titles.get(uuid.UUID(s.document_id), s.document_title)
+                d = docs.get(uuid.UUID(s.document_id))
+                if d:
+                    s.document_title = d.title
+                    s.readings_only = d.readings_only
+                    s.cartridge = provenance.get(d.id)
 
         yield {
             "event": "sources",
@@ -145,13 +156,20 @@ async def run_turn(
                     "page": s.page,
                     "section": s.section_path,
                     "document_id": s.document_id,
+                    "readings_only": s.readings_only,
+                    "cartridge": s.cartridge,
                 }
                 for s in state.sources
             ],
         }
 
         messages = answer_mod.build_messages(
-            question, state.hits, state.sources, history, stance=stance
+            question,
+            state.hits,
+            state.sources,
+            history,
+            stance=stance,
+            foreign=any(s.cartridge for s in state.sources),
         )
         # A stance is an invitation to interpret; give the sampler room to take it.
         temperature = 0.85 if stance else 0.6

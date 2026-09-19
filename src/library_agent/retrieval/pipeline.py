@@ -51,6 +51,7 @@ async def retrieve(
     client: Ollama | None = None,
     limit: int | None = None,
     category_ids: list[uuid.UUID] | None = None,
+    cartridge_ids: list[uuid.UUID] | None = None,
 ) -> list[SearchHit]:
     cfg = settings()
     rc = config or RetrievalConfig()
@@ -77,6 +78,7 @@ async def retrieve(
         "weight_dense": rc.weight_dense if rc.weight_dense is not None else cfg.weight_dense,
         "use_reflections": rc.use_reflections,
         "category_ids": category_ids,
+        "cartridge_ids": cartridge_ids,
         "weight_lexical": rc.weight_lexical
         if rc.weight_lexical is not None
         else cfg.weight_lexical,

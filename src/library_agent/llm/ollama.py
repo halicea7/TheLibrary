@@ -89,6 +89,7 @@ class Ollama:
         num_ctx: int | None = None,
         think: bool = False,
         timeout: float = 300.0,
+        num_predict: int = 1500,
     ) -> str:
         """`timeout` is per request and deliberately much shorter than the client default.
         Ollama occasionally wedges on a single generation and never returns; it aborts
@@ -110,7 +111,7 @@ class Ollama:
             # Grammar-constrained sampling can run away on a long free-text field and
             # never finish. Every structured output here fits comfortably in this; a
             # cap turns a hang into a truncated (and retried) response.
-            payload["options"]["num_predict"] = 1500
+            payload["options"]["num_predict"] = num_predict
         r = await self._client.post("/api/generate", json=payload, timeout=timeout)
         r.raise_for_status()
         return r.json().get("response", "")
@@ -126,9 +127,17 @@ class Ollama:
         num_ctx: int | None = None,
         retries: int = 2,
         instructions: str | None = None,
+        num_predict: int = 1500,
+        think: bool = False,
     ) -> dict[str, Any]:
         """Generate and parse JSON. Retries on malformed output — even with a schema,
         small models occasionally emit a stray prefix.
+
+        `think=True` routes through /api/chat with thinking on, for the few calls that
+        need judgement rather than extraction (organising the shelf). Thinking and a JSON
+        schema do work together -- the earlier "returns empty" finding was the thinking
+        eating the whole output budget -- so the budget is raised to cover both, and an
+        empty answer is retried.
 
         `instructions` is the unfilled prompt template, if the caller wants echo
         protection: a field copied verbatim from the *instructions* is a failure and
@@ -137,14 +146,28 @@ class Ollama:
         last: Exception | None = None
         ctx = num_ctx or size_context(len(prompt) + len(system or ""))
         for _ in range(retries + 1):
-            raw = await self.generate(
-                model,
-                prompt,
-                system=system,
-                schema=schema,
-                temperature=temperature,
-                num_ctx=ctx,
-            )
+            if think and await self.supports_thinking(model):
+                raw = await self._generate_thinking(
+                    model,
+                    prompt,
+                    system=system,
+                    schema=schema,
+                    temperature=temperature,
+                    num_ctx=ctx,
+                )
+                if not raw.strip():
+                    last = OllamaError("thinking consumed the output budget")
+                    continue
+            else:
+                raw = await self.generate(
+                    model,
+                    prompt,
+                    system=system,
+                    schema=schema,
+                    temperature=temperature,
+                    num_ctx=ctx,
+                    num_predict=num_predict,
+                )
             parsed: dict[str, Any] | None = None
             try:
                 parsed = json.loads(raw)
@@ -172,6 +195,38 @@ class Ollama:
                     continue
                 return parsed
         raise OllamaError(f"model {model} returned unusable output: {last}")
+
+    async def _generate_thinking(
+        self,
+        model: str,
+        prompt: str,
+        *,
+        system: str | None,
+        schema: dict[str, Any],
+        temperature: float,
+        num_ctx: int,
+        timeout: float = 600.0,
+    ) -> str:
+        messages = ([{"role": "system", "content": system}] if system else []) + [
+            {"role": "user", "content": prompt}
+        ]
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "think": True,
+            "format": schema,
+            "keep_alive": settings().keep_alive,
+            # Room for the reasoning and the answer both; the grammar bounds the answer.
+            "options": {
+                "temperature": temperature,
+                "num_ctx": max(num_ctx, 16384),
+                "num_predict": 12000,
+            },
+        }
+        r = await self._client.post("/api/chat", json=payload, timeout=timeout)
+        r.raise_for_status()
+        return (r.json().get("message") or {}).get("content", "")
 
     async def chat_stream(
         self,

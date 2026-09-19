@@ -304,6 +304,13 @@ async def run_tier1(
         cats = await taxonomy.assign_document(
             db, doc.id, [x for x in (doc_out.get("categories") or []) if isinstance(x, str)][:4]
         )
+        # and one place on the shelf, if the shelf has been organised yet
+        try:
+            from library_agent.library.shelving import place_document
+
+            await place_document(db, doc.id, client=c)
+        except Exception:
+            log.warning("could not shelve %s", doc.id, exc_info=True)
 
         # --- 5. embed the new artifacts ---------------------------------------------
         # The document summary replaces the Tier 0 fingerprint as the router's vector.

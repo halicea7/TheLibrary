@@ -6,6 +6,8 @@
 #   ./library restart
 #   ./library status
 #   ./library import <dir|file>... [--read]   bulk-import from disk; --read queues reading
+#   ./library export --name "…" [--level readings] --subject "…"   make a cartridge
+#   ./library insert <cartridge.zip>          put a cartridge on the rack
 #
 # Ctrl-C in the foreground stops everything.
 set -euo pipefail
@@ -31,7 +33,8 @@ case "${1:-start}" in
     exit 0 ;;
   start) ;;
   import) shift; exec uv run python -m library_agent.ingest.bulk "$@" ;;
-  *) echo "usage: ./library [start|stop|restart|status|import <paths>... [--read]]"; exit 2 ;;
+  export|insert) exec uv run python -m library_agent.library.cartridge_cli "$@" ;;
+  *) echo "usage: ./library [start|stop|restart|status|import <paths>... [--read]|export …|insert <zip>]"; exit 2 ;;
 esac
 
 if running; then

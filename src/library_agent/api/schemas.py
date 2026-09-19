@@ -22,6 +22,9 @@ class DocumentOut(BaseModel):
     near_dup_of: uuid.UUID | None
     added_at: datetime
     categories: list[str] = []
+    readings_only: bool = False
+    cartridge: dict | None = None  # {id, name, colour} when it came in a cartridge
+    shelf: dict | None = None  # {top, top_id, sub, sub_id}: the one place it sits
 
 
 class SectionOut(BaseModel):

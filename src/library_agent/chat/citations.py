@@ -25,9 +25,15 @@ class Source:
     document_title: str
     section_path: str
     page: int | None
+    # Provenance: which cartridge the document arrived in (None = the local shelf), and
+    # whether what we hold is the owner's reading rather than the text.
+    cartridge: dict | None = None
+    readings_only: bool = False
 
     def label(self) -> str:
         loc = f", p.{self.page}" if self.page else ""
+        if self.readings_only and self.cartridge:
+            return f"{self.cartridge['name']}'s reading of {self.document_title}{loc}"
         return f"{self.document_title}{loc}"
 
 

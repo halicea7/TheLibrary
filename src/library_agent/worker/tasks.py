@@ -126,6 +126,39 @@ async def build_library_layer(ctx: dict, kind: str) -> dict[str, Any]:
     return out
 
 
+async def reshelve_library(ctx: dict, job_id: str, rebuild: bool = True) -> dict[str, Any]:
+    """Organise the shelf into two levels and put every read volume in one place."""
+    from library_agent.library.shelving import reshelve
+
+    jid = uuid.UUID(job_id)
+    await _set_job(jid, state=JobState.RUNNING)
+
+    async def progress(current: int, total: int) -> None:
+        await _set_job(jid, progress_current=current, progress_total=total)
+
+    try:
+        async with Ollama() as client, session_scope() as db:
+            r = await reshelve(
+                db, client=client, rebuild=rebuild, progress=progress, gate=_make_gate(jid)
+            )
+        await _set_job(jid, state=JobState.DONE, yielded_reason=None)
+        return r.__dict__
+    except Exception as exc:
+        log.exception("reshelve failed")
+        await _set_job(jid, state=JobState.ERROR, error=str(exc)[:2000])
+        raise
+
+
+async def enqueue_reshelve(redis, *, rebuild: bool = True) -> uuid.UUID:
+    async with session_scope() as db:
+        job = Job(kind="reshelve", state=JobState.QUEUED)
+        db.add(job)
+        await db.flush()
+        job_id = job.id
+    await redis.enqueue_job("reshelve_library", str(job_id), rebuild=rebuild)
+    return job_id
+
+
 async def schedule_library_rebuild(redis) -> bool:
     """Debounced: the first read to finish in a quiet window schedules one rebuild for
     `library_rebuild_delay_seconds` later; reads that finish inside the window do nothing.
@@ -159,7 +192,7 @@ async def backfill(ctx: dict, tier: int = 1) -> dict[str, Any]:
 
 
 class WorkerSettings:
-    functions: ClassVar[list] = [read_document, backfill, build_library_layer]
+    functions: ClassVar[list] = [read_document, backfill, build_library_layer, reshelve_library]
     redis_settings = RedisSettings.from_dsn(settings().redis_url)
     job_timeout = JOB_TIMEOUT
     # One at a time: the models are a single shared resource, so concurrency here would

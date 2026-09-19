@@ -21,6 +21,33 @@ from library_agent.ingest.tier0 import ingest
 from library_agent.llm.ollama import Ollama
 
 
+def looks_like_prose(path: Path, *, sample_bytes: int = 6000) -> bool:
+    """Wordlists, payload dumps and fuzz lists are text files but not reading material:
+    hundreds of short lines with almost no sentences. Skip them rather than shelve them --
+    a single path-traversal list produced 1,101 'passages' before this check existed."""
+    try:
+        if path.stat().st_size < 200:
+            return False  # EICAR is 68 bytes; no reading material is this small
+    except OSError:
+        return False
+    if path.suffix.lower() != ".txt":
+        return True
+    try:
+        head = path.read_text(encoding="utf-8", errors="replace")[:sample_bytes]
+    except OSError:
+        return False
+    lines = [ln for ln in head.splitlines() if ln.strip()]
+    if len(lines) < 12:
+        return True
+    avg = sum(len(ln) for ln in lines) / len(lines)
+    with_space = sum(1 for ln in lines if " " in ln.strip()) / len(lines)
+    body = "".join(lines)
+    symbols = sum(1 for ch in body if not ch.isalnum() and not ch.isspace()) / max(1, len(body))
+    # Prose lines are long, contain spaces, and are mostly letters. Payloads and
+    # polyglots can be long and spaced too -- but they are dense with < > / % ' " ( ).
+    return (avg >= 40 or with_space >= 0.6) and symbols < 0.12
+
+
 def find_files(roots: list[Path]) -> list[Path]:
     out: list[Path] = []
     for root in roots:
@@ -29,7 +56,12 @@ def find_files(roots: list[Path]) -> list[Path]:
                 out.append(root)
             continue
         for p in sorted(root.rglob("*")):
-            if p.is_file() and p.suffix.lower() in SUPPORTED and not p.name.startswith("."):
+            if (
+                p.is_file()
+                and p.suffix.lower() in SUPPORTED
+                and not p.name.startswith(".")
+                and looks_like_prose(p)
+            ):
                 out.append(p)
     return out
 

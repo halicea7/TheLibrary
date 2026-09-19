@@ -73,6 +73,7 @@ body {
 @media (max-width:920px) { .frame { grid-template-columns:1fr; } }
 
 .shelf {
+  position:relative;
   border-right:1px solid var(--rule); background:var(--panel);
   padding:16px 16px 22px; overflow-y:auto; min-height:0;
   scrollbar-width:thin; scrollbar-color:var(--rule) transparent;
@@ -108,6 +109,57 @@ body {
 .notice.ok  { display:block; background:color-mix(in srgb,var(--verdigris) 13%,transparent); color:var(--verdigris); }
 .notice.bad { display:block; background:color-mix(in srgb,var(--amber) 14%,transparent); color:var(--amber); }
 
+/* ── the rack ─────────────────────────────────────────────────────────── */
+/* Cartridges inserted from other libraries stand on the rack as spines: a slab in the
+   cartridge's colour with the name printed down it, the way a book announces itself
+   edge-on. A scoped spine is pulled forward off the slot. Cartridge colours mean identity
+   and nothing else -- they never appear on a control. */
+.rack {
+  display:flex; align-items:flex-end; gap:5px; padding:6px 4px 0;
+  border-bottom:2px solid var(--rule); box-shadow:0 3px 0 -1px var(--rule-soft);
+  margin-bottom:8px; overflow-x:auto; scrollbar-width:none;
+}
+.spine {
+  --c:var(--dim);
+  position:relative; width:var(--w,30px); height:164px; flex:0 0 var(--w,30px); cursor:pointer; border:0;
+  border-radius:2px 2px 0 0; background:var(--c); color:#fff;
+  box-shadow:inset -3px 0 0 rgba(0,0,0,.28), inset 1px 0 0 rgba(255,255,255,.18);
+  display:flex; flex-direction:column; align-items:center; padding:6px 0 5px;
+  transition:transform .18s ease, box-shadow .18s ease; user-select:none;
+  transform-origin:bottom center;
+}
+.spine:hover { transform:translateY(-3px); }
+.spine[aria-pressed=true] {
+  transform:translateY(-8px) scale(1.04);
+  box-shadow:inset -3px 0 0 rgba(0,0,0,.28), inset 1px 0 0 rgba(255,255,255,.3), 0 6px 14px rgba(0,0,0,.35);
+}
+.spine .swatch { width:14px; height:14px; opacity:.9; }
+.spine .swatch svg { width:14px; height:14px; display:block; }
+.spine .t {
+  flex:1; writing-mode:vertical-rl; margin:6px 0 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font:500 11px/1 var(--serif); letter-spacing:.03em;
+}
+.spine .n { font:9px/1 var(--mono); opacity:.8; }
+.spine .lvl { position:absolute; left:0; right:0; bottom:0; height:3px; background:repeating-linear-gradient(90deg, rgba(255,255,255,.55) 0 3px, transparent 3px 6px); }
+.spine[data-level=full] .lvl { display:none; }
+.spine .eject {
+  position:absolute; top:-18px; left:50%; transform:translateX(-50%);
+  background:var(--panel); border:1px solid var(--rule); border-radius:2px; color:var(--faint);
+  font:10px/1 var(--sans); padding:2px 5px; cursor:pointer; display:none; white-space:nowrap;
+}
+.spine:hover .eject, .spine:focus-within .eject { display:block; }
+.spine .eject:hover { color:var(--amber); border-color:var(--amber); }
+.spine.inserting { animation:insert .55s cubic-bezier(.2,.8,.2,1); }
+@keyframes insert { 0% { transform:translate(-30px,-40px) rotate(-8deg); opacity:0; } 70% { transform:translate(0,-6px); } 100% { transform:none; opacity:1; } }
+/* The empty slot: where a new cartridge would stand. */
+.slot {
+  width:30px; height:164px; flex:0 0 30px; border:1px dashed var(--rule); border-bottom:0;
+  border-radius:2px 2px 0 0; background:none; color:var(--faint); cursor:pointer;
+  display:grid; place-items:center; font:16px/1 var(--sans);
+}
+.slot:hover { color:var(--fg); border-color:var(--faint); }
+.rack-note { font:10.5px/1.5 var(--mono); color:var(--faint); margin:-2px 0 6px; min-height:14px; }
+
 /* ── the shelf itself ─────────────────────────────────────────────────── */
 /* Volumes are grouped by subject. A volume with three subjects sits on three shelves,
    the way a subject index works; the collapse state remembers itself. */
@@ -126,7 +178,13 @@ body {
 .shelf-name[aria-pressed=true] { color:var(--verdigris); }
 .shelf-n { font:10px/1 var(--mono); color:var(--faint); margin-left:auto; }
 .shelf-vols { padding-left:14px; border-left:1px solid var(--rule-soft); margin-left:6px; }
-.shelf-group[data-open=false] .shelf-vols { display:none; }
+.shelf-group[data-open=false] > .shelf-vols, .shelf-sub[data-open=false] > .shelf-vols { display:none; }
+/* Sub-shelves sit one step in, in a quieter voice than the top shelf. */
+.shelf-sub { margin:2px 0; }
+.shelf-sub .shelf-h { padding:4px 0 3px; }
+.shelf-sub .shelf-name { text-transform:none; letter-spacing:0; font:500 12.5px/1.3 var(--serif); color:var(--dim); }
+.shelf-sub .shelf-name[aria-pressed=true] { color:var(--verdigris); }
+.shelf-h .linkish { margin-left:auto; }
 
 .vol { padding:8px 0; border-bottom:1px solid var(--rule-soft); }
 .vol:last-child { border-bottom:0; }
@@ -144,6 +202,9 @@ body {
 .state { width:8px; height:8px; flex:0 0 8px; border:1px solid var(--verdigris); border-radius:1px; }
 .state.s1 { background:linear-gradient(to right,var(--verdigris) 50%,transparent 50%); }
 .state.s2 { background:var(--verdigris); }
+/* Where a volume came from: a dot in its cartridge's colour. */
+.dot { width:7px; height:7px; flex:0 0 7px; border-radius:50%; background:var(--c); }
+.badge { font:9.5px/1 var(--mono); letter-spacing:.04em; color:var(--faint); border:1px solid var(--rule); border-radius:2px; padding:2px 4px; }
 /* Actions stay out of the way until the volume is under the cursor. */
 .vol-acts { display:flex; gap:10px; max-height:0; overflow:hidden; opacity:0;
             transition:max-height .15s, opacity .12s, margin-top .15s; margin-top:0; }
@@ -213,6 +274,16 @@ select, .toggle {
 .toggle input { margin:0; accent-color:var(--verdigris); }
 
 .pane { overflow-y:auto; min-height:0; padding:18px 22px 24px; }
+/* The web: the library drawn as a network behind the Ask pane -- one node per volume,
+   edges where volumes cite each other, share a thread, or sit close in meaning. It
+   thickens as the library grows and lights where passages are being retrieved. */
+#web { position:absolute; left:0; right:0; z-index:0; pointer-events:none; opacity:0; transition:opacity 1.2s ease; }
+.views { position:relative; z-index:1; }
+#web[data-on=true] { opacity:1; }
+.turn { position:relative; }
+/* A faint wash behind the reading column keeps the text legible over the web. */
+.said, .asked { background:linear-gradient(90deg, color-mix(in srgb, var(--bg) 78%, transparent) 0 70%, transparent); }
+.said { border-radius:4px; }
 
 /* ── subject chips ────────────────────────────────────────────────────── */
 .subjects { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px; }
@@ -236,9 +307,25 @@ select, .toggle {
 /* Signature: the reading column keeps its margin, and every [n] resolves
    into a note beside the paragraph that cites it. */
 .said { margin-top:14px; display:grid; grid-template-columns:minmax(0,68ch) 200px; gap:0 28px; }
-.said p {
-  grid-column:1; margin:0 0 .85em; font:15.5px/1.72 var(--serif); max-width:68ch;
-}
+.said > * { grid-column:1; max-width:68ch; }
+.said p, .said li { font:15.5px/1.72 var(--serif); }
+.said p { margin:0 0 .85em; }
+/* Answers and .md volumes are rendered as markdown: quiet headings, real lists, code
+   that looks like code. Nothing shouts; the librarian's voice stays even. */
+.md h1, .md h2, .md h3, .md h4 { font:600 15.5px/1.4 var(--serif); margin:1.1em 0 .4em; }
+.md h1 { font-size:18px; } .md h2 { font-size:16.5px; }
+.md ul, .md ol { margin:0 0 .85em; padding-left:1.4em; }
+.md li { margin:.15em 0; }
+.md li p { margin:0; }
+.md code { font:13px/1.5 var(--mono); background:var(--sunk); border:1px solid var(--rule-soft); border-radius:3px; padding:0 4px; }
+.md pre { margin:0 0 .95em; padding:10px 12px; background:var(--sunk); border:1px solid var(--rule-soft); border-radius:3px; overflow-x:auto; }
+.md pre code { background:none; border:0; padding:0; font-size:12.5px; line-height:1.55; white-space:pre; }
+.md blockquote { margin:0 0 .85em; padding-left:12px; border-left:2px solid var(--rule); color:var(--dim); }
+.md hr { border:0; border-top:1px solid var(--rule); margin:1em 0; }
+.md table { border-collapse:collapse; margin:0 0 .95em; font:13.5px/1.5 var(--sans); }
+.md th, .md td { border:1px solid var(--rule); padding:4px 8px; text-align:left; vertical-align:top; }
+.md a { color:inherit; text-decoration:underline dotted var(--faint); }
+.md strong { font-weight:600; }
 .said .apparatus { grid-column:2; align-self:start; padding-top:.3em; }
 .mark {
   font:11px/1 var(--mono); color:var(--rubric); cursor:default;
@@ -251,19 +338,46 @@ select, .toggle {
 }
 .note b { display:block; color:var(--fg); font-weight:500; }
 .note .pg { color:var(--rubric); }
+/* Provenance stripe: the rubric rule still says "from the shelf"; the stripe beside it
+   says whose shelf. */
+.note.from { position:relative; }
+.note.from::before { content:''; position:absolute; left:-5px; top:0; bottom:0; width:2px; background:var(--c); }
+.note .who { display:block; color:var(--c); font-size:9.5px; letter-spacing:.04em; }
 @media (max-width:1080px) {
   .said { grid-template-columns:minmax(0,1fr); }
   .said .apparatus { grid-column:1; display:flex; flex-wrap:wrap; gap:5px; padding:6px 0 0; }
   .note { border-left:0; border-top:1px solid var(--rubric); padding:4px 0 0; margin:0; max-width:230px; }
+  .note.from::before { left:0; right:0; top:-4px; bottom:auto; width:auto; height:2px; }
 }
 .unsourced { font:11px/1.5 var(--mono); color:var(--faint); margin-top:6px; }
-/* The librarian considering, before it speaks. Faint and italic so it reads as
-   murmur rather than answer; it is replaced the moment real prose arrives. */
-.considering {
-  grid-column:1; font:italic 13.5px/1.6 var(--serif); color:var(--faint);
-  max-width:68ch; margin:0; white-space:pre-wrap;
-  mask-image:linear-gradient(to right, transparent, #000 12%);
+/* The murmur: the librarian's thinking, ghosted behind the shelf and drifting upward,
+   like the library rifling through itself. Never in the answer column -- prose arrives
+   there clean. Always on; it is the honest signal that a long wait is work, not a hang. */
+/* It occupies the empty space beneath the question, anchored on the shelf's edge, and
+   is masked by a radial bleed so the text is strongest where it leaves the shelf and
+   dissolves as it drifts up and right into the page. */
+.reading { position:relative; }
+#murmur {
+  position:absolute; left:0; right:35%; top:0; bottom:0; z-index:0; pointer-events:none;
+  overflow:hidden; opacity:0; transition:opacity .7s ease;
+  mask-image:radial-gradient(ellipse 85% 70% at 0% 62%, #000 0%, rgba(0,0,0,.55) 38%, transparent 72%);
+  -webkit-mask-image:radial-gradient(ellipse 85% 70% at 0% 62%, #000 0%, rgba(0,0,0,.55) 38%, transparent 72%);
 }
+#murmur[data-on=true] { opacity:1; }
+/* A wash of the shelf's panel colour spills into the page with the text, so the bleed
+   reads as light from the shelf, not floating type. */
+#murmur::before {
+  content:''; position:absolute; inset:0;
+  background:radial-gradient(ellipse 70% 60% at 0% 62%, color-mix(in srgb, var(--panel) 85%, var(--verdigris) 15%) 0%, transparent 70%);
+}
+#murmur .lines {
+  position:absolute; left:22px; bottom:0; max-width:62ch;
+  font:italic 13.5px/1.8 var(--serif); color:var(--dim); opacity:.75;
+  white-space:pre-wrap; word-break:break-word;
+}
+.pane { position:relative; z-index:1; }
+.composer { position:relative; z-index:1; }
+@media (prefers-reduced-motion: reduce) { #murmur { transition:none; } }
 
 .composer { border-top:1px solid var(--rule); background:var(--panel); padding:12px 22px 14px; }
 .composer input {
@@ -320,11 +434,46 @@ select, .toggle {
 .page .lead { grid-column:1; font:italic 13.5px/1.6 var(--serif); color:var(--dim); margin:0 0 12px;
               padding-left:11px; border-left:1px solid var(--rule); }
 .page p.pass { grid-column:1; font:15px/1.72 var(--serif); margin:0 0 .85em; white-space:pre-wrap; }
+.page .pass { grid-column:1; }
+.page .pass.md { white-space:normal; margin:0 0 .85em; }
+.page .pass.md > *:first-child { margin-top:0; }
+.page .pass.md p, .page .pass.md li { font:15px/1.72 var(--serif); }
 .page .gloss { grid-column:2; align-self:start; padding-top:.2em; }
 .page .gloss span {
   display:block; font:12px/1.5 var(--serif); color:var(--dim);
-  padding:2px 0 2px 10px; border-left:1px solid var(--rubric);
+  padding:2px 0 2px 10px; border-left:1px solid var(--rubric); margin-bottom:6px;
 }
+/* Their reading, beside yours: stripe in the cartridge colour, and named. */
+.page .gloss span.theirs { position:relative; }
+.page .gloss span.theirs::before { content:''; position:absolute; left:-5px; top:0; bottom:0; width:2px; background:var(--c); }
+.page .gloss span.theirs i { display:block; font:9.5px/1.4 var(--mono); font-style:normal; color:var(--c); letter-spacing:.04em; }
+.reader-m .dot { display:inline-block; vertical-align:middle; margin-right:5px; }
+.reading-only { font:italic 13px/1.6 var(--serif); color:var(--dim); margin:0 0 18px; max-width:68ch; }
+
+/* ── make a cartridge ─────────────────────────────────────────────────── */
+.make { max-width:62ch; }
+.make h2 { font:600 20px/1.3 var(--serif); margin:0 0 4px; }
+.make .why { font:13.5px/1.6 var(--serif); color:var(--dim); margin:0 0 20px; }
+.make .row { display:grid; grid-template-columns:110px 1fr; gap:10px 14px; align-items:start; margin-bottom:14px; }
+.make .row > label:first-child { font:600 10.5px/2.2 var(--sans); letter-spacing:.06em; text-transform:uppercase; color:var(--dim); }
+.make input[type=text] { width:100%; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; color:var(--fg); font:14px/1.4 var(--serif); padding:7px 10px; }
+.make input[type=text]:focus { border-color:var(--verdigris); outline:none; }
+.swatches { display:flex; gap:6px; flex-wrap:wrap; padding-top:4px; }
+.swatches button { width:22px; height:22px; border-radius:3px; border:2px solid transparent; cursor:pointer; background:var(--c); }
+.swatches button[aria-pressed=true] { border-color:var(--fg); }
+.glyphs { display:flex; gap:6px; flex-wrap:wrap; padding-top:4px; }
+.glyphs button { width:26px; height:26px; border-radius:3px; border:1px solid var(--rule); background:var(--sunk); color:var(--dim); cursor:pointer; display:grid; place-items:center; }
+.glyphs button svg { width:14px; height:14px; }
+.glyphs button[aria-pressed=true] { color:var(--fg); border-color:var(--fg); }
+.levels { display:flex; flex-direction:column; gap:6px; padding-top:2px; }
+.levels label { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:start; font:13px/1.45 var(--serif); cursor:pointer; }
+.levels input { margin:4px 0 0; accent-color:var(--verdigris); }
+.levels small { display:block; color:var(--faint); font:11px/1.45 var(--sans); }
+.make .preview { font:11.5px/1.7 var(--mono); color:var(--dim); border-top:1px solid var(--rule-soft); padding-top:10px; margin-top:6px; }
+.make .preview b { color:var(--fg); font-weight:500; }
+.make .go { margin-top:14px; background:var(--sunk); color:var(--fg); border:1px solid var(--rule); border-radius:3px; font:13px/1 var(--sans); padding:8px 14px; cursor:pointer; }
+.make .go:hover { border-color:var(--verdigris); }
+.make .go[disabled] { opacity:.5; cursor:default; }
 @media (max-width:1080px) {
   .page { grid-template-columns:minmax(0,1fr); }
   .page .gloss { grid-column:1; margin:-4px 0 14px; }
@@ -352,8 +501,8 @@ select, .toggle {
     <p class="label">Accession</p>
     <div class="accession" id="drop" tabindex="0" role="button" aria-label="Add a document">
       <b>Drop documents or folders</b>
-      <span>pdf · md · txt · rst — folders are walked</span>
-      <input type="file" id="file" multiple accept=".pdf,.md,.markdown,.txt,.rst" hidden/>
+      <span>pdf · md · txt · rst — folders are walked · a cartridge .zip goes on the rack</span>
+      <input type="file" id="file" multiple accept=".pdf,.md,.markdown,.txt,.rst,.zip" hidden/>
     </div>
     <div class="notice" id="notice" role="status"></div>
 
@@ -362,19 +511,25 @@ select, .toggle {
       <div id="jobs"></div>
     </div>
 
-    <p class="label spaced">Shelf</p>
-    <div id="shelf"></div>
+    <p class="label spaced">Rack</p>
+    <div class="rack" id="rack"></div>
+    <div class="rack-note" id="rack-note"></div>
+
+    <div class="shelf-h" style="padding:0"><p class="label spaced" style="margin-bottom:0">Shelf</p><button class="linkish" id="reshelve" onclick="reshelve(this)" title="Have the library organise its shelf: top shelves, sub-shelves, one place per volume">reshelve</button></div>
+    <div id="shelf" style="margin-top:8px"></div>
   </aside>
 
   <main class="reading">
+    <canvas id="web" data-on="false" aria-hidden="true"></canvas>
+    <div id="murmur" data-on="false" aria-hidden="true"><div class="lines"></div></div>
     <nav class="views" role="tablist">
       <button class="view-tab" id="tab-ask"     role="tab" aria-selected="true"  onclick="setView('ask')">Ask</button>
       <button class="view-tab" id="tab-find"    role="tab" aria-selected="false" onclick="setView('find')">Find</button>
       <button class="view-tab" id="tab-threads" role="tab" aria-selected="false" onclick="setView('threads')">Threads</button>
       <button class="view-tab" id="tab-open"    role="tab" aria-selected="false" onclick="setView('open')" hidden>Open</button>
+      <button class="view-tab" id="tab-make"    role="tab" aria-selected="false" onclick="setView('make')" hidden>Make a cartridge</button>
       <span class="right">
         <select id="model" title="Switching models takes a moment"></select>
-        <label class="toggle" id="think-wrap" title="This model always thinks before it answers; this shows or hides that."><input type="checkbox" id="think" checked/> show thinking</label>
         <span class="stance">
           <button id="stance-btn" data-on="false" aria-haspopup="true" aria-expanded="false" onclick="toggleStanceMenu()">stance</button>
           <div class="stance-menu" id="stance-menu" role="menu"></div>
@@ -389,6 +544,7 @@ select, .toggle {
       <div id="view-find" hidden></div>
       <div id="view-threads" hidden></div>
       <div id="view-open" hidden></div>
+      <div id="view-make" hidden></div>
     </div>
 
     <form class="composer" id="composer" autocomplete="off">
@@ -404,8 +560,205 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 const STATE = ['listed','read','annotated'];
 
 let view = 'ask', convId = null, subjects = new Set(), sources = [], busy = false;
+// Scoped cartridges (a "room"), and what the rack knows about each one.
+let cartridges = new Set(), rackIndex = {}, palette = [];
 let stance = null, stanceMeta = [], thinkingModels = {};
-let showThinking = localStorage.getItem('showThinking') !== 'off';
+// The murmur keeps the last few hundred characters of thinking and drifts them upward.
+const murmur = {
+  el: null, lines: null, text: '',
+  start(under) {
+    this.el = $('#murmur'); this.lines = this.el.querySelector('.lines');
+    this.text = ''; this.lines.textContent = '';
+    // Fill the empty space between the question and the composer.
+    const main = $('.reading').getBoundingClientRect();
+    const top = under ? under.getBoundingClientRect().bottom - main.top + 12 : main.height * .35;
+    const bottom = main.bottom - $('#composer').getBoundingClientRect().top + 8;
+    this.el.style.top = `${Math.max(0, top)}px`;
+    this.el.style.bottom = `${bottom}px`;
+    this.el.dataset.on = 'true';
+  },
+  add(piece) {
+    // Bottom-anchored, so new text pushes the old upward: a column drifting up out of
+    // the shelf's edge.
+    this.text = (this.text + piece).slice(-2200);
+    this.lines.textContent = this.text;
+  },
+  stop() { if (!this.el) return; this.el.dataset.on = 'false';
+           setTimeout(() => { if (this.el.dataset.on === 'false') { this.lines.textContent = ''; this.text = ''; } }, 700); },
+};
+localStorage.removeItem('showThinking');
+
+/* ── the web ──────────────────────────────────────────────────────────── */
+// The library as a nebula. A force layout in three dimensions -- repulsion between all
+// volumes, springs along edges, gravity to the centre and a gentler pull toward each
+// sub-shelf's own centroid so shelves read as regions of the cloud -- projected with
+// perspective and turning slowly. Far volumes dim and shrink; each carries a soft haze in
+// its shelf's colour, blended additively, which is what makes it a nebula rather than a
+// diagram. Retrieval lights the volumes it drew on in rubric. Plain canvas, no library.
+const web = {
+  canvas: null, ctx: null, nodes: [], edges: [], byId: {}, alpha: 0, frame: null,
+  scanning: false, scanT: 0, hueOf: {}, theta: 0, last: 0, R: 240, extent: 0,
+  HUES: [206, 34, 96, 326, 172, 44, 262, 0],
+  reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
+  async load() {
+    let r; try { r = await (await fetch('/api/library/web')).json(); } catch { return; }
+    const seen = new Set();
+    for (const n of r.nodes) {
+      seen.add(n.id);
+      let node = this.byId[n.id];
+      if (!node) {
+        // Born somewhere inside the cloud; the forces take it from there.
+        const a = Math.random() * Math.PI * 2, b = Math.acos(2 * Math.random() - 1), d = this.R * .5 * Math.cbrt(Math.random());
+        node = this.byId[n.id] = { x: d * Math.sin(b) * Math.cos(a), y: d * Math.sin(b) * Math.sin(a), z: d * Math.cos(b), vx: 0, vy: 0, vz: 0, r: 0, lit: 0 };
+        this.nodes.push(node);
+        this.alpha = Math.max(this.alpha, 1);
+      }
+      Object.assign(node, { id: n.id, t: n.t, top: n.top, sub: n.sub, c: n.c, tier: n.tier, target: 2 + Math.sqrt(n.n || 1) * .5 });
+    }
+    const before = this.nodes.length;
+    this.nodes = this.nodes.filter(n => seen.has(n.id));
+    for (const id of Object.keys(this.byId)) if (!seen.has(id)) delete this.byId[id];
+    if (this.nodes.length !== before) this.alpha = Math.max(this.alpha, .4);
+    const had = this.edges.length;
+    this.edges = r.edges.filter(e => this.byId[e.a] && this.byId[e.b]).map(e => ({ a: this.byId[e.a], b: this.byId[e.b], w: e.w, k: e.k }));
+    if (this.edges.length !== had) this.alpha = Math.max(this.alpha, .3);
+    const tops = [...new Set(this.nodes.map(n => n.top).filter(Boolean))].sort();
+    this.hueOf = Object.fromEntries(tops.map((t, i) => [t, this.HUES[i % this.HUES.length]]));
+    // The cloud's radius grows with the library, gently.
+    this.R = 150 + 14 * Math.sqrt(this.nodes.length);
+    this.canvas.dataset.on = String(view === 'ask' && this.nodes.length > 0);
+    this.wake();
+  },
+  size() {
+    const main = $('.reading'); const dpr = Math.min(2, devicePixelRatio || 1);
+    const pane = $('#pane').getBoundingClientRect(), box = main.getBoundingClientRect();
+    this.canvas.style.top = (pane.top - box.top) + 'px'; this.canvas.style.height = pane.height + 'px';
+    const w = main.clientWidth, h = Math.max(1, Math.round(pane.height));
+    if (this.canvas.width !== w * dpr || this.canvas.height !== h * dpr) {
+      this.canvas.width = w * dpr; this.canvas.height = h * dpr;
+      this.canvas.style.width = w + 'px';
+      this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    this.w = w; this.h = h;
+  },
+  tick() {
+    const N = this.nodes;
+    const g = {};
+    for (const n of N) { if (!n.sub) continue; const s = (g[n.sub] ||= { x: 0, y: 0, z: 0, n: 0 }); s.x += n.x; s.y += n.y; s.z += n.z; s.n++; }
+    for (let i = 0; i < N.length; i++) {
+      const a = N[i];
+      for (let j = i + 1; j < N.length; j++) {
+        const b = N[j]; let dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+        const d2 = Math.max(400, dx * dx + dy * dy + dz * dz);
+        if (d2 > 48000) continue;
+        const k = a.sub && a.sub === b.sub ? 140 : 420;   // same shelf sits closer
+        const f = k / d2; dx *= f; dy *= f; dz *= f;
+        a.vx -= dx; a.vy -= dy; a.vz -= dz; b.vx += dx; b.vy += dy; b.vz += dz;
+      }
+      a.vx -= a.x * .02; a.vy -= a.y * .02; a.vz -= a.z * .02;
+      const s = a.sub && g[a.sub];
+      if (s && s.n > 1) { a.vx += (s.x / s.n - a.x) * .035; a.vy += (s.y / s.n - a.y) * .035; a.vz += (s.z / s.n - a.z) * .035; }
+    }
+    for (const e of this.edges) {
+      const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, dz = e.b.z - e.a.z, d = Math.hypot(dx, dy, dz) || 1;
+      const want = e.k === 'cite' ? 40 : e.k === 'thread' ? 50 : 66;
+      const f = (d - want) / d * (.03 + .04 * e.w);
+      e.a.vx += dx * f; e.a.vy += dy * f; e.a.vz += dz * f; e.b.vx -= dx * f; e.b.vy -= dy * f; e.b.vz -= dz * f;
+    }
+    let ext = 40;
+    for (const n of N) {
+      n.vx *= .8; n.vy *= .8; n.vz *= .8;
+      const sp = Math.hypot(n.vx, n.vy, n.vz); if (sp > 6) { const k = 6 / sp; n.vx *= k; n.vy *= k; n.vz *= k; }
+      n.x += n.vx * this.alpha; n.y += n.vy * this.alpha; n.z += n.vz * this.alpha;
+      const d = Math.hypot(n.x, n.y, n.z); if (d > this.R) { const k = this.R / d; n.x *= k; n.y *= k; n.z *= k; }
+      if (d < this.R && d > ext) ext = d;
+      n.r += (n.target - n.r) * .08;
+    }
+    // Scale the view to the cloud as it actually is, not the radius it may grow to.
+    this.extent += ((Math.min(ext, this.R)) - (this.extent || ext)) * .05;
+    this.alpha *= .992;
+  },
+  project(n) {
+    // Turn about the vertical axis, tilt a little, then perspective.
+    const ct = Math.cos(this.theta), st = Math.sin(this.theta), tilt = .38;
+    const x = n.x * ct + n.z * st, z0 = -n.x * st + n.z * ct;
+    const y = n.y * Math.cos(tilt) - z0 * Math.sin(tilt), z = n.y * Math.sin(tilt) + z0 * Math.cos(tilt);
+    const E = this.extent || this.R;
+    const f = 720, s = f / (f + z + E * .6);
+    const fit = Math.min(this.w / (E * 2.6), this.h / (E * 2.3));
+    return { x: this.w * .55 + x * s * fit, y: this.h * .5 + y * s * fit, s: s * fit, depth: (z + this.R) / (2 * this.R) };
+  },
+  draw(now) {
+    const c = this.ctx; c.clearRect(0, 0, this.w, this.h);
+    const dark = !document.documentElement.dataset.theme ? matchMedia('(prefers-color-scheme: dark)').matches : document.documentElement.dataset.theme === 'dark';
+    const ink = dark ? '221,226,234' : '23,28,36';
+    const css = getComputedStyle(document.documentElement);
+    const rubric = css.getPropertyValue('--rubric').trim(), verd = css.getPropertyValue('--verdigris').trim();
+    const P = new Map(); for (const n of this.nodes) P.set(n, this.project(n));
+    const colour = (n, l, a) => n.c ? n.c : n.top && this.hueOf[n.top] != null ? `hsl(${this.hueOf[n.top]} 45% ${l}% / ${a})` : `rgba(${ink},${a})`;
+    // edges, faint, fading with depth
+    c.lineWidth = .7;
+    for (const e of this.edges) {
+      const a = P.get(e.a), b = P.get(e.b), depth = 1 - (a.depth + b.depth) / 2;
+      const lit = Math.min(e.a.lit, e.b.lit);
+      c.strokeStyle = lit > .05 ? rubric : `rgba(${ink},${(e.k === 'cite' ? .26 : e.k === 'thread' ? .18 : .08) * e.w * (.35 + .65 * depth)})`;
+      c.globalAlpha = lit > .05 ? .2 + .6 * lit : 1;
+      c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
+    }
+    c.globalAlpha = 1;
+    // the haze: additive, so overlapping volumes brighten into a cloud
+    c.globalCompositeOperation = dark ? 'lighter' : 'multiply';
+    const order = [...this.nodes].sort((m, n) => P.get(n).depth - P.get(m).depth);
+    for (const n of order) {
+      const p = P.get(n), near = 1 - p.depth, R = (n.r * 9 + 18) * p.s;
+      const grd = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
+      const hazeA = (dark ? .17 : .09) * (.4 + .6 * near);
+      if (n.lit > .02) { grd.addColorStop(0, rubric); c.globalAlpha = .5 * n.lit; n.lit *= .992; }
+      else { grd.addColorStop(0, colour(n, dark ? 62 : 40, 1)); c.globalAlpha = hazeA; }
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = grd; c.beginPath(); c.arc(p.x, p.y, R, 0, Math.PI * 2); c.fill();
+    }
+    c.globalCompositeOperation = 'source-over';
+    // the volumes themselves
+    for (const n of order) {
+      const p = P.get(n), near = 1 - p.depth;
+      c.globalAlpha = (n.tier === 0 ? .3 : .55) * (.35 + .65 * near);
+      c.fillStyle = n.lit > .02 ? rubric : colour(n, dark ? 70 : 38, 1);
+      c.beginPath(); c.arc(p.x, p.y, Math.max(.6, n.r * p.s), 0, Math.PI * 2); c.fill();
+      if (n.tier >= 2) { c.lineWidth = .7; c.strokeStyle = c.fillStyle; c.beginPath(); c.arc(p.x, p.y, n.r * p.s + 2, 0, Math.PI * 2); c.stroke(); }
+    }
+    c.globalAlpha = 1;
+    // retrieval: a ring travelling out through the cloud, verdigris
+    if (this.scanning || this.scanT > 0) {
+      const t = ((now / 1400) % 1), R = t * Math.max(this.w, this.h) * .6;
+      c.strokeStyle = verd; c.globalAlpha = (1 - t) * .3 * (this.scanning ? 1 : this.scanT);
+      c.lineWidth = 1.2; c.beginPath(); c.arc(this.w * .55, this.h * .5, R, 0, Math.PI * 2); c.stroke();
+      c.globalAlpha = 1; if (!this.scanning) this.scanT = Math.max(0, this.scanT - .02);
+    }
+  },
+  loop(now) {
+    this.frame = null;
+    this.size();
+    const dt = this.last ? Math.min(.1, (now - this.last) / 1000) : 0; this.last = now;
+    if (!this.reduced && this.canvas.dataset.on === 'true') this.theta += dt * (2 * Math.PI / 110);  // one turn in ~two minutes
+    if (this.alpha > .003) this.tick();
+    this.draw(now);
+    const on = this.canvas.dataset.on === 'true';
+    if (on || this.alpha > .003) this.frame = requestAnimationFrame(t => this.loop(t));
+    else this.last = 0;
+  },
+  wake() { if (!this.frame) this.frame = requestAnimationFrame(t => this.loop(t)); },
+  light(ids) { for (const id of ids) { const n = this.byId[id]; if (n) n.lit = 1; } this.wake(); },
+  scan(on) { this.scanning = on; if (!on) this.scanT = 1; this.wake(); },
+  init() {
+    this.canvas = $('#web'); this.ctx = this.canvas.getContext('2d');
+    this.size(); this.load();
+    addEventListener('resize', () => this.wake());
+    setInterval(() => this.load(), 30000);
+    // Keep the turn going only while the pane is in view.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.wake(); });
+  },
+};
 
 /* ── appearance ───────────────────────────────────────────────────────── */
 const saved = localStorage.getItem('appearance');
@@ -416,21 +769,34 @@ $('#themer').onclick = () => {
   const next = now === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = next;
   localStorage.setItem('appearance', next);
+  web.wake();
 };
 
 /* ── views ────────────────────────────────────────────────────────────── */
 function setView(v) {
   view = v;
-  for (const k of ['ask','find','threads','open']) {
+  for (const k of ['ask','find','threads','open','make']) {
     $('#view-' + k).hidden = k !== v;
     const t = $('#tab-' + k); t.setAttribute('aria-selected', String(k === v));
   }
-  $('#composer').hidden = v === 'threads' || v === 'open';
+  $('#composer').hidden = v === 'threads' || v === 'open' || v === 'make';
   const e = $('#entry');
-  e.placeholder = v === 'ask' ? 'Ask the library something' : 'Search for a passage';
+  e.placeholder = placeholderFor(v);
   $('#subjects').hidden = v === 'threads' || v === 'open';
   if (v === 'threads') loadThreads();
+  if (v === 'make') renderMake();
+  $('#web').dataset.on = String(v === 'ask' && web.nodes.length > 0); web.wake();
   e.focus();
+}
+// One cartridge scoped is a room you have walked into; the composer says so.
+function roomName() {
+  if (cartridges.size !== 1) return null;
+  return rackIndex[[...cartridges][0]]?.name || null;
+}
+function placeholderFor(v) {
+  const room = roomName();
+  if (v === 'ask') return room ? `Ask ${room}'s shelf` : 'Ask the library something';
+  return room ? `Search ${room}'s shelf` : 'Search for a passage';
 }
 
 /* ── holdings line ────────────────────────────────────────────────────── */
@@ -451,12 +817,15 @@ let openDoc = null;
 const collapsed = new Set(JSON.parse(localStorage.getItem('shelf.collapsed') || '[]'));
 
 function volHtml(d) {
+  const c = d.cartridge;
   return `
     <div class="vol ${d.id === openDoc ? 'current' : ''}">
       <button class="vol-t" onclick="openVolume('${d.id}')" title="Open">${esc(d.title)}</button>
       <div class="vol-m">
         <span class="state s${d.tier}" title="${STATE[d.tier]}"></span>
         <span>${STATE[d.tier]}</span>
+        ${c ? `<span class="dot" style="--c:${esc(c.colour)}" title="from ${esc(c.name)}"></span>` : ''}
+        ${d.readings_only ? `<span class="badge" title="The owner shared their reading, not the text">reading only</span>` : ''}
         <span>·</span>
         <span>${d.page_count ? d.page_count + 'pp' : d.kind}</span>
         <span>·</span>
@@ -481,30 +850,123 @@ async function loadShelf() {
     $('#shelf').innerHTML = `<div class="empty"><b>Nothing shelved yet.</b>Drop a paper above. It is searchable within seconds; reading it takes a few minutes more.</div>`;
     return;
   }
-  const groups = {};
-  for (const d of docs) {
-    const names = d.categories?.length ? d.categories : ['Unsorted'];
-    for (const n of names) (groups[n] ||= []).push(d);
+  // Top shelf › sub-shelf › volume. Each volume sits in exactly one place; anything the
+  // library has not shelved yet waits at the bottom.
+  const shown = cartridges.size ? docs.filter(d => d.cartridge && cartridges.has(d.cartridge.id)) : docs;
+  const tops = {};
+  const waiting = [];
+  for (const d of shown) {
+    if (!d.shelf) { waiting.push(d); continue; }
+    const top = (tops[d.shelf.top] ||= { id: d.shelf.top_id, subs: {}, n: 0 });
+    (top.subs[d.shelf.sub] ||= { id: d.shelf.sub_id, vols: [] }).vols.push(d);
+    top.n++;
   }
-  const order = Object.keys(groups).sort((a, b) =>
-    a === 'Unsorted' ? 1 : b === 'Unsorted' ? -1 : groups[b].length - groups[a].length || a.localeCompare(b));
-  $('#shelf').innerHTML = order.map(name => {
-    const id = catIndex[name]; const open = !collapsed.has(name);
-    return `<div class="shelf-group" data-open="${open}">
+  const byCount = (a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0]);
+  const group = (key, name, id, n, inner, cls = 'shelf-group') => {
+    const open = !collapsed.has(key);
+    return `<div class="${cls}" data-open="${open}">
       <div class="shelf-h">
-        <button class="caret" aria-expanded="${open}" aria-label="Collapse ${esc(name)}" onclick="toggleGroup('${esc(name).replace(/'/g,"\\'")}')">▾</button>
-        <button class="shelf-name" aria-pressed="${!!(id && subjects.has(id))}" title="${id ? 'Narrow to this subject' : ''}"
+        <button class="caret" aria-expanded="${open}" aria-label="Collapse ${esc(name)}" onclick="toggleGroup('${esc(key).replace(/'/g,"\\'")}')">▾</button>
+        <button class="shelf-name" aria-pressed="${!!(id && subjects.has(id))}" title="${id ? 'Narrow to this shelf' : ''}"
                 onclick="${id ? `toggleSubject('${id}')` : ''}">${esc(name)}</button>
-        <span class="shelf-n">${groups[name].length}</span>
+        <span class="shelf-n">${n}</span>
       </div>
-      <div class="shelf-vols">${groups[name].map(volHtml).join('')}</div>
+      <div class="shelf-vols">${inner}</div>
     </div>`;
+  };
+  let h = Object.entries(tops).sort(byCount).map(([tname, top]) => {
+    const subs = Object.entries(top.subs).sort((a, b) => b[1].vols.length - a[1].vols.length || a[0].localeCompare(b[0]));
+    const inner = subs.map(([sname, sub]) => {
+      const key = tname + ' › ' + sname;
+      // Sub-shelves start closed unless opened before: twenty open runs is a wall.
+      if (!collapsed.has(key) && !opened.has(key)) collapsed.add(key);
+      return group(key, sname, sub.id, sub.vols.length, sub.vols.map(volHtml).join(''), 'shelf-sub');
+    }).join('');
+    return group(tname, tname, top.id, top.n, inner);
   }).join('');
+  if (waiting.length) {
+    const read = waiting.filter(d => d.tier >= 1), unread = waiting.filter(d => d.tier === 0);
+    const label = read.length ? 'Not yet shelved' : 'Not yet read';
+    h += group('__waiting', label, null, waiting.length,
+      (read.length && Object.keys(tops).length ? `<div class="empty" style="padding:4px 0 8px">Read, but the shelf has not placed ${read.length === 1 ? 'it' : 'them'} yet — <button class="linkish" onclick="reshelve(this, false)">shelve now</button></div>` : '')
+      + [...read, ...unread].map(volHtml).join(''));
+  }
+  $('#shelf').innerHTML = h;
+}
+const opened = new Set(JSON.parse(localStorage.getItem('shelf.opened') || '[]'));
+
+async function reshelve(btn, rebuild = true) {
+  if (rebuild && btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1'; btn.textContent = 'reshelve — rebuild the whole shelf?';
+    setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'reshelve'; }, 5000);
+    return;
+  }
+  btn.dataset.armed = ''; btn.textContent = 'reshelve';
+  await fetch('/api/shelf/reshelve?rebuild=' + rebuild, { method:'POST' });
+  say(rebuild ? 'Reorganising the shelf. A few minutes; the shelf updates as it goes.' : 'Shelving the unshelved.');
+  loadJobs();
+}
+
+/* ── the rack ─────────────────────────────────────────────────────────── */
+async function loadRack(justInserted) {
+  let r;
+  try { r = await (await fetch('/api/cartridges')).json(); } catch { return; }
+  palette = r.palette || [];
+  rackIndex = Object.fromEntries(r.cartridges.map(c => [c.id, c]));
+  for (const id of [...cartridges]) if (!rackIndex[id]) cartridges.delete(id);
+  $('#rack').innerHTML = r.cartridges.map(c => `
+    <button class="spine ${c.id === justInserted ? 'inserting' : ''}" style="--c:${esc(c.colour)}; --w:${26 + Math.round(Math.min(c.document_count, 80) / 80 * 16)}px" data-level="${c.level}"
+            aria-pressed="${cartridges.has(c.id)}" title="${esc(c.name)} · ${c.level} · ${c.document_count} volumes · v${c.version}${c.made_by ? ' · made by ' + esc(c.made_by) : ''}"
+            onclick="toggleCartridge('${c.id}')">
+      <span class="eject" onclick="event.stopPropagation(); ejectCartridge('${c.id}', this)" title="Take it off the rack">eject</span>
+      <span class="swatch">${c.icon_svg || ''}</span>
+      <span class="t">${esc(c.name)}</span>
+      <span class="n">${c.document_count}</span>
+      <span class="lvl"></span>
+    </button>`).join('') + `<button class="slot" onclick="openMake()" title="Make a cartridge from this library">+</button>`;
+  const room = roomName();
+  $('#rack-note').textContent = room ? `in ${room}'s shelf` : cartridges.size ? `${cartridges.size} rooms` : r.cartridges.length ? '' : 'nothing inserted yet — drop a cartridge, or make one';
+}
+function toggleCartridge(id) {
+  cartridges.has(id) ? cartridges.delete(id) : cartridges.add(id);
+  loadRack(); loadShelf();
+  $('#entry').placeholder = placeholderFor(view);
+  const room = roomName();
+  desk(room ? `in ${esc(room)}'s shelf` : cartridges.size ? `across ${cartridges.size} cartridges` : '');
+  if (view === 'find' && $('#entry').value.trim().length > 1) runFind($('#entry').value.trim());
+}
+async function ejectCartridge(id, btn) {
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1'; btn.textContent = 'eject — sure?';
+    setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'eject'; }, 4000);
+    return;
+  }
+  const name = rackIndex[id]?.name || 'cartridge';
+  const r = await fetch('/api/cartridges/' + id, { method:'DELETE' });
+  const j = await r.json();
+  if (!r.ok) { say(j.detail || 'Could not eject.', true); return; }
+  cartridges.delete(id);
+  say(`${name} ejected — ${j.documents_removed} volumes went with it, ${j.documents_kept} were yours and stayed.`);
+  loadRack(); loadShelf(); holdings(); loadSubjects();
+}
+async function insertCartridge(file) {
+  say(`Inserting ${file.name}…`);
+  const fd = new FormData(); fd.append('file', file);
+  const r = await fetch('/api/cartridges/import', { method:'POST', body:fd });
+  const j = await r.json();
+  if (!r.ok) { say(j.detail || 'That cartridge could not be inserted.', true); return false; }
+  if (j.noop) say(`${j.name} v${j.version} is already on the rack.`);
+  else say(`${j.name} is on the rack — ${j.documents_introduced} new volumes, ${j.documents_joined} already here, ${j.artifacts} readings`
+    + (j.vectors_embedded ? ` · ${j.vectors_embedded} re-embedded` : '') + '. Threads will rebuild across it.');
+  loadRack(j.cartridge_id);
+  return true;
 }
 
 function toggleGroup(name) {
-  collapsed.has(name) ? collapsed.delete(name) : collapsed.add(name);
+  if (collapsed.has(name)) { collapsed.delete(name); opened.add(name); }
+  else { collapsed.add(name); opened.delete(name); }
   localStorage.setItem('shelf.collapsed', JSON.stringify([...collapsed]));
+  localStorage.setItem('shelf.opened', JSON.stringify([...opened]));
   loadShelf();
 }
 
@@ -530,7 +992,7 @@ function say(msg, bad) {
 }
 
 /* ── accession ────────────────────────────────────────────────────────── */
-const SUPPORTED = /\.(pdf|md|markdown|txt|text|rst)$/i;
+const SUPPORTED = /\.(pdf|md|markdown|txt|text|rst|zip)$/i;
 
 // A dropped folder arrives as a directory entry, not a list of files. Walk it.
 async function collect(items) {
@@ -559,6 +1021,11 @@ async function collect(items) {
 async function accession(files) {
   files = [...files].filter(f => SUPPORTED.test(f.name));
   if (!files.length) { say('Nothing there the library can read.', true); return; }
+  // A zip is a cartridge; it goes on the rack, not the shelf.
+  const zips = files.filter(f => /\.zip$/i.test(f.name));
+  for (const z of zips) await insertCartridge(z);
+  files = files.filter(f => !/\.zip$/i.test(f.name));
+  if (!files.length) { loadShelf(); holdings(); loadSubjects(); return; }
   const many = files.length > 1;
   let shelved = 0, dupes = 0, failed = 0;
   for (let i = 0; i < files.length; i++) {
@@ -613,7 +1080,7 @@ async function loadJobs() {
     const paused = j.state === 'yielded';
     return `<div class="job ${paused ? 'paused' : ''}">
       ${esc((j.document_title || '').slice(0,30))}<br>
-      ${paused ? 'paused — you are talking' : `${j.kind === 'tier2' ? 'annotating' : 'reading'} · section ${j.progress_current} of ${j.progress_total}`}
+      ${paused ? 'paused — you are talking' : j.kind === 'reshelve' ? `shelving · ${j.progress_current} of ${j.progress_total}` : `${j.kind === 'tier2' ? 'annotating' : 'reading'} · section ${j.progress_current} of ${j.progress_total}`}
       <span class="bar"><i style="width:${pct}%"></i></span>
     </div>`;
   }).join('') + (waiting ? `<div class="job">${waiting} waiting</div>` : '');
@@ -623,12 +1090,16 @@ async function loadJobs() {
 async function loadSubjects() {
   let cats = [];
   try { cats = await (await fetch('/api/categories')).json(); } catch { return; }
-  const used = cats.filter(c => c.documents > 0);
+  // Chips are the top shelves. Sub-shelves are reached from the shelf itself; a chip
+  // row of thirty tags was the mess this replaces. Before the shelf is organised, fall
+  // back to the tags in use.
+  const tops = cats.filter(c => !c.parent_id && c.shelved > 0);
+  const used = tops.length ? tops : cats.filter(c => c.documents > 0);
   $('#subjects').innerHTML = used.length
     ? used.map(c => `<span class="subject" role="button" tabindex="0" aria-pressed="${subjects.has(c.id)}"
         onclick="toggleSubject('${c.id}')"
         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSubject('${c.id}')}"
-        >${esc(c.name)}<i>${c.documents}</i></span>`).join('')
+        >${esc(c.name)}<i>${c.shelved || c.documents}</i></span>`).join('')
       + (subjects.size ? `<span class="subject" role="button" tabindex="0" onclick="clearSubjects()">clear</span>` : '')
     : '';
 }
@@ -652,6 +1123,81 @@ function shortTitle(t) {
   return words.slice(0, 5).join(' ') + (words.length > 5 ? '…' : '');
 }
 
+/* ── markdown ─────────────────────────────────────────────────────────── */
+// Small on purpose: what a model and a .md file actually emit. Inline pass escapes HTML
+// first, then dresses **bold**, *italic*, `code`, [links](u), and finally the [n]
+// citation marks, so a mark is never mistaken for a link.
+function inline(s) {
+  return esc(s)
+    .replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>')
+    .replace(/(^|[^\w])_([^_\n]+)_(?!\w)/g, '$1<em>$2</em>')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, (_, l, u) => `<a href="${u}" target="_blank" rel="noopener">${l}</a>`)
+    .replace(/\[([^\]\d][^\]]*)\]\([^)]*\)/g, '$1')   // anchors and relative links: keep the words
+    .replace(/\[(\d+(?:,\s*\d+)*)\]/g, (_, nums) => `<span class="mark" data-n="${nums.split(',').map(n => n.trim()).join(' ')}">[${nums}]</span>`);
+}
+// Returns block-level HTML strings, so the answer renderer can hang its margin notes off
+// each block. A fenced code block is one block; a list is one block.
+function mdBlocks(text) {
+  const lines = String(text || '').replace(/\r/g, '').split('\n');
+  const out = []; let i = 0;
+  const para = [];
+  const flush = () => { if (para.length) { out.push(`<p>${inline(para.join(' '))}</p>`); para.length = 0; } };
+  while (i < lines.length) {
+    const ln = lines[i];
+    if (/^\s*```/.test(ln)) {                       // fence
+      flush(); const buf = []; i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
+      i++; out.push(`<pre><code>${esc(buf.join('\n'))}</code></pre>`); continue;
+    }
+    if (!ln.trim()) { flush(); i++; continue; }
+    let m;
+    if ((m = ln.match(/^(#{1,6})\s+(.*)$/))) { flush(); const l = Math.min(m[1].length, 4); out.push(`<h${l}>${inline(m[2])}</h${l}>`); i++; continue; }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(ln)) { flush(); out.push('<hr>'); i++; continue; }
+    if (/^\s*>/.test(ln)) {                          // quote
+      flush(); const buf = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ''));
+      out.push(`<blockquote>${mdBlocks(buf.join('\n')).join('')}</blockquote>`); continue;
+    }
+    if (/^\s*\|.*\|\s*$/.test(ln) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {  // table
+      flush(); const rows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(lines[i++]);
+      const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => inline(c.trim()));
+      const head = cells(rows[0]); const body = rows.slice(2).map(cells);
+      out.push(`<table><thead><tr>${head.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>${
+        body.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+      continue;
+    }
+    if ((m = ln.match(/^(\s*)([-*+]|\d+[.)])\s+/))) {   // list (with nesting by indent)
+      flush();
+      const items = [];
+      while (i < lines.length && (m = lines[i].match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/))) {
+        const depth = Math.floor(m[1].replace(/\t/g, '  ').length / 2);
+        let text = m[3]; i++;
+        while (i < lines.length && lines[i].trim() && !/^(\s*)([-*+]|\d+[.)])\s+/.test(lines[i]) && /^\s+/.test(lines[i])) text += ' ' + lines[i++].trim();
+        items.push({ depth, ordered: /\d/.test(m[2]), text });
+      }
+      const build = (start, depth) => {
+        const tag = items[start].ordered ? 'ol' : 'ul'; let h = `<${tag}>`; let k = start;
+        while (k < items.length && items[k].depth >= depth) {
+          if (items[k].depth === depth) { h += `<li>${inline(items[k].text)}`; k++;
+            if (k < items.length && items[k].depth > depth) { const [sub, next] = build(k, items[k].depth); h += sub; k = next; }
+            h += '</li>';
+          } else k++;
+        }
+        return [h + `</${tag}>`, k];
+      };
+      out.push(build(0, items[0].depth)[0]); continue;
+    }
+    para.push(ln.trim()); i++;
+  }
+  flush();
+  return out;
+}
+function md(text) { return `<div class="md">${mdBlocks(text).join('')}</div>`; }
+
 function markup(text) {
   return esc(text).replace(/\[(\d+(?:,\s*\d+)*)\]/g, (_, nums) => {
     const ns = nums.split(',').map(n => n.trim());
@@ -660,20 +1206,26 @@ function markup(text) {
 }
 
 function renderAnswer(el, text) {
-  const paras = text.split(/\n{2,}/).filter(p => p.trim());
-  el.innerHTML = paras.map(p => {
-    const used = [...p.matchAll(/\[(\d+(?:,\s*\d+)*)\]/g)]
-      .flatMap(m => m[1].split(',').map(n => parseInt(n.trim())));
+  // One markdown block per row of the apparatus grid: the notes for a block sit beside it.
+  const blocks = mdBlocks(text);
+  el.classList.add('md');
+  el.innerHTML = blocks.map(html => {
+    const used = [...html.matchAll(/class="mark" data-n="([\d ]+)"/g)]
+      .flatMap(m => m[1].split(' ').map(n => parseInt(n)));
     const uniq = [...new Set(used)];
     const notes = uniq.map(n => {
       const s = sources.find(x => x.n === n);
       if (!s) return '';
       const short = shortTitle(s.title);
       const where = (s.section || '').split(' › ').slice(1).join(' › ');
-      return `<span class="note" data-n="${n}"><b>${esc(short)}</b>${
+      const c = s.cartridge;
+      // A note from a cartridge wears its colour beside the rubric; a reading-only
+      // source says so, since what it cites is their reading, not the page.
+      const who = c ? `<span class="who">${esc(c.name)}${s.readings_only ? "'s reading" : ''}</span>` : '';
+      return `<span class="note ${c ? 'from' : ''}" data-n="${n}" ${c ? `style="--c:${esc(c.colour)}"` : ''}>${who}<b>${esc(short)}</b>${
         s.page ? `<span class="pg">p.${s.page}</span>` : ''}${where ? ` · ${esc(where.slice(0,40))}` : ''}</span>`;
     }).join('');
-    return `<p>${markup(p)}</p><div class="apparatus">${notes}</div>`;
+    return `${html}<div class="apparatus">${notes}</div>`;
   }).join('');
 
   // Hovering a marker lights its note, and vice versa.
@@ -706,10 +1258,11 @@ async function ask(text) {
   wrap.scrollIntoView({ block:'start', behavior:'smooth' });
   desk('<span class="working">consulting the shelf</span>');
   sources = [];
+  web.scan(true);
 
   const body = { message:text, conversational:$('#multi').checked, model:$('#model').value,
                  conversation_id:convId, category_ids:subjects.size ? [...subjects] : null,
-                 stance };
+                 cartridge_ids:cartridges.size ? [...cartridges] : null, stance };
   let answer = '', ev = null, buf = '', thought = '';
   try {
     const res = await fetch('/api/chat', {
@@ -731,24 +1284,28 @@ async function ask(text) {
           if (m.rewritten) asked.insertAdjacentHTML('beforeend',
             `<span class="rewrote">looked for: ${esc(m.rewritten)}</span>`);
           desk('<span class="working">thinking</span>');
+          if (m.retrieving) web.scan(true);
         }
         else if (ev === 'sources') {
           sources = JSON.parse(raw);
+          web.scan(false); web.light([...new Set(sources.map(s => s.document_id))]);
           desk(`<span class="working">${sources.length} passages in hand</span>`);
         }
         else if (ev === 'thinking') {
+          if (!thought) murmur.start(asked);
           thought += raw;
-          // Show only the tail; the point is a pulse of activity, not a transcript.
-          // With thinking hidden, the desk still says it is happening.
-          if (showThinking) said.innerHTML = `<p class="considering">${esc(thought.slice(-160))}</p>`;
-          desk(`<span class="working">${showThinking ? 'considering' : 'thinking'}</span>`);
+          murmur.add(raw);
+          desk(`<span class="working">considering</span>`);
         }
         else if (ev === 'token') {
+          if (thought && answer === '') murmur.stop();
           answer += raw;
-          said.innerHTML = `<p>${markup(answer)}</p>`;
+          said.classList.add('md');
+          said.innerHTML = mdBlocks(answer).join('');
           if (thought) desk('');
         }
         else if (ev === 'done') {
+          murmur.stop();
           const d = JSON.parse(raw);
           renderAnswer(said, d.answer);
           const cited = (d.cited || []).length;
@@ -759,12 +1316,14 @@ async function ask(text) {
             : '');
         }
         else if (ev === 'error') {
+          murmur.stop(); web.scan(false);
           said.innerHTML = `<p style="color:var(--amber)">${esc(raw)}</p>`;
           desk('');
         }
       }
     }
   } catch (e) {
+    murmur.stop(); web.scan(false);
     said.innerHTML = `<p style="color:var(--amber)">${esc(String(e))}</p>`;
     desk('');
   }
@@ -775,7 +1334,8 @@ async function ask(text) {
 let findTimer;
 async function runFind(q) {
   const cats = subjects.size ? '&categories=' + [...subjects].join(',') : '';
-  const r = await (await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=10${cats}`)).json();
+  const carts = cartridges.size ? '&cartridges=' + [...cartridges].join(',') : '';
+  const r = await (await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=10${cats}${carts}`)).json();
   $('#view-find').innerHTML = r.hits.length ? r.hits.map(h => `
     <div class="hit">
       <div class="hit-h">
@@ -850,6 +1410,8 @@ async function openVolume(id) {
   loadShelf();
 
   const state = STATE[d.tier] || 'listed';
+  // A .md or .rst volume is rendered as it was written; a PDF's text is shown as text.
+  const isMd = d.kind === 'doc' || d.kind === 'note';
   const toc = d.sections.filter(s => s.title).map((s, i) =>
     `<li class="l${Math.min(s.level, 3)}"><a href="#sec-${i}">${esc(s.title)}</a></li>`).join('');
 
@@ -858,9 +1420,13 @@ async function openVolume(id) {
       ? `<h3 id="sec-${i}">${esc(s.title)}${s.page_start ? `<small>p.${s.page_start}</small>` : ''}</h3>`
       : '';
     if (s.summary) h += `<p class="lead">${esc(s.summary)}</p>`;
-    h += s.passages.map(p =>
-      `<p class="pass">${esc(p.text)}</p><div class="gloss">${p.reflection ? `<span>${esc(p.reflection)}</span>` : ''}</div>`
-    ).join('');
+    h += s.passages.map(p => {
+      const notes = (p.reflections || []).map(r => r.cartridge
+        ? `<span class="theirs" style="--c:${esc(r.cartridge.colour)}"><i>${esc(r.cartridge.name)}</i>${esc(r.text)}</span>`
+        : `<span>${esc(r.text)}</span>`).join('');
+      const body = isMd ? `<div class="pass md">${mdBlocks(p.text).join('')}</div>` : `<p class="pass">${esc(p.text)}</p>`;
+      return `${body}<div class="gloss">${notes}</div>`;
+    }).join('');
     return h;
   }).join('');
 
@@ -869,6 +1435,7 @@ async function openVolume(id) {
       <h2 class="reader-t">${esc(d.title)}</h2>
       <div class="reader-m">
         <span>${state}</span>
+        ${d.cartridge ? `<span><span class="dot" style="--c:${esc(d.cartridge.colour)}"></span>from ${esc(d.cartridge.name)}</span>` : ''}
         ${d.page_count ? `<span>${d.page_count} pages</span>` : ''}
         <span>${d.sections.length} sections</span>
         ${d.tier === 0 ? `<button class="linkish" onclick="readDoc('${d.id}', 1)">have it read</button>` : ''}
@@ -876,9 +1443,88 @@ async function openVolume(id) {
         ${d.tier >= 2 ? `<span title="Reflections sit in the margin">marginalia in the margin</span>` : ''}
       </div>
     </div>
+    ${d.readings_only ? `<p class="reading-only">${esc(d.cartridge?.name || 'The owner')} shared their reading of this volume, not the text. What follows is what their library understood of each section.</p>` : ''}
     ${toc ? `<ul class="toc">${toc}</ul>` : ''}
     <div class="page">${body}</div>`;
   $('#pane').scrollTop = 0;
+}
+
+/* ── make a cartridge ─────────────────────────────────────────────────── */
+const GLYPHS = {
+  book:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>',
+  shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>',
+  flask:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 3h6M10 3v6l-5 9a2 2 0 002 3h10a2 2 0 002-3l-5-9V3"/></svg>',
+  graph:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="18" r="2"/><circle cx="12" cy="7" r="2"/><circle cx="18" cy="15" r="2"/><path d="M7.5 16.5L11 9M13.5 8.5l3 5"/></svg>',
+  gear:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>',
+  leaf:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 19C5 9 11 4 20 4c0 9-5 15-15 15z"/><path d="M5 19l8-8"/></svg>',
+};
+const make = { name:'', colour:null, glyph:'book', level:'readings', timer:null };
+function openMake() { $('#tab-make').hidden = false; setView('make'); }
+function renderMake() {
+  const el = $('#view-make');
+  if (!palette.length) palette = ['#2f6f8f','#7a5c2e','#4f7a3a','#8a3d5e','#3e6b6b','#9a6b1f','#5a4b8a','#6f6f6f'];
+  make.colour ||= palette[Object.keys(rackIndex).length % palette.length];
+  const scope = [];
+  if (subjects.size) scope.push(`${subjects.size} subject${subjects.size > 1 ? 's' : ''}`);
+  if (cartridges.size) scope.push([...cartridges].map(id => rackIndex[id]?.name).filter(Boolean).join(', '));
+  el.innerHTML = `<div class="make">
+    <h2>Make a cartridge</h2>
+    <p class="why">A cartridge is a slice of this library another one can put on its rack. The level sets what leaves: the volumes themselves, only what this library understood of them, or just the fact that they exist.</p>
+    <div class="row"><label>Name</label><input type="text" id="mk-name" value="${esc(make.name)}" placeholder="Security's shelf" oninput="make.name=this.value; previewMake()"/></div>
+    <div class="row"><label>Colour</label><div class="swatches">${palette.map(c =>
+      `<button style="--c:${c}" aria-pressed="${c === make.colour}" title="${c}" onclick="make.colour='${c}'; renderMake()"></button>`).join('')}</div></div>
+    <div class="row"><label>Icon</label><div class="glyphs">${Object.entries(GLYPHS).map(([k, svg]) =>
+      `<button aria-pressed="${k === make.glyph}" title="${k}" onclick="make.glyph='${k}'; renderMake()">${svg}</button>`).join('')}</div></div>
+    <div class="row"><label>Level</label><div class="levels">
+      ${[['full','Full','The originals, every passage, and every reading. The receiver can open the pages.'],
+         ['readings','Readings','What this library wrote about each section, and its margin notes. Searchable and citable; the text itself never leaves.'],
+         ['catalogue','Catalogue','A summary and subjects per volume. Enough to know the material exists and ask for it.']].map(([v, l, d]) =>
+        `<label><input type="radio" name="mk-level" value="${v}" ${v === make.level ? 'checked' : ''} onchange="make.level='${v}'; previewMake()"/><span>${l}<small>${d}</small></span></label>`).join('')}
+    </div></div>
+    <div class="row"><label>Contents</label><div style="font:13px/1.5 var(--serif); color:var(--dim)">${
+      scope.length ? `What is scoped now — ${esc(scope.join(' · '))}. Change the scope with the subject chips and the rack.` : 'Nothing is scoped, so the whole library goes in. Pick subjects or a cartridge to narrow it.'}</div></div>
+    <div class="preview" id="mk-preview">…</div>
+    <button class="go" id="mk-go" onclick="exportCartridge()" ${make.name.trim() ? '' : 'disabled'}>make it</button>
+  </div>`;
+  previewMake();
+}
+function makeSelection() {
+  return { category_ids:[...subjects], cartridge_ids:[...cartridges], document_ids:[], level:make.level };
+}
+function previewMake() {
+  $('#mk-go').disabled = !make.name.trim();
+  clearTimeout(make.timer);
+  make.timer = setTimeout(async () => {
+    const sel = makeSelection();
+    let r;
+    try {
+      r = await (await fetch('/api/cartridges/preview', { method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(sel.category_ids.length || sel.cartridge_ids.length ? sel : { ...sel, document_ids: await allDocumentIds() }) })).json();
+    } catch { return; }
+    const c = r.counts || {};
+    const mb = ((r.estimated_bytes || 0) / 1e6).toFixed(1);
+    $('#mk-preview').innerHTML = `<b>${c.documents || 0} volumes</b> · ${c.chunks || 0} passages · ${c.artifacts || 0} readings · ${c.vectors || 0} vectors${c.originals ? ` · ${c.originals} originals` : ''} · about ${mb} MB<br>`
+      + (r.titles || []).slice(0, 8).map(esc).join(' · ') + ((r.titles || []).length > 8 ? ' …' : '');
+  }, 250);
+}
+async function allDocumentIds() {
+  const docs = await (await fetch('/api/documents')).json();
+  return docs.map(d => d.id);
+}
+async function exportCartridge() {
+  const sel = makeSelection();
+  if (!sel.category_ids.length && !sel.cartridge_ids.length) sel.document_ids = await allDocumentIds();
+  const body = { ...sel, name:make.name.trim(), colour:make.colour, icon_svg:GLYPHS[make.glyph] };
+  $('#mk-go').disabled = true; $('#mk-go').textContent = 'making…';
+  try {
+    const r = await fetch('/api/cartridges/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    if (!r.ok) { say((await r.json()).detail || 'Could not make it.', true); return; }
+    const blob = await r.blob();
+    const name = (r.headers.get('content-disposition') || '').match(/filename="?([^";]+)/)?.[1] || 'cartridge.zip';
+    const a = Object.assign(document.createElement('a'), { href:URL.createObjectURL(blob), download:name });
+    a.click(); URL.revokeObjectURL(a.href);
+    say(`${make.name} is made — ${name}.`);
+  } finally { $('#mk-go').disabled = false; $('#mk-go').textContent = 'make it'; }
 }
 
 /* ── composer ─────────────────────────────────────────────────────────── */
@@ -903,20 +1549,8 @@ async function loadModels() {
   stanceMeta = m.stances || [];
   $('#model').innerHTML = Object.entries(m.options)
     .map(([k,v]) => `<option value="${v}" ${v === m.default ? 'selected' : ''}>${k}</option>`).join('');
-  $('#think').checked = showThinking;
-  syncThinkToggle();
   renderStanceMenu();
 }
-
-function syncThinkToggle() {
-  // Only meaningful for a model that thinks; the others just answer.
-  $('#think-wrap').hidden = !thinkingModels[$('#model').value];
-}
-$('#model').addEventListener('change', syncThinkToggle);
-$('#think').addEventListener('change', e => {
-  showThinking = e.target.checked;
-  localStorage.setItem('showThinking', showThinking ? 'on' : 'off');
-});
 
 function renderStanceMenu() {
   const byId = Object.fromEntries(stanceMeta.map(s => [s.id, s]));
@@ -949,7 +1583,8 @@ $('#view-ask').innerHTML = `<div class="empty invitation"><b>Ask the library som
 <span>It answers from what it has read, and marks in the margin exactly which page each claim
 came from. Anything unmarked is its own reasoning.</span></div>`;
 
-setView('ask'); loadModels(); holdings(); loadShelf(); loadSubjects(); loadJobs();
+setView('ask'); loadModels(); holdings(); loadRack().then(loadShelf); loadSubjects(); loadJobs();
+web.init();
 setInterval(loadJobs, 4000);
 setInterval(() => { holdings(); }, 30000);
 </script>

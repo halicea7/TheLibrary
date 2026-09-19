@@ -60,6 +60,11 @@ def _build_sql(use_dense: bool, use_lexical: bool, use_reflections: bool = False
           select 1 from chunk_category cc
           where cc.chunk_id = c.id and cc.category_id = any(cast(:cats as uuid[]))
       ))
+      and (cast(:carts as uuid[]) is null or exists (
+          select 1 from cartridge_document cd
+          where cd.document_id = c.document_id
+            and cd.cartridge_id = any(cast(:carts as uuid[]))
+      ))
 
         union all
         select a.target_id as chunk_id, e.vec
@@ -76,6 +81,11 @@ def _build_sql(use_dense: bool, use_lexical: bool, use_reflections: bool = False
           select 1 from chunk_category cc
           where cc.chunk_id = c.id and cc.category_id = any(cast(:cats as uuid[]))
       ))
+      and (cast(:carts as uuid[]) is null or exists (
+          select 1 from cartridge_document cd
+          where cd.document_id = c.document_id
+            and cd.cartridge_id = any(cast(:carts as uuid[]))
+      ))
 
     )"""
             if use_reflections
@@ -91,6 +101,11 @@ def _build_sql(use_dense: bool, use_lexical: bool, use_reflections: bool = False
       ) or exists (
           select 1 from chunk_category cc
           where cc.chunk_id = c.id and cc.category_id = any(cast(:cats as uuid[]))
+      ))
+      and (cast(:carts as uuid[]) is null or exists (
+          select 1 from cartridge_document cd
+          where cd.document_id = c.document_id
+            and cd.cartridge_id = any(cast(:carts as uuid[]))
       ))
 
     )"""
@@ -124,6 +139,11 @@ def _build_sql(use_dense: bool, use_lexical: bool, use_reflections: bool = False
       ) or exists (
           select 1 from chunk_category cc
           where cc.chunk_id = c.id and cc.category_id = any(cast(:cats as uuid[]))
+      ))
+      and (cast(:carts as uuid[]) is null or exists (
+          select 1 from cartridge_document cd
+          where cd.document_id = c.document_id
+            and cd.cartridge_id = any(cast(:carts as uuid[]))
       ))
 
     limit :pool
@@ -164,6 +184,7 @@ async def hybrid_search(
     weight_lexical: float = 1.0,
     use_reflections: bool = False,
     category_ids: list[uuid.UUID] | None = None,
+    cartridge_ids: list[uuid.UUID] | None = None,
 ) -> list[SearchHit]:
     cfg = settings()
     if not (use_dense or use_lexical):
@@ -176,6 +197,8 @@ async def hybrid_search(
         "emodel": cfg.embed_model,
         "docs": [str(d) for d in document_ids] if document_ids else None,
         "cats": [str(x) for x in category_ids] if category_ids else None,
+        # A cartridge is a room: scoping to one keeps every hit inside it.
+        "carts": [str(x) for x in cartridge_ids] if cartridge_ids else None,
         "pool": pool or cfg.candidate_pool,
         "k": cfg.rrf_k,
         "w_dense": weight_dense,

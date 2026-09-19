@@ -16,6 +16,7 @@ from library_agent.chat.session import get_or_create_conversation, run_turn
 from library_agent.config import settings
 from library_agent.db.models import Conversation, Message
 from library_agent.db.session import SessionDep, session_scope
+from library_agent.library.shelving import expand_category_ids
 from library_agent.llm.ollama import Ollama
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -28,6 +29,7 @@ class ChatRequest(BaseModel):
     model: str | None = None
     document_ids: list[uuid.UUID] | None = None
     category_ids: list[uuid.UUID] | None = None
+    cartridge_ids: list[uuid.UUID] | None = None
     stance: str | None = None
 
 
@@ -84,7 +86,9 @@ async def chat(req: ChatRequest) -> EventSourceResponse:
         if req.conversational != conv.conversational:
             conv.conversational = req.conversational
         # Stored on the conversation so every turn is scoped the same way.
-        conv.category_ids = [str(x) for x in req.category_ids] if req.category_ids else None
+        cat_ids = await expand_category_ids(db, req.category_ids or [])
+        conv.category_ids = [str(x) for x in cat_ids] if cat_ids else None
+        conv.cartridge_ids = [str(x) for x in req.cartridge_ids] if req.cartridge_ids else None
         conversation_id = conv.id
 
     async def events() -> AsyncIterator[dict]:

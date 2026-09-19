@@ -16,7 +16,9 @@ from library_agent.db.models import Category, ChunkCategory, DocumentCategory
 
 
 def normalize_name(name: str) -> str:
-    return " ".join(name.strip().split()).strip(" .,:;").title()
+    words = " ".join(name.strip().split()).strip(" .,:;").split(" ")
+    # Title-case, but leave short all-caps tokens alone: NLP, IR, LLM, API, OSCP.
+    return " ".join(w if (w.isupper() and 2 <= len(w) <= 5) else w.title() for w in words)
 
 
 async def canonical_names(db: AsyncSession) -> list[str]:
@@ -32,7 +34,26 @@ async def get_or_create(db: AsyncSession, name: str) -> Category | None:
     existing = (
         await db.execute(select(Category).where(Category.name == clean))
     ).scalar_one_or_none()
+    if existing and existing.canonical:
+        return existing
     if existing:
+        # Folded into another category: hand back the survivor, or revive this one if
+        # the survivor is gone.
+        survivor = (
+            (
+                await db.execute(
+                    select(Category).where(
+                        Category.canonical.is_(True),
+                        Category.merged_from.contains([clean]),  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if survivor:
+            return survivor
+        existing.canonical = True
         return existing
     # A name previously folded into another category resolves to its survivor.
     merged = (

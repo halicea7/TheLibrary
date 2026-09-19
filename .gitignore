@@ -18,3 +18,6 @@ ops/logs/
 # local working notes, not part of the project
 Specs.md
 TODO.md
+
+# local material, never committed
+dump/

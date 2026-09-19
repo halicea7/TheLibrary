@@ -351,3 +351,109 @@ Pull the models on the remote first (`bootstrap.sh` only pulls locally). Postgre
 the cross-encoder reranker stay on the API host — the reranker is in-process torch and was
 never the constrained piece. The Redis lease that lets chat pre-empt background reading
 still holds, since both still contend for the one remote instance.
+
+
+## Follow-on: the murmur, and cartridges
+
+**The murmur.** The model's hidden reasoning used to stream as a faint horizontal line in
+the answer column. It now drifts upward *behind the shelf*, serif italic at very low
+contrast, masked top and bottom: the library rifling through itself while it thinks. It
+is always on, because it is the honest signal that a long first token is work rather than
+a hang. Prose arrives in the answer column clean.
+
+**Cartridges** are a portable slice of a library: a zip with a manifest, colour, icon,
+confidentiality level and the data (`library/cartridge.py`). The design choice that made
+it cheap: at the `readings` level every section becomes one synthetic chunk whose text is
+that section's summary, with a deterministic id (`uuid5(content_hash, "reading:<order>")`),
+and reflections are re-targeted at it. Nothing in retrieval, citation or the reader had
+to learn a new source type — the passage *is* the reading. The document is flagged
+`readings_only` so the UI says so.
+
+Provenance is a column, not a namespace. `artifact.cartridge_id` says who wrote a note
+(null is you); `cartridge_document.introduced` says whether an import created the
+document or found it already shelved, which is what lets eject remove what it brought and
+leave what was yours. Subjects merge by name through the existing taxonomy. The citation
+rebuild used to wipe and re-extract from text; readings-only documents have no text, so it
+now re-matches the raw references they shipped with instead.
+
+The colour rule held: cartridge colours are identity, shown on rack spines, shelf dots and
+a stripe beside the rubric rule on margin notes — never on a control. Scoping to one
+cartridge is a room: the composer says *Ask Security's shelf* and the conversation stores
+the scope so follow-ups stay in it.
+
+Round-tripped on the live corpus: export *Information Retrieval* at `readings` (13
+volumes, 146 reading-passages, 383 readings, 1.7 MB, no passage text in the zip); insert
+onto the same shelf → 13 memberships, the 211 reflections aimed at reading-chunks
+correctly skipped because the originals are here; delete one volume and insert v2 → it
+returns readings-only with 8 reading-chunks; a scoped ask stays inside; eject removes only
+what it introduced and leaves zero orphans.
+
+Also from this stretch: `delete_document` now removes the stored file (the store is
+content-addressed, one file per document, so it is safe), the importer skips files under
+200 bytes, and the health check counts stray files. The lesson came from a payload
+collection whose EICAR test string sat on disk after its document row was gone and set
+off the endpoint agent.
+
+
+## Follow-on: the shelf, properly
+
+Feedback after living with it: thirty flat subjects, most security guides on three shelves
+at once, and the whole thing read as a mess. The ask was *Cybersecurity › Network Scanning
+› the document* -- two levels, no more, one place per volume.
+
+Tags and shelving are now different things. `document_category` stays many-to-many for
+filtering; `document.shelf_id` is the one sub-shelf a volume sits on; `category.parent_id`
+gives the two levels. `library/shelving.py` runs the passes:
+
+1. **Design** -- one call over every volume title, with thinking on. This was the hard
+   part. Without thinking, qwen3:30b-a3b named sub-shelves after the tags it was handed
+   (two seconds, lazy) or sliced the majority field into "Security Tools", "Security
+   Concepts", "Security Methods" to fill the quota. Thinking plus a JSON schema *does*
+   work -- the earlier "returns empty" finding was the reasoning eating the whole output
+   budget -- so `Ollama.structured(think=True)` routes through `/api/chat` with room for
+   both. A sanity gate rejects and retries the shapes it still reaches for: two top
+   shelves sharing a significant word, activity names (Research, Preparation, References),
+   schema-shaped filler (Top Shelf 1), a bay with one sub-shelf. `learning` was on the
+   banned list for one embarrassing hour; Machine Learning failed every time.
+2. **Fold** -- old tags map onto the new sub-shelves. An array with `minItems` guaranteed
+   the *length* and the model filled it by repeating one subject; an object with one
+   required enum property per tag makes coverage part of the grammar.
+3. **Place** -- one short call per volume, reasoning first, sub-shelf from an enum, a new
+   sub-shelf allowed under an existing top shelf. 0.5 s each.
+4. **Even out** -- split any sub-shelf over 30 volumes from its own titles (catch-all
+   names banned: "Web Attack Types" just recreates the lump), twice; then dissolve
+   sub-shelves under 3 volumes into their siblings.
+
+On the 170 read volumes: two top shelves (Cybersecurity 146, Machine Learning 24), 22
+sub-shelves of 3–15 volumes, nothing unplaced, about seven minutes. Tier 1 places each
+newly read volume; the shelf header has *reshelve*.
+
+Also from this round: the murmur moved back into the answer column, in the empty space
+under the question, masked by a radial bleed off the shelf's edge; and cartridges stand
+on the rack as actual spines -- a slab in the cartridge's colour, name down the spine,
+thickness proportional to the volumes it holds -- instead of chips. The mechanics had
+been done; it looked like a filter.
+
+
+## Follow-on: the nebula, and markdown
+
+**The web.** `/api/library/web` returns a node per volume and three kinds of edge:
+citations, shared threads, and nearest neighbours by document vector (three per volume,
+cosine > 0.55) -- the last is what makes it dense enough to look like anything at 176
+volumes, and what makes it thicken as the library grows. In the UI it is a force layout
+in three dimensions on a plain canvas, projected with perspective and turning once every
+two minutes; each volume carries an additive haze in its shelf's hue, which is what turns
+a diagram into a nebula. Retrieval sends a verdigris ring out through it; the volumes an
+answer drew on glow rubric and fade. Two bugs worth recording: nodes were born at
+`canvas.width / 2` -- device pixels, so on a 2x display every volume spawned on the right
+edge and never came back -- and the first tuning pinned everything to the boundary
+because repulsion at spawn distance was unbounded. Cap the short-range force, cap the
+velocity, scale the view to the cloud's real extent.
+
+**Markdown.** A small renderer, inline pass first (escape, then code, bold, italic,
+links, then the `[n]` citation marks so a mark is never taken for a link), then blocks:
+fences, headings, quotes, tables, nested lists. The answer renderer hangs its margin notes
+off each block instead of each paragraph. `.md` and `.rst` volumes render as written in
+the reader; PDFs stay as text.
+
+Logged for later: comparative questions retrieve from one volume (see TODO).

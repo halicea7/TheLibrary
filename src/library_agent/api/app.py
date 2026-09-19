@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 
-from library_agent.api.routes import chat, documents, library, reading, search
+from library_agent.api.routes import cartridges, chat, documents, library, reading, search
 from library_agent.api.schemas import HealthOut
 from library_agent.config import settings
 from library_agent.db.models import Chunk, Document, Embedding
@@ -50,6 +50,7 @@ app.include_router(search.router)
 app.include_router(reading.router)
 app.include_router(chat.router)
 app.include_router(library.router)
+app.include_router(cartridges.router)
 
 
 @app.get("/api/health", response_model=HealthOut)
@@ -58,6 +59,14 @@ async def health(db: SessionDep) -> HealthOut:
     chunks = (await db.execute(select(func.count()).select_from(Chunk))).scalar() or 0
     embs = (await db.execute(select(func.count()).select_from(Embedding))).scalar() or 0
     orphans = await count_orphans(db)
+    hashes = set((await db.execute(select(Document.content_hash))).scalars())
+    store = settings().storage_dir
+    stray = (
+        sum(1 for f in store.rglob("*") if f.is_file() and f.stem not in hashes)
+        if store.exists()
+        else 0
+    )
+    orphans["stray_files"] = stray
     # Over an SSH tunnel this is the failure you actually hit: the tunnel drops and
     # every model call fails. Say so plainly rather than showing an empty model list.
     reachable = True

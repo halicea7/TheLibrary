@@ -17,6 +17,7 @@ from library_agent.api.schemas import DocumentDetail, DocumentOut, SectionOut, U
 from library_agent.db.models import (
     Artifact,
     ArtifactKind,
+    Cartridge,
     Category,
     Chunk,
     Document,
@@ -27,6 +28,7 @@ from library_agent.db.purge import delete_document
 from library_agent.db.session import SessionDep
 from library_agent.ingest.extract import SUPPORTED
 from library_agent.ingest.tier0 import ingest
+from library_agent.library.cartridge import cartridge_provenance
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -69,6 +71,7 @@ def _to_out(d: Document, sections: int, chunks: int) -> DocumentOut:
         starred=d.starred,
         near_dup_of=d.near_dup_of,
         added_at=d.added_at,
+        readings_only=d.readings_only,
     )
 
 
@@ -85,11 +88,27 @@ async def list_documents(db: SessionDep) -> list[DocumentOut]:
         )
     ).all():
         cats.setdefault(did, []).append(name)
+    provenance = await cartridge_provenance(db, [d.id for d in docs])
+    shelves = await shelf_labels(db)
     out = []
     for d in docs:
         o = _to_out(d, *counts.get(d.id, (0, 0)))
         o.categories = cats.get(d.id, [])
+        o.cartridge = provenance.get(d.id)
+        o.shelf = shelves.get(d.shelf_id) if d.shelf_id else None
         out.append(o)
+    return out
+
+
+async def shelf_labels(db: AsyncSession) -> dict[uuid.UUID, dict]:
+    """sub-shelf id -> {top, top_id, sub, sub_id}."""
+    rows = list((await db.execute(select(Category))).scalars())
+    by_id = {c.id: c for c in rows}
+    out = {}
+    for c in rows:
+        if c.parent_id and c.parent_id in by_id:
+            p = by_id[c.parent_id]
+            out[c.id] = {"top": p.name, "top_id": str(p.id), "sub": c.name, "sub_id": str(c.id)}
     return out
 
 
@@ -162,6 +181,8 @@ async def get_document(document_id: uuid.UUID, db: SessionDep) -> DocumentDetail
     )
     counts = await _counts(db, [document_id])
     base = _to_out(doc, *counts.get(document_id, (0, 0)))
+    base.cartridge = (await cartridge_provenance(db, [document_id])).get(document_id)
+    base.shelf = (await shelf_labels(db)).get(doc.shelf_id) if doc.shelf_id else None
     base.categories = list(
         (
             await db.execute(
@@ -311,8 +332,30 @@ async def read_document(document_id: uuid.UUID, db: SessionDep) -> dict:
             )
         ).scalars()
     )
+    # Marginalia has an author: yours carries no cartridge; theirs is labelled with it.
+    cart_ids = {a.cartridge_id for a in arts if a.cartridge_id}
+    carts = (
+        {
+            c.id: {"id": str(c.id), "name": c.name, "colour": c.colour}
+            for c in (
+                await db.execute(select(Cartridge).where(Cartridge.id.in_(cart_ids)))
+            ).scalars()
+        }
+        if cart_ids
+        else {}
+    )
     summaries = {a.target_id: a.text for a in arts if a.kind == ArtifactKind.SECTION_SUMMARY}
-    reflections = {a.target_id: a.text for a in arts if a.kind == ArtifactKind.REFLECTION}
+    if doc.readings_only:
+        # The body *is* the reading; announcing it again above would double it.
+        summaries = {}
+    reflections: dict[uuid.UUID, list[dict]] = {}
+    for a in sorted(
+        (a for a in arts if a.kind == ArtifactKind.REFLECTION),
+        key=lambda a: (a.cartridge_id is not None, a.created_at),
+    ):
+        reflections.setdefault(a.target_id, []).append(
+            {"text": a.text, "cartridge": carts.get(a.cartridge_id) if a.cartridge_id else None}
+        )
 
     by_section: dict[uuid.UUID | None, list[Chunk]] = {}
     for c in chunks:
@@ -321,12 +364,17 @@ async def read_document(document_id: uuid.UUID, db: SessionDep) -> dict:
     out_sections = []
     for s in sections:
         cs = by_section.get(s.id, [])
+        if doc.readings_only and not cs:
+            # Their library had nothing to say about this section; a bare heading
+            # would only advertise an absence.
+            continue
         texts = _deoverlap([c.text for c in cs])
         # The first chunk of a section usually opens with the heading line itself, which
         # the reader already shows as the heading. Drop it once.
         if texts and s.title:
             first_line, _, rest = texts[0].partition("\n")
-            if first_line.strip().lower() == s.title.strip().lower():
+            # In a markdown volume the heading line still wears its hashes.
+            if first_line.strip().lstrip("#").strip().lower() == s.title.strip().lower():
                 texts[0] = rest.lstrip()
         out_sections.append(
             {
@@ -342,7 +390,8 @@ async def read_document(document_id: uuid.UUID, db: SessionDep) -> dict:
                         "id": str(c.id),
                         "page": c.page_start,
                         "text": txt,
-                        "reflection": reflections.get(c.id),
+                        "reflection": (reflections.get(c.id) or [{}])[0].get("text"),
+                        "reflections": reflections.get(c.id, []),
                     }
                     for c, txt in zip(cs, texts, strict=True)
                 ],
@@ -362,7 +411,8 @@ async def read_document(document_id: uuid.UUID, db: SessionDep) -> dict:
                         "id": str(c.id),
                         "page": c.page_start,
                         "text": c.text,
-                        "reflection": reflections.get(c.id),
+                        "reflection": (reflections.get(c.id) or [{}])[0].get("text"),
+                        "reflections": reflections.get(c.id, []),
                     }
                     for c in orphans
                 ],
@@ -373,6 +423,8 @@ async def read_document(document_id: uuid.UUID, db: SessionDep) -> dict:
         "title": doc.title,
         "tier": doc.tier,
         "kind": doc.kind,
+        "readings_only": doc.readings_only,
+        "cartridge": (await cartridge_provenance(db, [doc.id])).get(doc.id),
         "page_count": doc.page_count,
         "sections": out_sections,
     }

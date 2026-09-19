@@ -104,12 +104,28 @@ async def match_references(
 async def build_citation_graph(db: AsyncSession, *, progress=None) -> CitationResult:
     docs = list((await db.execute(select(Document))).scalars())
     corpus = {d.id: d.title for d in docs}
+    # A readings-only document (from a cartridge) has no text to mine references from;
+    # the references it shipped with are all it will ever have. Keep those and re-match
+    # them against whatever the corpus holds now.
+    shipped: dict[uuid.UUID, list[str]] = {}
+    for d in docs:
+        if d.readings_only:
+            shipped[d.id] = list(
+                (
+                    await db.execute(
+                        select(Citation.raw_reference).where(Citation.citing_document_id == d.id)
+                    )
+                ).scalars()
+            )
     await db.execute(delete(Citation))
 
     found = matched = 0
     for n, doc in enumerate(docs):
-        body = await _document_text(db, doc.id)
-        refs = extract_references(body)
+        if doc.readings_only:
+            refs = shipped.get(doc.id, [])
+        else:
+            body = await _document_text(db, doc.id)
+            refs = extract_references(body)
         found += len(refs)
         for ref, target, sim, doi in await match_references(db, refs, corpus, doc.id):
             db.add(

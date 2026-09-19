@@ -6,7 +6,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/ask.jpg" alt="Asking the library a question. The answer is a reading column; every citation resolves into a note in the margin beside the paragraph that cites it." width="900"/>
+  <img src="docs/web.jpg" alt="The Ask pane. Behind it, the library drawn as a nebula: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning. On the left, the rack with an inserted cartridge and the two-level shelf." width="900"/>
+</p>
+
+<p align="center">
+  <img src="docs/ask.jpg" alt="An answer. A reading column with markdown rendered; every citation resolves into a note in the margin beside the block that cites it, and the volumes it drew on light up in the nebula behind." width="900"/>
 </p>
 
 <p align="center">
@@ -24,7 +28,7 @@ Then the collection is treated as one thing. Claims are clustered *across* docum
 And when you ask it something, the answer is a reading column with an apparatus: each `[n]` resolves into a note in the margin naming the volume, page, and section it came from. Those markers are **verified after generation** — a citation the model invents is stripped rather than shown — so a flash of red always means provenance. Anything unmarked is the librarian's own reasoning, and it's meant to reason: the answering policy is deliberately open.
 
 <p align="center">
-  <img src="docs/reader.jpg" alt="Reading a volume. Section summaries appear as italic leads; reflections sit in the margin beside the passage they are about." width="900"/>
+  <img src="docs/reader.jpg" alt="Reading a volume. The section summary is the italic lead; the library's reflection sits in the margin beside the passage it is about." width="900"/>
 </p>
 
 ## Using it
@@ -69,11 +73,40 @@ This is what makes a 500-document backfill a single overnight rather than the ~2
 
 **Retrieval** is dense + lexical fused with reciprocal rank fusion, in one Postgres query, then reranked by a cross-encoder — every stage measured against a generated question set and switchable. Chat reranks; keyword search doesn't, because the eval showed the cross-encoder *hurts* short keyword queries.
 
+**The shelf is two levels, and every volume sits in one place.** Tier 1 tags each document with up to four subjects, which is right for finding things and wrong for shelving them. So shelving is a separate pass: the model organises the collection into a handful of *top shelves* (fields — Cybersecurity, Machine Learning) each with *sub-shelves* named from the titles actually on them, then files every volume on exactly one sub-shelf. Crowded sub-shelves are split from their own titles; sub-shelves with a volume or two are dissolved into their neighbours. New volumes are shelved as they are read. *Reshelve* redoes the whole thing; the tags remain for filtering.
+
 **The library layer** clusters extracted claims (not section summaries — measured: summaries cluster with their own paper, claims cluster across papers) and summarises each cluster once. Citations are parsed from reference sections and matched by title. Contradiction detection runs over cross-document clusters only.
 
 **One store.** Postgres with `pgvector` holds documents, sections, chunks, artifacts, vectors, and the lexical index. Vectors commit in the same transaction as the rows they describe, so there is nothing to reconcile. Every generated artifact records the model and prompt version that produced it, so changing a prompt regenerates only what that prompt owns.
 
 **Extraction does the unglamorous work.** Two-column papers are read column by column. Figure labels, axis ticks and legend text are dropped by position and font size rather than by regex. Footnotes are lifted out of the flow and placed after the page's prose with their numbers; the superscript markers they leave in the body are removed. Running headers are detected by frequency and stripped. Papers with no PDF bookmarks get their section tree from numbered headings in the text — which, it turns out, is most of them.
+
+**Behind the Ask pane is the library itself**, drawn as a nebula: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning, laid out by a small force simulation in three dimensions and turning slowly. It thickens as the library grows, and the volumes an answer drew on light up as they are retrieved. Answers and markdown volumes are rendered as markdown; each block of an answer keeps its own margin notes.
+
+## Cartridges
+
+A cartridge is a slice of a library that another library can put on its **rack**: a zip with a manifest, a colour, an icon, and the data. The receiving library doesn't just file it — it reads across everything it holds, so threads and disagreements form *between* collections, and every margin note keeps the colour of where it came from.
+
+The point is sharing between people who can't share the documents. A confidentiality level sets what leaves:
+
+| Level | Originals | Passages | Readings (summaries, notes) | What the receiver can do |
+|---|---|---|---|---|
+| `full` | yes | yes | yes | open the pages, cite them |
+| `readings` | no | no | yes | search and cite *your reading* of each section; never sees the text |
+| `catalogue` | no | no | summaries and subjects only | knows the material exists, asks you for it |
+
+At `readings`, each section's summary stands in as its passage, so retrieval, the citation apparatus and the reader work unchanged — a note from such a source reads *Security's reading of …* rather than quoting a page. Levels control what leaves, not what happens after import.
+
+```sh
+./library export --name "Security" --level readings --subject "Network Security"
+./library insert security-v1.zip           # or drop the zip on the accession box
+```
+
+<p align="center">
+  <img src="docs/cartridge.jpg" alt="Making a cartridge: name, colour, icon, level, and a live preview of what would leave. On the left, the shelf open two levels deep: Cybersecurity, Deserialization Flaws, the volumes." width="900"/>
+</p>
+
+Click a spine on the rack to walk into that room: the composer becomes *Ask Security's shelf*, and Find, the shelf and follow-ups stay inside it. Eject removes what the cartridge brought and leaves what was already yours. A document that arrives from two cartridges is one document with two memberships; subjects merge by name; vectors ship as float16 and are loaded directly when the embedding model matches, re-embedded from the shipped text when it doesn't. Clusters and contradictions are never shipped — the receiver recomputes them across the new whole, which is the point. Content is hash-verified; there is no signing.
 
 ## Models
 
@@ -109,7 +142,7 @@ src/library_agent/
   ingest/               extraction, section tree, chunking, dedup, bulk import
   reading/              tier 1 and tier 2 passes, versioned prompts
   retrieval/            hybrid search, router, reranked pipeline
-  library/              clusters, citation graph, contradictions, taxonomy
+  library/              clusters, citation graph, contradictions, taxonomy, shelving, cartridges
   chat/                 citations, query rewriting, stances, streaming
   eval/                 question generation, recall@k harness
   api/  worker/  db/

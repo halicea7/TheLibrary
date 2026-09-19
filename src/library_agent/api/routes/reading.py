@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from library_agent.config import settings
 from library_agent.db.models import Category, Document, DocumentCategory, Job
 from library_agent.db.session import SessionDep
-from library_agent.worker.tasks import enqueue_read
+from library_agent.worker.tasks import enqueue_read, enqueue_reshelve
 
 router = APIRouter(prefix="/api", tags=["reading"])
 
@@ -33,7 +33,9 @@ class JobOut(BaseModel):
 class CategoryOut(BaseModel):
     id: uuid.UUID
     name: str
-    documents: int
+    documents: int  # tagged with it (a top shelf counts everything beneath it)
+    parent_id: uuid.UUID | None = None
+    shelved: int = 0  # volumes whose one place this is
 
 
 async def _redis():
@@ -116,4 +118,38 @@ async def list_categories(db: SessionDep) -> list[CategoryOut]:
             .order_by(func.count(DocumentCategory.document_id).desc(), Category.name)
         )
     ).all()
-    return [CategoryOut(id=c.id, name=c.name, documents=n) for c, n in rows]
+    shelved = dict(
+        (
+            await db.execute(
+                select(Document.shelf_id, func.count())
+                .where(Document.shelf_id.is_not(None))
+                .group_by(Document.shelf_id)
+            )
+        ).all()
+    )
+    out = {
+        c.id: CategoryOut(
+            id=c.id, name=c.name, documents=n, parent_id=c.parent_id, shelved=shelved.get(c.id, 0)
+        )
+        for c, n in rows
+    }
+    # A top shelf counts what stands beneath it, not what happens to be tagged with it.
+    for c in out.values():
+        if c.parent_id and c.parent_id in out:
+            out[c.parent_id].shelved += c.shelved
+    for c in out.values():
+        if c.parent_id is None and any(x.parent_id == c.id for x in out.values()):
+            c.documents = c.shelved
+    return sorted(out.values(), key=lambda c: (-c.documents, c.name))
+
+
+@router.post("/shelf/reshelve")
+async def reshelve(db: SessionDep, rebuild: bool = True) -> dict[str, str]:
+    """Organise the shelf into top shelves and sub-shelves and give every read volume
+    one place. `rebuild=false` keeps the current shelves and only places the unshelved."""
+    redis = await _redis()
+    try:
+        job_id = await enqueue_reshelve(redis, rebuild=rebuild)
+    finally:
+        await redis.aclose()
+    return {"job_id": str(job_id)}

@@ -123,6 +123,14 @@ class Document(Base):
     status: Mapped[str] = mapped_column(String(16), default=DocumentStatus.PENDING)
     starred: Mapped[bool] = mapped_column(default=False)
     retrieval_hits: Mapped[int] = mapped_column(Integer, default=0)  # Tier 2 promotion signal
+    # Arrived in a readings-only cartridge: its "passages" are the sharer's section
+    # summaries, synthesised as chunks. The originals were never shared.
+    readings_only: Mapped[bool] = mapped_column(default=False)
+    # The one place the volume sits on the shelf: a second-level category. Tags
+    # (document_category) remain many-to-many for filtering; the shelf is singular.
+    shelf_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("category.id", ondelete="SET NULL"), default=None, index=True
+    )
 
     near_dup_of: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("document.id", ondelete="SET NULL"), default=None
@@ -219,10 +227,24 @@ class Artifact(Base):
     model: Mapped[str] = mapped_column(String(64))
     prompt_version: Mapped[str] = mapped_column(String(16))
     tier: Mapped[int] = mapped_column(SmallInteger, default=1)
+    # Who wrote this: null is you; otherwise the cartridge it arrived in. Lets the reader
+    # show your marginalia beside theirs, and lets an update replace theirs but not yours.
+    cartridge_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("cartridge.id", ondelete="SET NULL"), default=None, index=True
+    )
     created_at: Mapped[datetime] = _now()
 
     __table_args__ = (
-        UniqueConstraint("kind", "target_kind", "target_id", name="uq_artifact_target"),
+        # NULLS NOT DISTINCT: without it two local artifacts (cartridge_id null) of the
+        # same kind on the same target would both be allowed.
+        UniqueConstraint(
+            "kind",
+            "target_kind",
+            "target_id",
+            "cartridge_id",
+            name="uq_artifact_target",
+            postgresql_nulls_not_distinct=True,
+        ),
     )
 
 
@@ -250,6 +272,58 @@ class Embedding(Base):
     )
 
 
+# --------------------------------------------------------------------------- cartridges
+
+
+class Cartridge(Base):
+    """A portable slice of a library, inserted whole and ejectable whole.
+
+    The id comes from the manifest and is stable across versions, so re-importing a newer
+    version of the same cartridge replaces its documents in place."""
+
+    __tablename__ = "cartridge"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
+    slug: Mapped[str] = mapped_column(String(80), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    colour: Mapped[str] = mapped_column(String(16))  # "#rrggbb"
+    icon_svg: Mapped[str | None] = mapped_column(Text, default=None)
+    made_by: Mapped[str | None] = mapped_column(Text, default=None)
+    made_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    level: Mapped[str] = mapped_column(String(16))  # full | readings | catalogue
+    embed_model: Mapped[str] = mapped_column(String(64))
+    reader_model: Mapped[str | None] = mapped_column(String(64), default=None)
+    prompt_versions: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    manifest: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    document_count: Mapped[int] = mapped_column(Integer, default=0)
+    imported_at: Mapped[datetime] = _now()
+
+
+class CartridgeDocument(Base):
+    """A document in no cartridge is local. The same paper in two cartridges is one
+    document with two memberships -- content-hash dedup already makes that so."""
+
+    __tablename__ = "cartridge_document"
+
+    cartridge_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("cartridge.id", ondelete="CASCADE"), primary_key=True
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Did this import create the document, or was it already on the shelf? Eject
+    # removes what it brought and leaves what was here.
+    introduced: Mapped[bool] = mapped_column(default=False)
+
+
+class CartridgeLevel(StrEnum):
+    FULL = "full"
+    READINGS = "readings"
+    CATALOGUE = "catalogue"
+
+
 # --------------------------------------------------------------------------- taxonomy
 
 
@@ -259,6 +333,11 @@ class Category(Base):
     id: Mapped[uuid.UUID] = _pk()
     name: Mapped[str] = mapped_column(Text, unique=True)
     description: Mapped[str | None] = mapped_column(Text, default=None)
+    # Two levels, no more: a top shelf (parent_id null) holds sub-shelves, which hold
+    # volumes. Cybersecurity › Network Scanning › the document.
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("category.id", ondelete="SET NULL"), default=None, index=True
+    )
     # Names folded into this one by the backstop cleanup job.
     merged_from: Mapped[list[str] | None] = mapped_column(JSONB, default=None)
     canonical: Mapped[bool] = mapped_column(default=True)
@@ -356,6 +435,8 @@ class Conversation(Base):
     # Switching evicts the other model, so this is per-conversation, not per-message.
     model: Mapped[str | None] = mapped_column(Text, default=None)
     category_ids: Mapped[list[str] | None] = mapped_column(JSONB, default=None)
+    # "Ask Security's shelf": scope every turn of this conversation to these cartridges.
+    cartridge_ids: Mapped[list[str] | None] = mapped_column(JSONB, default=None)
     created_at: Mapped[datetime] = _now()
 
     messages: Mapped[list[Message]] = relationship(

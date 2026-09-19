@@ -7,7 +7,7 @@ the reader, searches with and without filters, runs chat turns on both models (t
 follow-up rewriting, stances, citation verification), inspects the library layer, deletes
 the document and confirms nothing is orphaned. Takes a few minutes because it waits on
 the model. Set LIBRARY_TESTDOCS to a folder of already-shelved files for the import check."""
-import asyncio, json, os, subprocess, sys, tempfile, time, uuid
+import asyncio, json, os, pathlib, subprocess, sys, tempfile, time, uuid
 import httpx
 
 API = "http://127.0.0.1:8077"
@@ -118,12 +118,52 @@ async def main():
         ok("contradictions have real explanations", all(len(x["explanation"] or "")>=40 and not (x["explanation"] or "").lower().startswith(("explain","state")) for x in co), f"{len(co)} found")
         g = (await c.get("/api/library/graph")).json()
         ok("citation graph", len(g["edges"])>=5 and g["hubs"], f"{len(g['edges'])} edges")
+        wb = (await c.get("/api/library/web")).json()
+        ids = {n["id"] for n in wb["nodes"]}
+        now_docs = (await c.get("/api/health")).json()["documents"]  # the verify note is shelved by now
+        ok("the web has a node per volume and knits them", len(wb["nodes"])==now_docs and len(wb["edges"])>=len(wb["nodes"]) and all(e["a"] in ids and e["b"] in ids for e in wb["edges"]), f"{len(wb['nodes'])} nodes, {len(wb['edges'])} edges")
+        ok("volumes carry a shelf", sum(1 for n in wb["nodes"] if n["top"] and n["sub"]) >= 0.9*sum(1 for n in wb["nodes"] if n["tier"]>=1))
 
-        print("== cleanup ==")
+        print("== cartridges: export → insert → ask in the room → eject ==")
+        # The verification note is on the shelf, read and annotated; it goes in alone.
+        pv = (await c.post("/api/cartridges/preview", json={"document_ids":[did],"level":"readings"})).json()
+        ok("preview counts", pv["counts"]["documents"]==1 and pv["counts"]["chunks"]>=1 and pv["counts"]["originals"]==0, f"{pv['counts']}")
+        ex = await c.post("/api/cartridges/export", json={"document_ids":[did],"level":"readings","name":"Verify Room","colour":"#8a3d5e"})
+        ok("export returns a zip", ex.status_code==200 and ex.headers.get("content-type","").startswith("application/zip") and ex.content[:2]==b"PK", f"{len(ex.content)} bytes")
+        import zipfile, io
+        z = zipfile.ZipFile(io.BytesIO(ex.content)); names = z.namelist()
+        ok("readings level ships no passages", "data/chunks.jsonl" in names and "sixty-five milliseconds" not in z.read("data/chunks.jsonl").decode() and not any(n.startswith("documents/") for n in names))
+        cid = json.loads(z.read("cartridge.json"))["id"]
+        im = await c.post("/api/cartridges/import", files={"file": ("verify-room.zip", ex.content, "application/zip")})
+        ij = im.json()
+        ok("insert joins the shelved original", im.status_code==200 and ij["documents_joined"]==1 and ij["documents_introduced"]==0, f"{ij}")
+        rk = (await c.get("/api/cartridges")).json()["cartridges"]
+        ok("on the rack", any(x["id"]==cid and x["document_count"]==1 for x in rk))
+        # Delete the local copy; a higher version of the cartridge brings it back as a reading.
         dl = await c.delete(f"/api/documents/{did}")
         ok("delete removes vectors", dl.status_code==200 and dl.json()["vectors_removed"]>0, f"{dl.json().get('vectors_removed')} vectors")
+        m = json.loads(z.read("cartridge.json")); m["version"] = 2
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z2:
+            for n in names: z2.writestr(n, json.dumps(m).encode() if n=="cartridge.json" else z.read(n))
+        im2 = (await c.post("/api/cartridges/import", files={"file": ("verify-room-v2.zip", buf.getvalue(), "application/zip")})).json()
+        ok("v2 reintroduces the deleted volume as a reading", im2.get("documents_introduced")==1 and im2.get("replaced_version")==1, f"{im2}")
+        docs = (await c.get("/api/documents")).json()
+        back = next((d for d in docs if d["title"]=="Verification note"), None)
+        ok("volume is readings-only with provenance", back and back["readings_only"] and (back.get("cartridge") or {}).get("id")==cid, f"chunks={back and back['chunks']}")
+        rd = (await c.get(f"/api/documents/{back['id']}/read")).json() if back else {}
+        ok("reader shows the reading as the body", rd.get("readings_only") and all(s["summary"] is None for s in rd.get("sections",[])) and any(s["passages"] for s in rd.get("sections",[])))
+        t = await sse(c, {"message":"What is the only latency lever for a cross-encoder reranker?","conversational":False,"cartridge_ids":[cid]}, timeout=400)
+        ok("ask in the room stays in it", t["error"] is None and t["meta"].get("cartridges")==1 and t["sources"] and all(s["document_id"]==back["id"] for s in t["sources"]), f"{len(t['sources'])} sources")
+        ok("sources carry the cartridge colour and reading flag", all((s.get("cartridge") or {}).get("colour")=="#8a3d5e" and s.get("readings_only") for s in t["sources"]))
+        ej = (await c.delete(f"/api/cartridges/{cid}")).json()
+        ok("eject removes what it introduced", ej.get("documents_removed")==1 and ej.get("documents_kept")==0, f"{ej}")
+        ok("rack empty of it", not any(x["id"]==cid for x in (await c.get("/api/cartridges")).json()["cartridges"]))
+        did = None
+
+        print("== cleanup ==")
         h2 = (await c.get("/api/health")).json()
-        ok("no orphans after delete", sum(h2["orphan_vectors"].values())==0)
+        ok("no orphans after eject", sum(h2["orphan_vectors"].values())==0 and h2["orphan_vectors"].get("stray_files",0)==0, f"{h2['orphan_vectors']}")
         ok("document count restored", h2["documents"]==h["documents"])
 
     print("== extraction (the reported BERT anomaly) ==")
@@ -137,14 +177,21 @@ async def main():
     ok("tests", "passed" in tl and "failed" not in tl, tl.split(" in ")[0])
     ok("lint", sh("uv run ruff check src/ tests/ 2>&1 | tail -1")=="All checks passed!")
     ok("ui js parses", sh("python3 -c \"import pathlib;h=pathlib.Path('web/index.html').read_text();pathlib.Path('/tmp/v.js').write_text(h.split('<script>')[1].split('</script>')[0])\" && node --check /tmp/v.js && echo y")=="y")
-    imp = sh(f"./library import {os.environ.get('LIBRARY_TESTDOCS', 'tests')} --quiet 2>&1 | tail -1")
-    ok("bulk import runs", "shelved" in imp, imp)
+    with tempfile.TemporaryDirectory() as td:
+        # A folder with one note, one wordlist and one tiny file: only the note is shelved.
+        pathlib.Path(td, "bulk-verify-note.md").write_text("# Bulk verify\n\n" + "A sentence of ordinary prose about retrieval evaluation. " * 12)
+        pathlib.Path(td, "words.txt").write_text("\n".join(f"w{i}" for i in range(400)))
+        pathlib.Path(td, "tiny.txt").write_text("X5O!P%@AP")
+        imp = sh(f"./library import {td} --quiet 2>&1 | tail -1")
+        ok("bulk import shelves prose, skips lists and tiny files", imp.startswith("1 shelved") or "1 shelved" in imp, imp)
+    bid = sh("psql -d library_agent -tAc \"select id from document where title='Bulk verify'\"")
+    if bid: sh(f"curl -s -X DELETE {API}/api/documents/{bid} >/dev/null")
     with tempfile.TemporaryDirectory() as td:
         sh(f"./ops/backup.sh {td} >/dev/null 2>&1")
         made = sh(f"ls {td}/*/ 2>/dev/null")
         ok("backup produces dump + archive", "library_agent.dump" in made and "documents.tar.gz" in made)
-    ok("screenshots present", all(os.path.exists(f"docs/{n}.jpg") for n in ("ask","reader","threads")))
-    ok("README references them", all(f"docs/{n}.jpg" in open("README.md").read() for n in ("ask","reader","threads")))
+    ok("screenshots present", all(os.path.exists(f"docs/{n}.jpg") for n in ("web","ask","reader","threads","cartridge")))
+    ok("README references them", all(f"docs/{n}.jpg" in open("README.md").read() for n in ("web","ask","reader","threads","cartridge")))
 
     passed = sum(1 for _,c_,_ in R if c_); total = len(R)
     print(f"\n{'ALL PASS' if passed==total else 'FAILURES'}: {passed}/{total}")

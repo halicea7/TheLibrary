@@ -6,11 +6,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/web.jpg" alt="The Ask pane. Behind it, the library drawn as a nebula: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning. On the left, the rack with an inserted cartridge and the two-level shelf." width="900"/>
+  <img src="docs/web.jpg" alt="The Ask pane. Behind it, the library drawn as a nebula: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning. On the left, the rack with a cartridge seated in its socket, and the shelf." width="900"/>
 </p>
 
 <p align="center">
-  <img src="docs/ask.jpg" alt="An answer. A reading column with markdown rendered; every citation resolves into a note in the margin beside the block that cites it, and the volumes it drew on light up in the nebula behind." width="900"/>
+  <img src="docs/ask.jpg" alt="An answer, asked inside a cartridge's room. A reading column with markdown rendered; every citation resolves into a note in the margin beside the block that cites it, with a stripe in the colour of the cartridge it came from." width="900"/>
 </p>
 
 <p align="center">
@@ -51,9 +51,15 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
 
 **Ask** — talk to the collection. Narrow it by subject with the chips or by clicking a subject on the shelf. Switch models per conversation. Set a **stance** to loosen the librarian's reserve: *opinionated*, *contrarian · charitable*, *cynical · optimistic*. Answers given under a stance are labelled in violet so you always know which ones were the librarian speaking for itself.
 
-**Find** — plain retrieval, showing each passage's dense and lexical rank.
+**Find** — plain retrieval, showing each passage's dense and lexical rank. The nebula stays up behind it: when results land, the camera dives on each finding in turn with a spin and a large label, advancing every few seconds; hovering a row takes over, and clicking opens the volume.
+
+<p align="center">
+  <img src="docs/find.jpg" alt="Find. The camera has dived into the region of the nebula where the findings are; the one under the eye is ringed and named; the list beside it marks the same row." width="900"/>
+</p>
 
 **Threads** — themes spanning volumes, where your sources disagree, and who cites whom. Rebuilt automatically a few minutes after the last read finishes, so a folder of forty papers produces one rebuild rather than forty.
+
+**Conversations** — the desk bar names the current one, starts a new one, and lists earlier ones; opening one replays it with its margin notes, and asking again continues it.
 
 <p align="center">
   <img src="docs/threads.jpg" alt="Threads across the collection: themes drawn from claims in several volumes, and the citation graph." width="900"/>
@@ -73,6 +79,8 @@ This is what makes a 500-document backfill a single overnight rather than the ~2
 
 **Retrieval** is dense + lexical fused with reciprocal rank fusion, in one Postgres query, then reranked by a cross-encoder — every stage measured against a generated question set and switchable. Chat reranks; keyword search doesn't, because the eval showed the cross-encoder *hurts* short keyword queries.
 
+**The nebula.** Behind Ask and Find the library is drawn as a cloud: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning, laid out by a small force simulation in three dimensions and turning slowly. It thickens as the library grows; the volumes an answer drew on light up as they are retrieved.
+
 **The shelf is two levels, and every volume sits in one place.** Tier 1 tags each document with up to four subjects, which is right for finding things and wrong for shelving them. So shelving is a separate pass: the model organises the collection into a handful of *top shelves* (fields — Cybersecurity, Machine Learning) each with *sub-shelves* named from the titles actually on them, then files every volume on exactly one sub-shelf. Crowded sub-shelves are split from their own titles; sub-shelves with a volume or two are dissolved into their neighbours. New volumes are shelved as they are read. *Reshelve* redoes the whole thing; the tags remain for filtering.
 
 **The library layer** clusters extracted claims (not section summaries — measured: summaries cluster with their own paper, claims cluster across papers) and summarises each cluster once. Citations are parsed from reference sections and matched by title. Contradiction detection runs over cross-document clusters only.
@@ -88,6 +96,10 @@ This is what makes a 500-document backfill a single overnight rather than the ~2
 The Settings tab shows what the library is running on — services, models, retrieval and library configuration, each with the environment variable that changes it — and a maintenance row (collect garbage, rebuild threads, reshelve). Below it is the **incident log**: anything that escapes a route, fails a background job or a chat turn, or is logged at `ERROR` is recorded there, deduplicated within a window.
 
 *Troubleshoot* asks the model to read an incident against the library's own documentation — [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md), this README, the devlog, the launcher and ops scripts — and answer with a diagnosis, the likely cause (environment, configuration, data, model, or a defect in the library itself), steps with commands for *you* to run, and the sections it leaned on. Nothing is executed: it says what to do; you do it. Every suggested command is checked against the commands the docs actually show, and anything the model appears to have invented is marked. When the cause looks like a defect, it drafts a GitHub issue — what happened, the error, what was tried, the environment — and offers it as a pre-filled link, with home paths and anything key-shaped scrubbed.
+
+<p align="center">
+  <img src="docs/settings.jpg" alt="An incident, troubleshot. The diagnosis, the likely cause, numbered steps with commands to copy — one of them marked as not in the documentation — the sections it leaned on, and a pre-filled GitHub issue." width="900"/>
+</p>
 
 ## Cartridges
 
@@ -109,14 +121,16 @@ At `readings`, each section's summary stands in as its passage, so retrieval, th
 ```
 
 <p align="center">
-  <img src="docs/cartridge.jpg" alt="Making a cartridge: name, colour, icon, level, and a live preview of what would leave. On the left, the shelf open two levels deep: Cybersecurity, Deserialization Flaws, the volumes." width="900"/>
+  <img src="docs/cartridge.jpg" alt="Making a cartridge: name, colour, material and dials, clearance, art, level — and the object itself turning on the right: a clear green shell with the constellation of its thousand volumes floating inside, the label a sticker on the front with CONFIDENTIAL across its top." width="900"/>
 </p>
 
-**A cartridge is an object.** It has art on its label — an image you upload, or by default its own *constellation*: the volumes it holds laid out from their vectors in its colour — and a material: solid, clear, smoke, glitter or metallic, with dials for tint, opacity, sparkle and roughness. A clear shell shows the constellation floating inside the plastic. The design is sealed into the manifest, so a cartridge looks the same on every rack it lands on; only its maker sets it. Each carries a power light that comes on when the cartridge is scoped, three pips lit by its level (catalogue, readings, full), and a **clearance** — open, internal, confidential, restricted — printed as a band across the label; a receiving library will not re-export the volumes of a restricted cartridge. The rack is one socket: step or scroll through your cartridges, and the one in view hangs above it until you click — then it drops in with a bounce and the light comes on, and you are in its room. Click again to lift it out. *All* opens a grid to jump straight to one. The make panel shows the cartridge turning as you work; hovering one on the rack lifts it into view. Rendered with one vendored library (three.js, in `web/vendor/`), so nothing is fetched from a network. Uploaded and shipped art is re-encoded on the way in.
+**A cartridge is an object.** Built the way the real thing is: a front plate with the grip grooves, three level pips, a power light and a screw cut into it, a PCB inside with an edge of gold contacts, and the label a sticker on the front. The label carries art — an image you upload, or by default the cartridge's own *constellation*, its volumes laid out from their vectors in its colour. The plastic is one of five materials — solid, clear, smoke, glitter, metallic — with dials for tint, opacity, sparkle and roughness; through a clear shell you see the board and the constellation floating in front of it. The pips light by level; the power light comes on when the cartridge is in use. A **clearance** — open, internal, confidential, restricted — prints as a band across the label; a receiving library will not re-export the volumes of a restricted cartridge. The whole design is sealed into the manifest, so a cartridge looks the same on every rack it lands on; only its maker sets it. Lit by a studio HDRI, rendered with one vendored library (three.js), nothing fetched from a network. Uploaded and shipped art is re-encoded on the way in.
+
+**The rack is one socket.** Step or scroll through your cartridges; the one in view hangs above the socket until you click, then it drops in with a bounce and the light comes on — you are in its room: the composer becomes *Ask HackTricks's shelf*, and Find, the shelf and follow-ups stay inside it. Click again to lift it out; *all* opens a grid to jump straight to one; hovering lifts the cartridge up large beside the nebula.
 
 A folder can also arrive as a cartridge directly: `./library import ~/hacktricks --cartridge "HackTricks"`.
 
-Click a spine on the rack to walk into that room: the composer becomes *Ask Security's shelf*, and Find, the shelf and follow-ups stay inside it. Eject removes what the cartridge brought and leaves what was already yours. A document that arrives from two cartridges is one document with two memberships; subjects merge by name; vectors ship as float16 and are loaded directly when the embedding model matches, re-embedded from the shipped text when it doesn't. Clusters and contradictions are never shipped — the receiver recomputes them across the new whole, which is the point. Content is hash-verified; there is no signing.
+Inside a room, eject removes what the cartridge brought and leaves what was already yours. A document that arrives from two cartridges is one document with two memberships; subjects merge by name; vectors ship as float16 and are loaded directly when the embedding model matches, re-embedded from the shipped text when it doesn't. Clusters and contradictions are never shipped — the receiver recomputes them across the new whole, which is the point. Content is hash-verified; there is no signing.
 
 ## Models
 
@@ -157,7 +171,10 @@ src/library_agent/
   chat/                 citations, query rewriting, stances, streaming
   eval/                 question generation, recall@k harness
   api/  worker/  db/
-web/index.html          the whole UI, one file, no build step
+web/index.html          the UI, one file, no build step
+web/cartridge3d.js      the cartridge as an object, and the socket (three.js)
+web/vendor/             three.js, RGBELoader, one studio HDRI — all vendored
+docs/TROUBLESHOOTING.md what the troubleshooter reads
 ops/                    launchd units, backup and restore
 tests/
 ```

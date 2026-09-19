@@ -215,8 +215,8 @@ async def main():
         sh(f"./ops/backup.sh {td} >/dev/null 2>&1")
         made = sh(f"ls {td}/*/ 2>/dev/null")
         ok("backup produces dump + archive", "library_agent.dump" in made and "documents.tar.gz" in made)
-    ok("screenshots present", all(os.path.exists(f"docs/{n}.jpg") for n in ("web","ask","reader","threads","cartridge")))
-    ok("README references them", all(f"docs/{n}.jpg" in open("README.md").read() for n in ("web","ask","reader","threads","cartridge")))
+    ok("screenshots present", all(os.path.exists(f"docs/{n}.jpg") for n in ("web","ask","find","reader","threads","cartridge","settings")))
+    ok("README references them", all(f"docs/{n}.jpg" in open("README.md").read() for n in ("web","ask","find","reader","threads","cartridge","settings")))
 
     passed = sum(1 for _,c_,_ in R if c_); total = len(R)
     print(f"\n{'ALL PASS' if passed==total else 'FAILURES'}: {passed}/{total}")

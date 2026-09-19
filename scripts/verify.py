@@ -61,6 +61,18 @@ async def main():
         bad = await c.post("/api/documents", files={"file": ("x.xyz", b"junk", "application/octet-stream")})
         ok("rejects unsupported type", bad.status_code==415)
 
+        # The worker runs one job at a time, and a threads rebuild across a large library
+        # can hold it for many minutes. Wait for it to go idle before queuing, so the read
+        # is timed on its own and not on whatever it queued behind.
+        t0=time.time(); busy=None
+        while time.time()-t0 < 1800:
+            jobs = (await c.get("/api/jobs", params={"limit":40})).json()
+            busy = [x for x in jobs if x["state"] in ("queued","running","yielded")]
+            if not busy: break
+            if time.time()-t0 < 6: print(f"  ...   worker busy ({busy[0]['kind']}); waiting for it to go idle", flush=True)
+            await asyncio.sleep(10)
+        ok("worker idle before the read", not busy, f"waited {time.time()-t0:.0f}s")
+
         jr = await c.post(f"/api/documents/{did}/read", params={"tier":2})
         ok("queue read+annotate", jr.status_code==200 and jr.json()["state"]=="queued")
         t0=time.time(); state=None

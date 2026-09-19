@@ -1412,7 +1412,7 @@ async function loadJobs() {
     const paused = j.state === 'yielded';
     return `<div class="job ${paused ? 'paused' : ''}">
       ${esc((j.document_title || '').slice(0,30))}<br>
-      ${paused ? 'paused — you are talking' : j.kind === 'reshelve' ? `shelving · ${j.progress_current} of ${j.progress_total}` : `${j.kind === 'tier2' ? 'annotating' : 'reading'} · section ${j.progress_current} of ${j.progress_total}`}
+      ${paused ? 'paused — you are talking' : j.kind === 'library' ? `rebuilding threads · ${esc(j.yielded_reason || '')}` : j.kind === 'reshelve' ? `shelving · ${j.progress_current} of ${j.progress_total}` : `${j.kind === 'tier2' ? 'annotating' : 'reading'} · section ${j.progress_current} of ${j.progress_total}`}
       <span class="bar"><i style="width:${pct}%"></i></span>
     </div>`;
   }).join('') + (waiting ? `<div class="job">${waiting} waiting</div>` : '');

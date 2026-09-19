@@ -123,8 +123,16 @@ async def build_library_layer(ctx: dict, kind: str) -> dict[str, Any]:
 
     kinds = ["citations", "clusters", "contradictions"] if kind == "all" else [kind]
     out: dict[str, Any] = {"kind": kind}
+    # A job row, so the UI's "In hand" and anything waiting for an idle worker can see
+    # that a rebuild is holding it -- these run for many minutes on a large library.
+    async with session_scope() as db:
+        job = Job(kind="library", state=JobState.RUNNING, progress_total=len(kinds))
+        db.add(job)
+        await db.flush()
+        jid = job.id
     async with Ollama() as client:
-        for k in kinds:
+        for n, k in enumerate(kinds):
+            await _set_job(jid, progress_current=n, yielded_reason=k)
             try:
                 async with session_scope() as db:
                     if k == "citations":
@@ -143,6 +151,7 @@ async def build_library_layer(ctx: dict, kind: str) -> dict[str, Any]:
                 await record_exception(exc, source="worker", context={"job": f"library:{k}"})
                 log.exception("library pass %s failed", k)
                 out[k] = {"error": str(exc)[:300]}
+    await _set_job(jid, state=JobState.DONE, progress_current=len(kinds), yielded_reason=None)
     return out
 
 

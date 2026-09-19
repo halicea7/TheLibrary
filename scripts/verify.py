@@ -196,9 +196,13 @@ async def main():
         second = await c.post("/api/v1/ask", json={**q, "question": "Summarise DPR in three sentences."}, headers=hdr)
         r1 = await first
         ok("gate: one in flight per token", r1.status_code == 200 and second.status_code == 429 and "Retry-After" in second.headers, f"{r1.status_code} / {second.status_code}")
-        d1 = (await c.post("/api/v1/ask", json={"question":"In one sentence, what does RAPTOR build?","remember":False,"deterministic":True,"subjects":["Machine Learning"]})).json()
-        d2 = (await c.post("/api/v1/ask", json={"question":"In one sentence, what does RAPTOR build?","remember":False,"deterministic":True,"subjects":["Machine Learning"]})).json()
-        ok("deterministic asks agree on citations", sorted(x["n"] for x in d1["citations"]) == sorted(x["n"] for x in d2["citations"]), "identical text" if d1["answer"] == d2["answer"] else "same citations, text differs (GPU nondeterminism)")
+        # Best effort by design: GPU batching makes Ollama usually, not always, byte-identical
+        # at temperature 0 with a seed. Three runs; a majority must agree on the text, and
+        # every run must say what a correct answer says.
+        runs = [(await c.post("/api/v1/ask", json={"question":"In one sentence, what does RAPTOR build?","remember":False,"deterministic":True,"subjects":["Machine Learning"]})).json() for _ in range(3)]
+        texts = [r["answer"] for r in runs]
+        majority = max(texts.count(x) for x in texts)
+        ok("deterministic asks: majority identical, all correct", majority >= 2 and all("tree" in x.lower() for x in texts), f"{majority}/3 identical")
 
     print("== other tools: /api/v1 ==")
     async with httpx.AsyncClient(base_url=API, timeout=600) as c:

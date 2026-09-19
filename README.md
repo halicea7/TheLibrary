@@ -210,6 +210,8 @@ The one detail worth knowing: asked what the owner ate for breakfast, the genera
 
 Do the Tier 2 reflections help the *answers*? Retrieval had said no twice; `scripts/reflections_ab.py` asked about synthesis instead — the same question, the same passages, once bare and once with the library's note beneath each, judged blind by the reader model. Over 14 questions: plain preferred 7, with notes 4, tie 3; groundedness 4.3 plain against 3.6 with notes; usefulness 4.4 against 4.3; citation validity 1.00 both ways. The notes make the answer lean on the note's claims rather than the passage's, and the judge notices. So reflections stay where they are — in the margin, for the reader — and out of the answer's context.
 
+Contradictions used to change every rebuild — 0 to 7 findings from identical runs. Each cluster is now judged up to three times at temperature 0 with fixed seeds and a finding needs two votes. Measured on 50 clusters (every flagged one plus 25 clean) judged three times each: 50 of 50 agreed with themselves.
+
 ## Layout
 
 ```

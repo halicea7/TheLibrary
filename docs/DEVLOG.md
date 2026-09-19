@@ -758,3 +758,13 @@ reading as if the passage said it, and the passage often did not. So the third s
 agrees with the first two: reflections are for the reader in the margin, not for the
 model in the context. `render_context(reflections=)` stays as the tested hook; nothing
 in the chat path calls it.
+
+**Contradiction stability, measured.** Every cluster the rebuild had flagged (25) plus 25
+random clean ones, each judged three times by `judge_cluster` on a quiet model: **50 of 50
+agreed with themselves** across the three runs, against 0–7 findings per run before. The
+honest footnote: 6 of the 25 flagged came back *no* all three times now. Those were flagged
+during a rebuild that ran while another process was also generating -- and the two of them
+together drove Ollama to a 500 -- so borderline verdicts under GPU contention are not the
+verdicts of a quiet pass. Majority-of-three removes the coin flip within a pass; it does
+not make the model the same machine under load as at rest. The rebuild runs alone on the
+worker, which is the normal case.

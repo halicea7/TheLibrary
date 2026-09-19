@@ -490,6 +490,39 @@ select, .toggle {
 .reader-m .dot { display:inline-block; vertical-align:middle; margin-right:5px; }
 .reading-only { font:italic 13px/1.6 var(--serif); color:var(--dim); margin:0 0 18px; max-width:68ch; }
 
+/* ── write ────────────────────────────────────────────────────────────── */
+/* A brief in, a document out: the outline appears, then each section writes itself with
+   its own margin notes, numbered across the whole document. */
+.write .brief { width:100%; min-height:88px; resize:vertical; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; color:var(--fg); font:15px/1.55 var(--serif); padding:11px 13px; }
+.write .brief:focus { border-color:var(--verdigris); outline:none; }
+.write .bar { display:flex; align-items:center; gap:14px; margin:10px 0 22px; flex-wrap:wrap; font:11.5px/1.4 var(--sans); color:var(--dim); }
+.write .go { background:var(--sunk); color:var(--fg); border:1px solid var(--rule); border-radius:3px; font:13px/1 var(--sans); padding:8px 14px; cursor:pointer; }
+.write .go:hover { border-color:var(--verdigris); }
+.write .go[disabled] { opacity:.5; cursor:default; }
+.doc h1.t { font:600 26px/1.25 var(--serif); margin:0 0 6px; max-width:68ch; }
+.doc .plan { font:12px/1.6 var(--mono); color:var(--faint); margin:0 0 18px; max-width:68ch; }
+.doc .outline { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 22px; }
+.doc .outline span { font:11px/1 var(--sans); padding:4px 9px; border:1px solid var(--rule); border-radius:99px; color:var(--faint); }
+.doc .outline span[data-state=writing] { color:var(--fg); border-color:var(--verdigris); }
+.doc .outline span[data-state=done] { color:var(--dim); }
+.doc .sec h2 { font:600 18px/1.35 var(--serif); margin:22px 0 8px; max-width:68ch; }
+.doc .sec .said { margin-top:0; }
+.doc .refs { margin-top:26px; padding-top:14px; border-top:1px solid var(--rule); max-width:78ch; }
+.doc .refs h3 { font:600 12px/1.4 var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:0 0 8px; }
+.doc .refs div { font:11.5px/1.7 var(--mono); color:var(--dim); }
+.doc .refs b { color:var(--rubric); font-weight:500; margin-right:6px; }
+.doc .acts { display:flex; gap:16px; align-items:center; margin:18px 0 30px; flex-wrap:wrap; }
+.doc .tally { font:11px/1.5 var(--mono); color:var(--faint); }
+.saved { max-width:78ch; }
+.saved .row { display:grid; grid-template-columns:1fr auto auto; gap:12px; align-items:baseline; padding:7px 0; border-bottom:1px solid var(--rule-soft); font:13px/1.5 var(--serif); }
+.saved .row .m { font:10.5px/1.5 var(--mono); color:var(--faint); }
+@media print {
+  body { display:block; background:#fff; color:#111; }
+  .shelf, .views, .composer, .subjects, .deskbar, #web, #murmur, #mk-stage, #inspect, .masthead, .write .brief, .write .bar, .doc .acts, .doc .outline, .doc .plan, .saved { display:none !important; }
+  .frame { display:block; } .pane { overflow:visible; padding:0; }
+  .said { grid-template-columns:minmax(0,1fr) 200px; } .note { color:#444; border-left-color:#a8402a; } .mark { color:#a8402a; }
+}
+
 /* ── settings ─────────────────────────────────────────────────────────── */
 .settings { max-width: 78ch; }
 .settings h2 { font:600 20px/1.3 var(--serif); margin:0 0 14px; }
@@ -645,6 +678,7 @@ select, .toggle {
       <button class="view-tab" id="tab-ask"     role="tab" aria-selected="true"  onclick="setView('ask')">Ask</button>
       <button class="view-tab" id="tab-find"    role="tab" aria-selected="false" onclick="setView('find')">Find</button>
       <button class="view-tab" id="tab-threads" role="tab" aria-selected="false" onclick="setView('threads')">Threads</button>
+      <button class="view-tab" id="tab-write"   role="tab" aria-selected="false" onclick="setView('write')" title="Compose a document from the library">Write</button>
       <button class="view-tab" id="tab-open"    role="tab" aria-selected="false" onclick="setView('open')" hidden>Open</button>
       <button class="view-tab" id="tab-make"    role="tab" aria-selected="false" onclick="setView('make')" hidden>Make a cartridge</button>
       <button class="view-tab" id="tab-settings" role="tab" aria-selected="false" onclick="setView('settings')" title="Services, models, maintenance, incidents">Settings<span id="inc-badge" hidden></span></button>
@@ -674,6 +708,7 @@ select, .toggle {
       <div id="view-open" hidden></div>
       <div id="view-make" hidden></div>
       <div id="view-settings" hidden></div>
+      <div id="view-write" hidden></div>
     </div>
     <div id="mk-stage" hidden><canvas id="mk-canvas"></canvas></div>
     <div id="inspect" data-on="false" aria-hidden="true"><canvas id="inspect-canvas"></canvas><div class="who" id="inspect-who"></div><div class="meta" id="inspect-meta"></div></div>
@@ -995,11 +1030,11 @@ $('#themer').onclick = () => {
 /* ── views ────────────────────────────────────────────────────────────── */
 function setView(v) {
   view = v;
-  for (const k of ['ask','find','threads','open','make','settings']) {
+  for (const k of ['ask','find','threads','open','make','settings','write']) {
     $('#view-' + k).hidden = k !== v;
     const t = $('#tab-' + k); t.setAttribute('aria-selected', String(k === v));
   }
-  $('#composer').hidden = v === 'threads' || v === 'open' || v === 'make' || v === 'settings';
+  $('#composer').hidden = v === 'threads' || v === 'open' || v === 'make' || v === 'settings' || v === 'write';
   const e = $('#entry');
   e.placeholder = placeholderFor(v);
   $('#subjects').hidden = v === 'threads' || v === 'open' || v === 'settings';
@@ -1009,6 +1044,7 @@ function setView(v) {
   if (v === 'threads') loadThreads();
   if (v === 'make') renderMake();
   if (v === 'settings') loadSettings();
+  if (v === 'write') renderWrite();
   $('#web').dataset.on = String((v === 'ask' || v === 'find') && web.nodes.length > 0);
   if (v !== 'find') { clearTimeout(web.tour.timer); web.focus(null); }
   web.wake();
@@ -1225,7 +1261,7 @@ function toggleCartridge(id) {
   if (!wasOn) cartridges.add(id);
   if (rack3d.ctrl) { rack3d.ctrl.show(id); rack3d.ctrl.seat(id, !wasOn); }
   rackUnder();
-  loadRack(); loadShelf();
+  loadRack(); loadShelf(); writeScope();
   $('#entry').placeholder = placeholderFor(view);
   const room = roomName();
   desk(room ? `in ${esc(room)}'s shelf` : cartridges.size ? `across ${cartridges.size} cartridges` : '');
@@ -1403,6 +1439,7 @@ function toggleSubject(id) {
   subjects.has(id) ? subjects.delete(id) : subjects.add(id);
   loadSubjects(); loadShelf();
   desk(subjects.size ? `narrowed to ${subjects.size} subject${subjects.size > 1 ? 's' : ''}` : '');
+  writeScope();
   if (view === 'find' && $('#entry').value.trim().length > 1) runFind($('#entry').value.trim());
 }
 function clearSubjects() { subjects.clear(); loadSubjects(); loadShelf(); desk(''); }
@@ -1822,6 +1859,117 @@ async function openVolume(id) {
     ${toc ? `<ul class="toc">${toc}</ul>` : ''}
     <div class="page">${body}</div>`;
   $('#pane').scrollTop = 0;
+}
+
+/* ── write ────────────────────────────────────────────────────────────── */
+const write = { brief: '', length: 'medium', busy: false, last: null };
+function renderWrite() {
+  const el = $('#view-write');
+  if (el.dataset.ready) { loadSaved(); return; }
+  el.dataset.ready = '1';
+  el.innerHTML = `<div class="write">
+    <textarea class="brief" id="wr-brief" placeholder="What should the library write? e.g. A reading guide to retrieval-augmented generation for a new team member: what to read first, what each paper contributes, where they disagree." oninput="write.brief=this.value"></textarea>
+    <div class="bar">
+      <button class="go" id="wr-go" onclick="composeDoc()">draft it</button>
+      <label>length <select id="wr-len" onchange="write.length=this.value"><option value="short">short</option><option value="medium" selected>medium</option><option value="long">long</option></select></label>
+      <span id="wr-scope"></span>
+    </div>
+    <div class="doc" id="wr-doc"></div>
+    <div class="saved" id="wr-saved"></div>
+  </div>`;
+  writeScope(); loadSaved();
+}
+function writeScope() {
+  const parts = [];
+  const room = roomName(); if (room) parts.push(`${room}'s shelf`);
+  if (subjects.size) parts.push(`${subjects.size} subject${subjects.size > 1 ? 's' : ''}`);
+  const s = $('#wr-scope'); if (s) s.textContent = parts.length ? `from ${parts.join(' · ')} — change the scope with the chips and the rack` : 'from the whole library — narrow it with the chips or the rack';
+}
+async function composeDoc() {
+  const brief = ($('#wr-brief').value || '').trim();
+  if (brief.length < 4 || write.busy) return;
+  write.busy = true; $('#wr-go').disabled = true; $('#wr-go').textContent = 'planning…';
+  const doc = $('#wr-doc'); doc.innerHTML = ''; $('#wr-saved').innerHTML = '';
+  const room = roomName();
+  const body = { brief, length: write.length, model: $('#model').value,
+    category_ids: [...subjects], cartridge_ids: [...cartridges],
+    scope_label: [room ? room + "'s shelf" : '', subjects.size ? `${subjects.size} subjects` : ''].filter(Boolean).join(' and ') };
+  let secSources = [], secEl = null, said = null, buf = '', ev = null, text = '', result = null;
+  murmur.start(doc);
+  try {
+    const res = await fetch('/api/compose', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream:true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith('event:')) { ev = line.slice(6).trim(); continue; }
+        if (!line.startsWith('data:')) continue;
+        const rawFull = line.slice(5).replace(/^ /, '').replace(/\r$/, '');
+        const raw = (ev === 'token' || ev === 'thinking') ? rawFull : rawFull.trim();
+        if (ev === 'plan') {
+          const p = JSON.parse(raw);
+          doc.innerHTML = `<h1 class="t">${esc(p.title)}</h1><div class="plan">${esc(p.notes || '')}</div>
+            <div class="outline">${p.sections.map((s, i) => `<span id="wr-o${i}">${esc(s.heading)}</span>`).join('')}</div>`;
+          $('#wr-go').textContent = 'writing…';
+        } else if (ev === 'sources') {
+          const s = JSON.parse(raw); secSources = s.sources;
+        } else if (ev === 'section') {
+          const s = JSON.parse(raw);
+          document.getElementById('wr-o' + s.index)?.setAttribute('data-state', 'writing');
+          secEl = document.createElement('div'); secEl.className = 'sec';
+          secEl.innerHTML = `<h2>${esc(s.heading)}</h2><div class="said md"><p></p></div>`;
+          doc.appendChild(secEl); said = secEl.querySelector('.said'); text = '';
+          murmur.stop(); murmur.start(secEl);
+        } else if (ev === 'thinking') {
+          murmur.add(raw);
+        } else if (ev === 'token') {
+          text += raw; said.innerHTML = mdBlocks(text).join('');
+        } else if (ev === 'section_done') {
+          const s = JSON.parse(raw);
+          document.getElementById('wr-o' + s.index)?.setAttribute('data-state', 'done');
+          sources = secSources; renderAnswer(said, s.body);  // the apparatus reads the global
+          murmur.stop();
+        } else if (ev === 'done') {
+          result = JSON.parse(raw); write.last = result;
+          doc.insertAdjacentHTML('beforeend', `<div class="refs"><h3>References</h3>${result.references.map(r =>
+            `<div><b>[${r.n}]</b>${esc(r.title)}${r.page ? `, p.${r.page}` : ''}${r.section ? ' — ' + esc((r.section || '').split(' › ').slice(1).join(' › ')) : ''}${r.cartridge ? ' (' + esc(r.cartridge.name) + ')' : ''}</div>`).join('')}</div>
+            <div class="acts">
+              <button class="go" onclick="saveDoc()">save .md</button>
+              <button class="go" onclick="window.print()">print / PDF</button>
+              <button class="go" onclick="shelveDoc(this)">shelve it in the library</button>
+              <span class="tally">${result.sections} sections · ${result.references.length} passages cited · ${result.markers_resolved} of ${result.markers_emitted} citations verified</span>
+            </div>`);
+        } else if (ev === 'error') {
+          doc.insertAdjacentHTML('beforeend', `<p style="color:var(--amber)">${esc(raw)}</p>`);
+        }
+      }
+    }
+  } catch (e) { doc.insertAdjacentHTML('beforeend', `<p style="color:var(--amber)">${esc(String(e))}</p>`); }
+  finally { murmur.stop(); write.busy = false; $('#wr-go').disabled = false; $('#wr-go').textContent = 'draft it'; loadSaved(); }
+}
+async function saveDoc() {
+  if (!write.last) return;
+  const r = await (await fetch('/api/compose/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title: write.last.title, markdown: write.last.markdown }) })).json();
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([write.last.markdown], { type: 'text/markdown' })), download: r.file });
+  a.click(); URL.revokeObjectURL(a.href);
+  say(`Saved as ${r.file} (also kept in ${r.path}).`); loadSaved();
+}
+async function shelveDoc(btn) {
+  if (!write.last) return;
+  btn.disabled = true; btn.textContent = 'shelving…';
+  const r = await fetch('/api/compose/shelve', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title: write.last.title, markdown: write.last.markdown }) });
+  const j = await r.json();
+  if (!r.ok) { say(j.detail || 'Could not shelve it.', true); btn.disabled = false; btn.textContent = 'shelve it in the library'; return; }
+  say(`${j.title} is on the shelf. It is searchable now; have it read like any volume.`);
+  btn.textContent = 'on the shelf'; loadShelf(); holdings();
+}
+async function loadSaved() {
+  const el = $('#wr-saved'); if (!el) return;
+  let list = []; try { list = await (await fetch('/api/compose/saved')).json(); } catch { return; }
+  el.innerHTML = list.length ? `<p class="label spaced">Written before</p>` + list.map(f =>
+    `<div class="row"><span>${esc(f.title)}</span><span class="m">${fmtWhen(f.modified)} · ${(f.bytes / 1024).toFixed(0)} KB</span><a class="linkish" href="/api/compose/saved/${encodeURIComponent(f.file)}" download>download</a></div>`).join('') : '';
 }
 
 /* ── settings ─────────────────────────────────────────────────────────── */

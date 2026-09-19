@@ -59,6 +59,12 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
 
 **Threads** — themes spanning volumes, where your sources disagree, and who cites whom. Rebuilt automatically a few minutes after the last read finishes, so a folder of forty papers produces one rebuild rather than forty.
 
+**Write** — a brief in, a document out. The librarian plans an outline, then writes each section *retrieving for that section*, so every paragraph keeps its `[n]` margin notes, numbered across the whole document and verified per section; a references list closes it. Save it as `.md`, print it to PDF, or **shelve it** — it becomes a volume, and the library can read what it wrote. Scoped by the chips and the rack like everything else.
+
+<p align="center">
+  <img src="docs/write.jpg" alt="Write. A brief at the top; below it the document the library composed: title, the plan's reasoning, the outline, and each section with its own margin notes." width="900"/>
+</p>
+
 **Conversations** — the desk bar names the current one, starts a new one, and lists earlier ones; opening one replays it with its margin notes, and asking again continues it.
 
 <p align="center">
@@ -146,7 +152,7 @@ curl -s -X POST http://library:8077/api/v1/ask -H "Authorization: Bearer $TOKEN"
   -d '{"question":"What does Kerberoasting require?","room":"HackTricks","model":"technical"}'
 ```
 
-returns `{answer, citations[{n,title,page,section,document_id,cartridge}], verified{emitted,resolved}, conversation_id}` — every `[n]` in the answer is a citation below, and anything the model cited that could not be verified against the shelf was stripped before you saw it. `room` is a cartridge by name, so a tool can be told *ask only our docs*; `subjects` are shelf names; `conversation_id` continues a thread. Also `GET /api/v1/search?q=…&room=…`, `GET /api/v1/shelves` (what there is to ask about), `GET /api/v1/volumes/{id}`.
+returns `{answer, citations[{n,title,page,section,document_id,cartridge}], verified{emitted,resolved}, conversation_id}` — every `[n]` in the answer is a citation below, and anything the model cited that could not be verified against the shelf was stripped before you saw it. `room` is a cartridge by name, so a tool can be told *ask only our docs*; `subjects` are shelf names; `conversation_id` continues a thread. Also `GET /api/v1/search?q=…&room=…`, `GET /api/v1/shelves` (what there is to ask about), `GET /api/v1/volumes/{id}`, and `POST /api/v1/compose` `{brief, room?, subjects?, length, shelve?}` → a whole document as markdown with its references and citation tally (minutes, not seconds: one retrieval and one generation per section).
 
 **MCP**, for anything that is an agent. `./library mcp` serves four tools — `list_shelves`, `search_library`, `ask_library`, `read_volume` — over stdio; `./library mcp --http 8078` serves them over streamable HTTP for an agent on another machine. It is a thin client of the JSON API (`LIBRARY_URL`, `LIBRARY_TOKEN`), so one Ollama, one job at a time, and one door stay one thing. For Claude Desktop or Claude Code, point the MCP config at `./library mcp` in this directory.
 
@@ -190,7 +196,7 @@ src/library_agent/
   ops/                  incidents and troubleshooting against the docs
   api/routes/v1.py      plain JSON for other programs; api/auth.py the door
   mcp_server.py         the library as MCP tools
-  chat/                 citations, query rewriting, stances, streaming
+  chat/                 citations, query rewriting, stances, streaming, composing
   eval/                 question generation, recall@k harness
   api/  worker/  db/
 web/index.html          the UI, one file, no build step

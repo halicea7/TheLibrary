@@ -16,6 +16,7 @@ from library_agent.api.auth import BearerOrLoopback
 from library_agent.api.routes import (
     cartridges,
     chat,
+    compose,
     documents,
     library,
     reading,
@@ -82,6 +83,7 @@ app.include_router(library.router)
 app.include_router(cartridges.router)
 app.include_router(settings_routes.router)
 app.include_router(v1.router)
+app.include_router(compose.router)
 
 
 @app.get("/api/health", response_model=HealthOut)

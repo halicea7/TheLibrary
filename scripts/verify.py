@@ -185,6 +185,14 @@ async def main():
         bad = await c.post("/api/v1/ask", json={"question":"anything","room":"No Such Room"})
         ok("v1 unknown room is a clean 404", bad.status_code==404)
 
+    print("== write ==")
+    async with httpx.AsyncClient(base_url=API, timeout=1200) as c:
+        r = await c.post("/api/v1/compose", json={"brief":"Two short sections on reciprocal rank fusion: what it is, and one limitation.","length":"short","subjects":["Machine Learning"]})
+        d = r.json()
+        ok("compose writes a cited document", r.status_code==200 and d["markdown"].startswith("# ") and d["sections"]>=2 and d["verified"]["resolved"]>=1 and "## References" in d["markdown"], f"{d.get('sections')} sections, {d.get('verified')}")
+        sv = (await c.post("/api/compose/save", json={"title": d["title"], "markdown": d["markdown"]})).json()
+        ok("composition saved to disk", sv["file"].endswith(".md") and any(x["file"]==sv["file"] for x in (await c.get("/api/compose/saved")).json()))
+
     print("== settings & incidents ==")
     async with httpx.AsyncClient(base_url=API, timeout=600) as c:
         st = (await c.get("/api/settings")).json()
@@ -227,8 +235,8 @@ async def main():
         sh(f"./ops/backup.sh {td} >/dev/null 2>&1")
         made = sh(f"ls {td}/*/ 2>/dev/null")
         ok("backup produces dump + archive", "library_agent.dump" in made and "documents.tar.gz" in made)
-    ok("screenshots present", all(os.path.exists(f"docs/{n}.jpg") for n in ("web","ask","find","reader","threads","cartridge","settings")))
-    ok("README references them", all(f"docs/{n}.jpg" in open("README.md").read() for n in ("web","ask","find","reader","threads","cartridge","settings")))
+    ok("screenshots present", all(os.path.exists(f"docs/{n}.jpg") for n in ("web","ask","find","reader","threads","cartridge","settings","write")))
+    ok("README references them", all(f"docs/{n}.jpg" in open("README.md").read() for n in ("web","ask","find","reader","threads","cartridge","settings","write")))
 
     passed = sum(1 for _,c_,_ in R if c_); total = len(R)
     print(f"\n{'ALL PASS' if passed==total else 'FAILURES'}: {passed}/{total}")

@@ -245,3 +245,70 @@ async def shelves(db: SessionDep) -> dict:
 async def volume(document_id: uuid.UUID, db: SessionDep) -> dict:
     """A volume as the reader sees it: sections, passages, and what the library wrote."""
     return await _read_document(document_id, db)
+
+
+class ComposeIn(BaseModel):
+    brief: str = Field(min_length=4, max_length=4000)
+    room: str | None = None
+    subjects: list[str] = Field(default_factory=list)
+    model: str | None = None
+    length: str = Field(default="medium", description="short | medium | long")
+    shelve: bool = Field(default=False, description="also add the document to the library")
+
+
+@router.post("/compose")
+async def compose_json(req: ComposeIn) -> dict:
+    """A whole document, written from the library with verified citations, as JSON:
+    the markdown, its references, and the citation tally. Slow -- one retrieval and one
+    generation per section -- so expect minutes, not seconds."""
+    from library_agent.chat import compose as comp
+
+    if req.length not in comp.LENGTHS:
+        raise HTTPException(422, f"length is one of {sorted(comp.LENGTHS)}")
+    async with session_scope() as db:
+        room = await _room_id(db, req.room)
+        subjects = await _subject_ids(db, req.subjects)
+    result: dict | None = None
+    error = None
+    async for ev in comp.compose(
+        req.brief,
+        model=_model(req.model),
+        length=req.length,
+        category_ids=subjects or None,
+        cartridge_ids=[room] if room else None,
+        scope_label=req.room or ", ".join(req.subjects),
+    ):
+        if ev["event"] == "done":
+            result = ev["data"]
+        elif ev["event"] == "error":
+            error = ev["data"]
+    if error or not result:
+        raise HTTPException(502, error or "composition produced nothing")
+    out = {
+        "title": result["title"],
+        "markdown": result["markdown"],
+        "references": result["references"],
+        "verified": {"emitted": result["markers_emitted"], "resolved": result["markers_resolved"]},
+        "sections": result["sections"],
+    }
+    if req.shelve:
+        import tempfile
+        from pathlib import Path
+
+        from library_agent.ingest.tier0 import ingest
+
+        comp.save_markdown(result["title"], result["markdown"])
+        with tempfile.NamedTemporaryFile(
+            suffix=".md", delete=False, mode="w", encoding="utf-8"
+        ) as tmp:
+            tmp.write(result["markdown"])
+            tmp_path = Path(tmp.name)
+        try:
+            async with session_scope() as db:
+                r = await ingest(
+                    db, tmp_path, original_filename=f"{comp.slugify(result['title'])}.md"
+                )
+                out["document_id"] = str(r.document_id)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    return out

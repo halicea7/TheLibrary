@@ -603,3 +603,23 @@ door itself stay in one place. Checked with the SDK's own client over stdio, and
 JSON ask against HackTricks came back on the technical model with 7 of 8 citations
 resolved -- the eighth was the model citing a number it had not been given, stripped
 before the caller saw it, which is the whole point of the apparatus.
+
+
+## Follow-on: the library writes
+
+"Can it compose documents we can save?" `chat/compose.py`. A brief goes in; the
+librarian plans an outline with thinking on (title, sections, and for each a *search
+query*, not a question -- the plan is also the retrieval plan), then writes each section
+against passages retrieved for that section. Citation numbers run across the document (a
+passage seen again keeps its number), each section is verified against only the passages
+it was given, and a references list of what was actually cited closes it. Streamed to
+the Write tab section by section with the murmur running; saved as `.md`; printed via a
+print stylesheet; or shelved, at which point the document is ingested like any dropped
+file and becomes a volume the library can read. `POST /api/v1/compose` returns the same
+thing as JSON.
+
+First run on the Machine Learning shelf: a four-section reading guide, 33 of 33
+citations verified. Two things fixed on the way: a local `sources` in the UI shadowed the
+global the apparatus reads (no margin notes until it was renamed), and the model opens a
+section with its own heading no matter how it is told not to, so the first line is
+dropped when it matches.

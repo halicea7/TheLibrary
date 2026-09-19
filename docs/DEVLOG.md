@@ -748,3 +748,13 @@ excluded from the tags. A dry run on the four worst placed three of them correct
 (Attack Techniques, Database Injection, Security Misconfigurations). `reshelve` takes a
 `category_id` to re-place one shelf's volumes without rebuilding the taxonomy, and the
 shelf header grows a *re-shelve these N* button when one shelf is chosen.
+
+**Reflections in the answer: no.** The A/B ran to 14 of 20 questions before the model
+wedged (HTTP up, no generation; the liveness probe caught it and the masthead said so).
+Enough to decide: plain preferred 7, notes 4, tie 3; grounded 4.29 plain versus 3.57 with
+notes; useful 4.43 versus 4.29; citation validity 1.00 both. The pattern in the judge's
+reasoning was consistent -- with a note beneath a passage the answer asserts the note's
+reading as if the passage said it, and the passage often did not. So the third suite
+agrees with the first two: reflections are for the reader in the margin, not for the
+model in the context. `render_context(reflections=)` stays as the tested hook; nothing
+in the chat path calls it.

@@ -208,6 +208,8 @@ Answer quality is checked separately by `scripts/consistency.py`: questions with
 
 The one detail worth knowing: asked what the owner ate for breakfast, the general model declined *and* cited the only breakfast in the library — a squirrel's, in an example from the T5 paper — while saying it was unrelated. That is the behaviour the apparatus is for. `uv run python scripts/verify.py` exercises every surface end to end.
 
+Do the Tier 2 reflections help the *answers*? Retrieval had said no twice; `scripts/reflections_ab.py` asked about synthesis instead — the same question, the same passages, once bare and once with the library's note beneath each, judged blind by the reader model. Over 14 questions: plain preferred 7, with notes 4, tie 3; groundedness 4.3 plain against 3.6 with notes; usefulness 4.4 against 4.3; citation validity 1.00 both ways. The notes make the answer lean on the note's claims rather than the passage's, and the judge notices. So reflections stay where they are — in the margin, for the reader — and out of the answer's context.
+
 ## Layout
 
 ```

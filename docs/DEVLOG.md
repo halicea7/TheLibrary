@@ -570,3 +570,17 @@ plate behind. Also found: the nebula's `extent` smoothing was a no-op from zero,
 view was always scaled to the maximum radius -- unnoticed at 176 volumes, a blob at
 1,219. It now starts from the first measurement and uses the 92nd-percentile distance,
 so outliers cannot shrink the cloud.
+
+**The models, properly.** "They look like they're from Roblox." Fair: primitives with a
+paint job. Rebuilt the way the object is built: a front plate extruded with openings
+cut out of it -- the grip grooves, three level pips, the power light, a screw -- so
+every recess has chamfered walls; a back plate; a rim joining them; a PCB inside with a
+few components and an edge connector of individual gold contacts; the label as a sticker
+on the outside of the front face with its own raised edge, never behind the glass. The
+plastic has a fine grain from a procedural normal map, a clearcoat, and a sheen on solid
+colours. Lighting is a real studio HDRI (Poly Haven, CC0) through three's RGBELoader,
+prefiltered once per page, with a soft-shadow key light and a contact shadow on the
+socket. Two bugs on the way: `ShapeGeometry` needs a `Shape`, not a `Path`, for the
+groove floors; and a label plane coplanar with the top of its own sticker edge z-fights
+into stripes. Through a clear shell you now see the board, and the constellation floating
+between it and the front.

@@ -28,6 +28,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from library_agent.config import settings
 
 MATERIALS = ("solid", "clear", "smoke", "glitter", "metallic")
+# Clearance is a marking, sealed in like the rest of the design: it says how the maker
+# meant the cartridge to travel. `restricted` is also enforced at one point -- the
+# receiving library will not re-export a restricted cartridge's volumes into another.
+CLEARANCES = ("open", "internal", "confidential", "restricted")
 ART_MAX_PX = 1024
 ART_MAX_BYTES = 2_000_000
 
@@ -38,6 +42,7 @@ DEFAULT_DESIGN: dict[str, Any] = {
     "sparkle": 0.5,  # glitter density
     "roughness": 0.25,
     "art": "generated",  # generated | upload
+    "clearance": "open",
 }
 
 
@@ -52,6 +57,8 @@ def clamp_design(raw: Any) -> dict[str, Any]:
             except (TypeError, ValueError):
                 pass
         d["art"] = "upload" if raw.get("art") == "upload" else "generated"
+        c = str(raw.get("clearance") or d["clearance"]).lower()
+        d["clearance"] = c if c in CLEARANCES else d["clearance"]
     return d
 
 

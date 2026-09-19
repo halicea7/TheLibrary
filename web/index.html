@@ -160,6 +160,18 @@ body {
 }
 .slot:hover { color:var(--fg); border-color:var(--faint); }
 .rack-note { font:10.5px/1.5 var(--mono); color:var(--faint); margin:-2px 0 6px; min-height:14px; }
+/* The rack in three dimensions: cartridges standing in a slotted base. Names and eject
+   sit beneath each one as HTML, placed by projecting the slot. */
+.rack3d { position:relative; height:190px; margin:0 -6px 4px; }
+.rack3d canvas { width:100%; height:100%; display:block; }
+.rack3d .tags { position:absolute; left:0; right:0; bottom:0; height:34px; pointer-events:none; }
+.rack3d .tag { position:absolute; transform:translateX(-50%); text-align:center; pointer-events:auto; white-space:nowrap; }
+.rack3d .tag .nm { display:block; font:500 10px/1.3 var(--serif); color:var(--dim); max-width:78px; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
+.rack3d .tag[data-on=true] .nm { color:var(--fg); }
+.rack3d .tag .ej { font:9.5px/1 var(--sans); color:var(--faint); background:none; border:0; cursor:pointer; padding:1px 0 0; display:none; }
+.rack3d .tag:hover .ej { display:inline; }
+.rack3d .tag .ej:hover { color:var(--amber); }
+.rack3d .slot2d { position:absolute; right:6px; top:8px; }
 
 /* ── the shelf itself ─────────────────────────────────────────────────── */
 /* Volumes are grouped by subject. A volume with three subjects sits on three shelves,
@@ -601,6 +613,7 @@ select, .toggle {
     </div>
 
     <p class="label spaced">Rack</p>
+    <div class="rack3d" id="rack3d" hidden><canvas id="rack-canvas"></canvas><div class="tags" id="rack-tags"></div><button class="slot slot2d" style="height:34px;width:22px;font-size:13px" onclick="openMake()" title="Make a cartridge from this library">+</button></div>
     <div class="rack" id="rack"></div>
     <div class="rack-note" id="rack-note"></div>
 
@@ -1101,12 +1114,35 @@ async function reshelve(btn, rebuild = true) {
 }
 
 /* ── the rack ─────────────────────────────────────────────────────────── */
+const rack3d = { ctrl: null, points: {} };
 async function loadRack(justInserted) {
   let r;
   try { r = await (await fetch('/api/cartridges')).json(); } catch { return; }
   palette = r.palette || [];
   rackIndex = Object.fromEntries(r.cartridges.map(c => [c.id, c]));
   for (const id of [...cartridges]) if (!rackIndex[id]) cartridges.delete(id);
+  if (window.Cartridge3D && r.cartridges.length) {
+    // The rack as objects. Constellations are fetched once per cartridge.
+    $('#rack3d').hidden = false; $('#rack').hidden = true;
+    if (!rack3d.ctrl) rack3d.ctrl = window.Cartridge3D.mountRack($('#rack-canvas'), {
+      onPick: id => toggleCartridge(id),
+      onHover: id => id ? inspectShow(id) : inspectHide(),
+    });
+    await Promise.all(r.cartridges.map(async c => {
+      if (rack3d.points[c.id]) return;
+      try { rack3d.points[c.id] = (await (await fetch(`/api/cartridges/${c.id}/constellation`)).json()).points || []; } catch { rack3d.points[c.id] = []; }
+    }));
+    rack3d.ctrl.setCartridges(r.cartridges.map(c => ({
+      id: c.id, design: c.design, colour: c.colour, name: c.name, level: c.level,
+      sub: `${c.level} · ${c.document_count} volumes`, points: rack3d.points[c.id], artUrl: `/api/cartridges/${c.id}/art`,
+      inserted: cartridges.has(c.id),
+    })));
+    rackTags(r.cartridges);
+    const room = roomName();
+    $('#rack-note').textContent = room ? `in ${room}'s shelf` : cartridges.size ? `${cartridges.size} rooms` : '';
+    return;
+  }
+  $('#rack3d').hidden = true; $('#rack').hidden = false;
   $('#rack').innerHTML = r.cartridges.map(c => `
     <button class="spine ${c.id === justInserted ? 'inserting' : ''}" style="--c:${esc(c.colour)}; --w:${26 + Math.round(Math.min(c.document_count, 80) / 80 * 16)}px" data-level="${c.level}"
             aria-pressed="${cartridges.has(c.id)}" title="${esc(c.name)} · ${c.level} · ${c.document_count} volumes · v${c.version}${c.made_by ? ' · made by ' + esc(c.made_by) : ''}"
@@ -1133,7 +1169,7 @@ async function inspectShow(id) {
     $('#inspect-meta').textContent = `${c.level} · ${c.document_count} volumes · v${c.version}${c.made_by ? ' · made by ' + c.made_by : ''}`;
     let points = [];
     try { points = (await (await fetch(`/api/cartridges/${id}/constellation`)).json()).points || []; } catch {}
-    inspect.ctrl.set({ design: c.design || {}, colour: c.colour, name: c.name, sub: `${c.level} · ${c.document_count} volumes`, points, artUrl: `/api/cartridges/${id}/art`, flip: fresh });
+    inspect.ctrl.set({ design: c.design || {}, colour: c.colour, name: c.name, level: c.level, sub: `${c.level} · ${c.document_count} volumes`, points, artUrl: `/api/cartridges/${id}/art`, lit: cartridges.has(id), flip: fresh });
     el.dataset.on = 'true';
   }, 140);
 }
@@ -1142,8 +1178,24 @@ function inspectHide() {
   inspect.timer = setTimeout(() => { $('#inspect').dataset.on = 'false'; }, 260);
 }
 
+// Names under the standing cartridges, placed where each slot projects to.
+function rackTags(list) {
+  const el = $('#rack-tags');
+  const place = () => {
+    el.innerHTML = list.map(c => {
+      const p = rack3d.ctrl.project(c.id); if (!p) return '';
+      return `<div class="tag" data-on="${cartridges.has(c.id)}" style="left:${p.x}px">
+        <span class="nm" onclick="toggleCartridge('${c.id}')" title="${esc(c.name)} · ${c.level} · ${c.document_count} volumes">${esc(c.name)}</span>
+        <button class="ej" onclick="event.stopPropagation(); ejectCartridge('${c.id}', this)">eject</button>
+      </div>`;
+    }).join('');
+  };
+  place(); requestAnimationFrame(place);
+}
 function toggleCartridge(id) {
   cartridges.has(id) ? cartridges.delete(id) : cartridges.add(id);
+  // The motion: down into the slot with the light coming on, or up and dark.
+  rack3d.ctrl?.setInserted(id, cartridges.has(id));
   loadRack(); loadShelf();
   $('#entry').placeholder = placeholderFor(view);
   const room = roomName();
@@ -1870,7 +1922,8 @@ const GLYPHS = {
   leaf:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 19C5 9 11 4 20 4c0 9-5 15-15 15z"/><path d="M5 19l8-8"/></svg>',
 };
 const make = { name:'', colour:null, glyph:'book', level:'readings', timer:null,
-  design: { material:'clear', tint:.55, opacity:.35, sparkle:.5, roughness:.25, art:'generated' }, artUrl:null, artData:null, points:[], stage:null };
+  design: { material:'clear', tint:.55, opacity:.35, sparkle:.5, roughness:.25, art:'generated', clearance:'open' }, artUrl:null, artData:null, points:[], stage:null };
+const CLEARANCES = [['open','Open','travels freely'],['internal','Internal','for your own people'],['confidential','Confidential','handle with care'],['restricted','Restricted','a receiving library will not re-export its volumes']];
 const MATERIALS = [['solid','Solid'],['clear','Clear'],['smoke','Smoke'],['glitter','Glitter'],['metallic','Metallic']];
 function openMake() { $('#tab-make').hidden = false; setView('make'); }
 function renderMake(flip) {
@@ -1895,6 +1948,9 @@ function renderMake(flip) {
           <input type="range" min="0" max="1" step=".01" value="${make.design[k]}" oninput="make.design.${k}=+this.value; this.nextElementSibling.value=Math.round(this.value*100); stageUpdate()"/><output>${Math.round(make.design[k]*100)}</output></label>`).join('')}
       </div>
       <div class="locked">The design is sealed into the cartridge: it looks like this on every rack.</div></div></div>
+    <div class="row"><label>Clearance</label><div><div class="mats">${CLEARANCES.map(([v, l, d]) =>
+      `<button aria-pressed="${make.design.clearance === v}" title="${d}" onclick="make.design.clearance='${v}'; renderMake(true)">${l}</button>`).join('')}</div>
+      <div class="locked">${esc(CLEARANCES.find(x => x[0] === make.design.clearance)?.[2] || '')}. Printed on the label; sealed with the design.</div></div></div>
     <div class="row"><label>Art</label><div class="artpick">
       ${make.artUrl ? `<img src="${make.artUrl}" alt=""/>` : ''}
       <span>${make.design.art === 'upload' ? 'your image' : 'its own constellation, drawn from the volumes'}</span>
@@ -1906,7 +1962,7 @@ function renderMake(flip) {
       ${[['full','Full','The originals, every passage, and every reading. The receiver can open the pages.'],
          ['readings','Readings','What this library wrote about each section, and its margin notes. Searchable and citable; the text itself never leaves.'],
          ['catalogue','Catalogue','A summary and subjects per volume. Enough to know the material exists and ask for it.']].map(([v, l, d]) =>
-        `<label><input type="radio" name="mk-level" value="${v}" ${v === make.level ? 'checked' : ''} onchange="make.level='${v}'; previewMake()"/><span>${l}<small>${d}</small></span></label>`).join('')}
+        `<label><input type="radio" name="mk-level" value="${v}" ${v === make.level ? 'checked' : ''} onchange="make.level='${v}'; previewMake(); stageUpdate()"/><span>${l}<small>${d}</small></span></label>`).join('')}
     </div></div>
     <div class="row"><label>Contents</label><div style="font:13px/1.5 var(--serif); color:var(--dim)">${
       scope.length ? `What is scoped now — ${esc(scope.join(' · '))}. Change the scope with the subject chips and the rack.` : 'Nothing is scoped, so the whole library goes in. Pick subjects or a cartridge to narrow it.'}</div></div>
@@ -1939,7 +1995,7 @@ async function stageShow() {
 }
 function stageUpdate(flip) {
   if (!make.stage) return;
-  make.stage.set({ design: { ...make.design }, colour: make.colour, name: make.name.trim() || 'Cartridge', sub: `${make.level} · ${(make.points || []).length} volumes`, points: make.points, artUrl: make.artUrl, flip: !!flip });
+  make.stage.set({ design: { ...make.design }, colour: make.colour, name: make.name.trim() || 'Cartridge', level: make.level, sub: `${make.level} · ${(make.points || []).length} volumes`, points: make.points, artUrl: make.artUrl, lit: true, flip: !!flip });
 }
 function pickArt(file) {
   if (!file) return;
@@ -2049,7 +2105,7 @@ setInterval(() => { holdings(); incidentBadge(); }, 30000);
 <script type="module">
   // The cartridge as an object. Loaded as a module (it imports three.js); if WebGL is
   // unavailable the rest of the library does not care.
-  try { const m = await import('/cartridge3d.js'); window.Cartridge3D = m; } catch (e) { console.warn('3D cartridges unavailable', e); }
+  try { const m = await import('/cartridge3d.js'); window.Cartridge3D = m; loadRack(); } catch (e) { console.warn('3D cartridges unavailable', e); }
 </script>
 </body>
 </html>

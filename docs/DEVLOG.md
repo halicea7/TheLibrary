@@ -537,3 +537,15 @@ vendored dependency, three r170, the first library the UI has used.
 `./library import --cartridge` puts a folder on the rack directly, introducing its
 volumes, which is how HackTricks arrived: 1,044 volumes in 564 s, a green translucent
 cartridge with a thousand points inside.
+
+
+**The rack as objects; light, pips, clearance.** The spine row is gone: the rack is a
+three.js scene in the shelf column, every cartridge standing in a slotted base. Scoped
+ones sit seated with a verdigris power light on; unscoped ones stand half out; toggling
+eases the motion (~95% in a third of a second). Picking is a raycast; names and eject sit
+beneath as HTML placed by projecting each slot. On the model: three level pips beside
+the grip ridges lit by level, and a clearance band across the top of the label (open has
+none; internal, confidential, restricted in slate, amber, rubric) with the marking
+printed on it. Clearance is sealed with the design; `restricted` is also enforced at the
+one place it can be: `resolve_selection` leaves out any volume that arrived only in a
+restricted cartridge, so the receiving library cannot re-export it.

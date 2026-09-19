@@ -247,10 +247,24 @@ async def resolve_selection(
         )
     if not ids:
         return []
+    # A volume that arrived only in a restricted cartridge does not leave again.
+    restricted = set(
+        (
+            await db.execute(
+                select(CartridgeDocument.document_id)
+                .join(Cartridge, Cartridge.id == CartridgeDocument.cartridge_id)
+                .where(
+                    CartridgeDocument.document_id.in_(ids),
+                    CartridgeDocument.introduced.is_(True),
+                    Cartridge.design["clearance"].astext == "restricted",
+                )
+            )
+        ).scalars()
+    )
     rows = (
         await db.execute(
             select(Document.id)
-            .where(Document.id.in_(ids), Document.status == DocumentStatus.READY)
+            .where(Document.id.in_(ids - restricted), Document.status == DocumentStatus.READY)
             .order_by(Document.title)
         )
     ).scalars()

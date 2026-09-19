@@ -128,3 +128,36 @@ class TestRoundTrip:
         from library_agent.db.models import Cartridge
 
         assert (await db.get(Cartridge, r.cartridge_id)).art_path is None
+
+
+class TestClearance:
+    def test_clamps(self):
+        assert clamp_design({"clearance": "restricted"})["clearance"] == "restricted"
+        assert clamp_design({"clearance": "top secret"})["clearance"] == "open"
+
+    async def test_restricted_volumes_do_not_reexport(self, db, tmp_path):
+        """A volume that arrived only inside a restricted cartridge is left out of any
+        selection for a new cartridge on the receiving library."""
+        from library_agent.db.purge import delete_document
+        from library_agent.library.cartridge import resolve_selection
+
+        a = await make_document(db, title="Alpha", body=BODY_A)
+        zip_path = await build_cartridge(
+            db,
+            document_ids=[a.id],
+            level="readings",
+            name="R",
+            out_dir=tmp_path,
+            design={"clearance": "restricted"},
+        )
+        await delete_document(db, a.id)
+        r = await import_cartridge(db, zip_path)
+        from library_agent.db.models import Document
+
+        back = (
+            await db.execute(
+                __import__("sqlalchemy").select(Document).where(Document.title == "Alpha")
+            )
+        ).scalar_one()
+        assert await resolve_selection(db, document_ids=[back.id]) == []
+        assert await resolve_selection(db, cartridge_ids=[r.cartridge_id]) == []

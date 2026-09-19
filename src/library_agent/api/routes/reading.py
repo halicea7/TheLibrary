@@ -11,8 +11,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from library_agent.config import settings
-from library_agent.db.models import Category, Document, DocumentCategory, Job
+from library_agent.db.models import CartridgeDocument, Category, Document, DocumentCategory, Job
 from library_agent.db.session import SessionDep
+from library_agent.library.shelving import expand_category_ids
 from library_agent.worker.tasks import enqueue_read, enqueue_reshelve
 
 router = APIRouter(prefix="/api", tags=["reading"])
@@ -69,16 +70,55 @@ async def start_reading(document_id: uuid.UUID, db: SessionDep, tier: int = 1) -
 
 
 @router.post("/read/backfill")
-async def start_backfill(db: SessionDep, tier: int = 1) -> dict[str, int]:
-    """Queue everything below `tier`. tier=2 annotates the whole shelf."""
-    ids = list((await db.execute(select(Document.id).where(Document.tier < tier))).scalars())
+async def start_backfill(
+    db: SessionDep,
+    tier: int = 1,
+    cartridge_id: uuid.UUID | None = None,
+    category_id: uuid.UUID | None = None,
+    only_tier: int | None = None,
+) -> dict[str, int]:
+    """Queue everything below `tier` -- optionally only what is in one cartridge or on one
+    shelf, and optionally only volumes currently at `only_tier` (so "annotate the read"
+    does not also read the unread). Volumes with a job already queued or running are
+    skipped, so pressing the button twice queues nothing twice."""
+    q = select(Document.id).where(Document.tier < tier, Document.status == "ready")
+    if only_tier is not None:
+        q = q.where(Document.tier == only_tier)
+    if cartridge_id:
+        q = q.where(
+            Document.id.in_(
+                select(CartridgeDocument.document_id).where(
+                    CartridgeDocument.cartridge_id == cartridge_id
+                )
+            )
+        )
+    if category_id:
+        # The same rule the shelf buttons count by: shelved under it (a top shelf takes
+        # its sub-shelves), or tagged with exactly it.
+        ids_ = await expand_category_ids(db, [category_id])
+        q = q.where(
+            Document.shelf_id.in_(ids_)
+            | Document.id.in_(
+                select(DocumentCategory.document_id).where(
+                    DocumentCategory.category_id == category_id
+                )
+            )
+        )
+    busy = set(
+        (
+            await db.execute(
+                select(Job.document_id).where(Job.state.in_(["queued", "running", "yielded"]))
+            )
+        ).scalars()
+    )
+    ids = [d for d in (await db.execute(q)).scalars() if d not in busy]
     redis = await _redis()
     try:
         for did in ids:
             await enqueue_read(redis, did, tier=tier)
     finally:
         await redis.aclose()
-    return {"queued": len(ids)}
+    return {"queued": len(ids), "already_queued": len(busy)}
 
 
 @router.get("/jobs", response_model=list[JobOut])

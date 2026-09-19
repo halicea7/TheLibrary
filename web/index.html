@@ -668,6 +668,7 @@ select, .toggle {
     <div class="rack-note" id="rack-note"></div>
 
     <div class="shelf-h" style="padding:0"><p class="label spaced" style="margin-bottom:0">Shelf</p><button class="linkish" id="reshelve" onclick="reshelve(this)" title="Have the library organise its shelf: top shelves, sub-shelves, one place per volume">reshelve</button></div>
+    <div class="acts" id="shelf-acts" style="gap:12px;margin:4px 0 2px;font:11px/1.5 var(--sans);color:var(--faint)"></div>
     <div id="shelf" style="margin-top:8px"></div>
   </aside>
 
@@ -1158,6 +1159,40 @@ async function loadShelf() {
       + [...read, ...unread].map(volHtml).join(''));
   }
   $('#shelf').innerHTML = h;
+  shelfActs(shown);
+}
+// Batch reading for what is in view: read the unread, annotate the read. Scoped like the
+// shelf itself -- a seated cartridge or a chosen subject narrows it -- and two-step armed,
+// because it is hours of background work.
+function shelfActs(shown) {
+  const el = $('#shelf-acts'); if (!el) return;
+  if (subjects.size) {
+    // Chips do not narrow the shelf listing, but they do narrow this: a top shelf takes
+    // everything beneath it, a sub-shelf its own, any other subject its tagged volumes.
+    const names = new Set(Object.entries(catIndex).filter(([, id]) => subjects.has(id)).map(([n]) => n));
+    shown = shown.filter(d => (d.shelf && (subjects.has(d.shelf.top_id) || subjects.has(d.shelf.sub_id))) || (d.categories || []).some(c => names.has(c)));
+  }
+  const unread = shown.filter(d => d.tier === 0 && d.status === 'ready').length;
+  const read = shown.filter(d => d.tier === 1).length;
+  const where = roomName() ? `in ${roomName()}'s shelf` : subjects.size === 1 ? 'on this shelf' : subjects.size ? 'in these subjects' : 'on the whole shelf';
+  el.innerHTML = (unread ? `<button class="linkish" onclick="backfill(this, 1, ${unread})" title="Queue Tier 1 reading for every unread volume ${where}">read the ${unread} unread</button>` : '')
+    + (read ? `<button class="linkish" onclick="backfill(this, 2, ${read})" title="Queue Tier 2 annotation for every read volume ${where}">annotate the ${read} read</button>` : '')
+    + (!unread && !read && shown.length ? `<span>everything here is annotated</span>` : '');
+}
+async function backfill(btn, tier, n) {
+  const mins = Math.round(n * (tier === 2 ? 1.5 : 2.5));
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1'; btn.textContent = `${tier === 2 ? 'annotate' : 'read'} ${n} — about ${mins < 90 ? mins + ' min' : Math.round(mins / 60) + ' h'} of background work, sure?`;
+    setTimeout(() => { btn.dataset.armed = ''; loadShelf(); }, 6000);
+    return;
+  }
+  const params = new URLSearchParams({ tier });
+  if (tier === 2) params.set('only_tier', 1);
+  if (cartridges.size === 1) params.set('cartridge_id', [...cartridges][0]);
+  else if (subjects.size === 1) params.set('category_id', [...subjects][0]);
+  const j = await (await fetch('/api/read/backfill?' + params, { method: 'POST' })).json();
+  say(`Queued ${j.queued} for ${tier === 2 ? 'annotation' : 'reading'}${j.already_queued ? ` (${j.already_queued} were already in hand)` : ''}. The worker takes them one at a time; the shelf fills in as it goes.`);
+  loadJobs(); loadShelf();
 }
 const opened = new Set(JSON.parse(localStorage.getItem('shelf.opened') || '[]'));
 

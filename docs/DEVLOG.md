@@ -681,3 +681,12 @@ and cut to ten, reranked at depth 40, 32k context. On the comparative question t
 had flagged -- SSTI versus SQL injection -- quick and normal cited one side; deep cited
 both, from four volumes, ten of ten markers resolved, in 23 s against 2.5 and 10. The
 dial is in the tab bar, remembered, and on the JSON and MCP asks.
+
+
+**Batch reading from the shelf.** Two buttons under the shelf header, counted from what
+is in view: *read the N unread*, *annotate the N read*. Scoped like everything else --
+a seated cartridge, a chosen subject -- two-step armed with an estimate of the hours,
+and idempotent: volumes already queued or running are skipped. First press queued 78
+where the button had promised 12, because the endpoint counted tag membership expanded
+to child shelves while the button counted shelf placement; the queue was cleared and the
+server now uses the button's rule (shelved under it, or tagged with exactly it).

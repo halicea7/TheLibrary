@@ -42,7 +42,7 @@ You need Postgres 16, Redis, [Ollama](https://ollama.com), and [uv](https://docs
 
 `./library stop`, `restart`, and `status` do what they say. `uv run python scripts/verify.py` exercises every surface against the running instance — ingest, read, annotate, search, chat on both models, the library layer, delete — and reports pass/fail per check. Ctrl-C in the foreground closes everything.
 
-Drop PDFs, Markdown, or text onto the shelf — folders are walked. A document is **searchable within seconds**. Click *have it read* for section summaries and subjects (a couple of minutes), then *annotate it* for marginalia. For a first load:
+Drop PDFs, Markdown, or text onto the shelf — folders are walked. A document is **searchable within seconds**. Click *have it read* for section summaries and subjects (a couple of minutes), then *annotate it* for marginalia — or use the two buttons under the shelf header, *read the N unread* and *annotate the N read*, which queue everything in view (the whole shelf, a subject, or a seated cartridge), skip what is already queued, and say how long it will take before they do it. For a first load from the terminal:
 
 ```sh
 ./library import ~/papers ~/books --read     # walks directories, skips what's already shelved

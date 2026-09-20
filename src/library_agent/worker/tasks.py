@@ -12,6 +12,7 @@ import time
 import uuid
 from typing import Any, ClassVar
 
+from arq import Retry
 from arq.connections import RedisSettings
 from sqlalchemy import func, select, update
 
@@ -29,6 +30,8 @@ log = logging.getLogger(__name__)
 # Tier 1 on a long book legitimately runs for many minutes; ARQ's 300s default would
 # kill it partway through.
 JOB_TIMEOUT = 60 * 60 * 3
+PAUSE_REQUEUE_SECONDS = 600  # a pause longer than this sends the job back to the queue
+PAUSE_RETRY_DEFER = 300
 POLL_SECONDS = 15
 
 
@@ -45,6 +48,7 @@ def _make_gate(job_id: uuid.UUID):
         r = redis_client()
         try:
             announced = False
+            waited = 0.0
             while True:
                 ok, reason = await reading_may_proceed(r)
                 if ok:
@@ -54,7 +58,14 @@ def _make_gate(job_id: uuid.UUID):
                 if not announced:
                     await _set_job(job_id, state=JobState.YIELDED, yielded_reason=reason)
                     announced = True
+                if reason == "paused" and waited >= PAUSE_REQUEUE_SECONDS:
+                    # A long pause must not sit inside the job: arq's job timeout would
+                    # kill it (one did, after a nine-hour pause). Hand it back to the
+                    # queue and try again later; what a read already wrote stays.
+                    await _set_job(job_id, state=JobState.QUEUED, yielded_reason="paused")
+                    raise Retry(defer=PAUSE_RETRY_DEFER)
                 await asyncio.sleep(POLL_SECONDS)
+                waited += POLL_SECONDS
         finally:
             await r.aclose()
 
@@ -343,6 +354,10 @@ class WorkerSettings:
     on_startup = _startup
     redis_settings = RedisSettings.from_dsn(settings().redis_url)
     job_timeout = JOB_TIMEOUT
+    # Retry is how a paused job returns to the queue every few minutes; a pause of a
+    # night is many retries. Genuine failures are never retried by arq, so this only
+    # bounds how long a pause can last.
+    max_tries = 10_000
     # One at a time: the models are a single shared resource, so concurrency here would
     # only make every job slower and starve chat.
     max_jobs = 1

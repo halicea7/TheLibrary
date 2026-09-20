@@ -509,7 +509,7 @@ function sizer(renderer, camera, canvas) {
 }
 
 /* ── one cartridge, large ─────────────────────────────────────────────── */
-export function mount(canvas) {
+export function mount(canvas, { interactive = false } = {}) {
   const renderer = makeRenderer(canvas);
   const scene = new THREE.Scene();
   environment(renderer).then(env => { scene.environment = env; ctrl.wake(); });
@@ -518,22 +518,62 @@ export function mount(canvas) {
   const backdrop = refractionPlate(renderer, new THREE.PlaneGeometry(30, 30)); backdrop.position.z = -6; scene.add(backdrop);
   const cart = makeCartridge(); scene.add(cart.group);
   let spin = 0, theta = 0, t0 = performance.now(), frame = null, alive = true, still = false;
+  let pitch = -.08, pointer = null, lastX = 0, lastY = 0;
+  const oldCursor = canvas.style.cursor, oldTouchAction = canvas.style.touchAction;
+  function pointerDown(ev) {
+    if (ev.button !== 0 || pointer !== null) return;
+    pointer = ev.pointerId; lastX = ev.clientX; lastY = ev.clientY;
+    canvas.setPointerCapture(pointer); canvas.style.cursor = 'grabbing';
+    ev.preventDefault(); ctrl.wake();
+  }
+  function pointerMove(ev) {
+    if (ev.pointerId !== pointer) return;
+    theta += (ev.clientX - lastX) * .008;
+    pitch = THREE.MathUtils.clamp(pitch + (ev.clientY - lastY) * .008, -Math.PI / 2, Math.PI / 2);
+    lastX = ev.clientX; lastY = ev.clientY; ctrl.wake();
+  }
+  function pointerUp(ev) {
+    if (ev.pointerId !== pointer) return;
+    const id = pointer; pointer = null;
+    if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id);
+    canvas.style.cursor = 'grab';
+  }
+  if (interactive) {
+    canvas.style.cursor = 'grab'; canvas.style.touchAction = 'none';
+    canvas.addEventListener('pointerdown', pointerDown);
+    canvas.addEventListener('pointermove', pointerMove);
+    canvas.addEventListener('pointerup', pointerUp);
+    canvas.addEventListener('pointercancel', pointerUp);
+    canvas.addEventListener('lostpointercapture', pointerUp);
+  }
   const size = sizer(renderer, camera, canvas);
   function loop(now) {
     frame = null; if (!alive) return;
     const dt = Math.min(.05, (now - t0) / 1000); t0 = now; size();
     if ((now | 0) % 60 === 0) backdrop.material.color.copy(pageBg());
-    if (!still) theta += dt * .45 + spin * dt; spin *= Math.pow(.08, dt);
-    cart.group.rotation.y = theta; cart.group.rotation.x = Math.sin(now / 2600) * .12 - .08; cart.group.position.y = Math.sin(now / 1900) * .06;
+    if (!interactive && !still) theta += dt * .45 + spin * dt; spin *= Math.pow(.08, dt);
+    cart.group.rotation.y = theta; cart.group.rotation.x = interactive ? pitch : Math.sin(now / 2600) * .12 - .08; cart.group.position.y = interactive ? 0 : Math.sin(now / 1900) * .06;
     cart.twinkle(now);
     renderer.render(scene, camera);
     if (canvas.isConnected && !canvas.closest('[hidden]')) frame = requestAnimationFrame(loop);
   }
   const ro = new ResizeObserver(() => size()); ro.observe(canvas);
   const ctrl = {
-    set(next) { cart.set(next); if (next.flip) spin = 6 * (Math.random() < .5 ? -1 : 1); if (next.face) { theta = 0; spin = 0; } if ('still' in next) still = !!next.still; ctrl.wake(); },
+    set(next) { cart.set(next); if (next.flip && !interactive) spin = 6 * (Math.random() < .5 ? -1 : 1); if (next.face) { theta = 0; pitch = -.08; spin = 0; } if ('still' in next) still = !!next.still; ctrl.wake(); },
     wake() { if (!frame && alive) { t0 = performance.now(); frame = requestAnimationFrame(loop); } },
-    dispose() { alive = false; if (frame) cancelAnimationFrame(frame); ro.disconnect(); cart.dispose(); renderer.dispose(); },
+    dispose() {
+      alive = false; if (frame) cancelAnimationFrame(frame); ro.disconnect();
+      if (interactive) {
+        if (pointer !== null) pointerUp({ pointerId: pointer });
+        canvas.removeEventListener('pointerdown', pointerDown);
+        canvas.removeEventListener('pointermove', pointerMove);
+        canvas.removeEventListener('pointerup', pointerUp);
+        canvas.removeEventListener('pointercancel', pointerUp);
+        canvas.removeEventListener('lostpointercapture', pointerUp);
+        canvas.style.cursor = oldCursor; canvas.style.touchAction = oldTouchAction;
+      }
+      cart.dispose(); renderer.dispose();
+    },
   };
   ctrl.wake();
   return ctrl;

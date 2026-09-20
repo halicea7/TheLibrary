@@ -963,3 +963,11 @@ keyed on *start* time, so a rebuild cut off by a worker restart skipped its own 
 it is keyed on completion now. And the batch feeder tops the queue up at ten remaining
 instead of letting it drain, so a batched import gets one rebuild at the end rather than
 one per batch.
+
+**A pause of a night.** The first long pause found the hole: the paused job waited
+inside the gate, and after three hours arq's job timeout killed it -- one document
+failed, its row stuck on *yielded*. A pause longer than ten minutes now sends the job
+back to the queue (`Retry`, deferred five minutes) instead of holding it; what the read
+had already written stays, and `max_tries` is raised so a long pause is many small
+retries rather than a failure. Genuine exceptions are never retried by arq, so the
+limit only bounds pausing.

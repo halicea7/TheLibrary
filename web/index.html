@@ -668,8 +668,8 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 /* ── the cartridge as an object ───────────────────────────────────────── */
 /* The make panel keeps its column; the object turns in the space to the right. On the
    rack, hovering a spine lifts the cartridge into the same space. */
-#mk-stage { position:absolute; right:24px; top:70px; width:min(46vw, 560px); height:min(70vh, 620px); pointer-events:none; }
-#mk-stage canvas { width:100%; height:100%; display:block; }
+#mk-stage { position:absolute; right:24px; top:70px; width:min(30vw, 360px); height:min(70vh, 620px); z-index:2; pointer-events:none; }
+#mk-stage canvas { width:100%; height:100%; display:block; pointer-events:auto; touch-action:none; }
 .dials { display:grid; grid-template-columns:1fr; gap:8px; padding-top:4px; }
 .dial { display:grid; grid-template-columns:86px 1fr 34px; gap:10px; align-items:center; font:11.5px/1.4 var(--sans); color:var(--dim); }
 .dial input[type=range] { width:100%; accent-color:var(--verdigris); }
@@ -813,7 +813,7 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
       <div id="view-settings" hidden></div>
       <div id="view-write" hidden></div>
     </div>
-    <div id="mk-stage" hidden><canvas id="mk-canvas"></canvas></div>
+    <div id="mk-stage" hidden><canvas id="mk-canvas" aria-label="Cartridge preview — drag to rotate" title="Drag to rotate the cartridge"></canvas></div>
     <div id="inspect" data-on="false" aria-hidden="true"><canvas id="inspect-canvas"></canvas><div class="who" id="inspect-who"></div><div class="meta" id="inspect-meta"></div></div>
 
     <form class="composer" id="composer" autocomplete="off">
@@ -2475,7 +2475,7 @@ function renderMake(flip) {
       <div class="dials" id="mk-foil-strength" ${['paper','gloss'].includes(make.design.labelFinish || 'paper') ? 'hidden' : ''}>
         <label class="dial"><span>Foil strength</span><input aria-label="Foil strength" type="range" min="0" max="1" step=".01" value="${make.design.labelFinishStrength ?? .65}" oninput="make.design.labelFinishStrength=+this.value; this.nextElementSibling.value=Math.round(this.value*100); stageUpdate()"/><output>${Math.round((make.design.labelFinishStrength ?? .65)*100)}</output></label>
       </div>
-      <div class="locked">Changes the printed label independently of the shell. Tilt the preview to see the foil catch the light.</div>
+      <div class="locked">Changes the printed label independently of the shell. Drag the preview to rotate it and see the foil catch the light.</div>
     </div></div>
     <div class="row"><label>Clearance</label><div><div class="mats">${CLEARANCES.map(([v, l, d]) =>
       `<button aria-pressed="${make.design.clearance === v}" title="${d}" onclick="make.design.clearance='${v}'; renderMake(true)">${l}</button>`).join('')}</div>
@@ -2508,7 +2508,7 @@ function renderMake(flip) {
 async function stageShow() {
   const st = $('#mk-stage'); st.hidden = false;
   if (!window.Cartridge3D) return;
-  if (!make.stage) make.stage = window.Cartridge3D.mount($('#mk-canvas'));
+  if (!make.stage) make.stage = window.Cartridge3D.mount($('#mk-canvas'), { interactive: true });
   stageUpdate(true);
   // art + constellation for the current selection
   const sel = makeSelection();

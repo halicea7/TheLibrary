@@ -227,7 +227,13 @@ async def build_clusters(
                     target_kind=TargetKind.CLUSTER,
                     target_id=cluster.id,
                     text=(out.get("summary") or "").strip(),
-                    data={**out, "claims": [texts[i] for i in idxs[:16]]},
+                    data={
+                        **out,
+                        "claims": [texts[i] for i in idxs[:16]],
+                        # Parallel to claims: who said each, so a conflict can be quoted
+                        # as "X says … / Y says …" rather than paraphrased.
+                        "claim_sources": [titles.get(doc_ids[i], "?") for i in idxs[:16]],
+                    },
                     model=cfg.reader_model,
                     prompt_version=cfg.prompt_versions.get("cluster_summary", "v1"),
                     tier=1,

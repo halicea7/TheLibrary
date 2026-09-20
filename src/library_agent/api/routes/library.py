@@ -14,6 +14,7 @@ from library_agent.config import settings
 from library_agent.db.session import SessionDep
 from library_agent.library.citations import hubs
 from library_agent.library.contradictions import list_contradictions
+from library_agent.library.shelving import expand_category_ids
 
 router = APIRouter(prefix="/api/library", tags=["library"])
 
@@ -26,6 +27,7 @@ class ClusterOut(BaseModel):
     document_count: int
     has_contradiction: bool
     documents: list[str]
+    document_ids: list[str] = []
 
 
 class GraphEdge(BaseModel):
@@ -34,24 +36,58 @@ class GraphEdge(BaseModel):
     confidence: float
 
 
+async def _scope(
+    db: SessionDep, categories: str | None, cartridges: str | None
+) -> tuple[str, dict]:
+    """A SQL fragment keeping clusters with a member volume in the chosen shelves or
+    cartridges -- the same scope the chips give Ask and Find."""
+    clauses, params = [], {}
+    if categories:
+        ids = await expand_category_ids(
+            db, [uuid.UUID(x) for x in categories.split(",") if x.strip()]
+        )
+        clauses.append(
+            "exists (select 1 from cluster_member sm join document sd on sd.id = sm.document_id"
+            " where sm.cluster_id = c.id and (sd.shelf_id = any(:cats) or exists (select 1"
+            " from document_category dc where dc.document_id = sd.id"
+            " and dc.category_id = any(:cats))))"
+        )
+        params["cats"] = ids
+    if cartridges:
+        clauses.append(
+            "exists (select 1 from cluster_member sm join cartridge_document cd"
+            " on cd.document_id = sm.document_id where sm.cluster_id = c.id"
+            " and cd.cartridge_id = any(:carts))"
+        )
+        params["carts"] = [uuid.UUID(x) for x in cartridges.split(",") if x.strip()]
+    return (" and " + " and ".join(clauses)) if clauses else "", params
+
+
 @router.get("/clusters", response_model=list[ClusterOut])
-async def clusters(db: SessionDep, cross_document_only: bool = True) -> list[ClusterOut]:
+async def clusters(
+    db: SessionDep,
+    cross_document_only: bool = True,
+    categories: str | None = None,
+    cartridges: str | None = None,
+) -> list[ClusterOut]:
+    scope, params = await _scope(db, categories, cartridges)
     rows = (
         await db.execute(
-            text("""
+            text(f"""
             select c.id, c.label, a.text as summary, c.size, c.document_count,
                    c.has_contradiction,
-                   array_agg(distinct d.title) as docs
+                   array_agg(distinct d.title) as docs,
+                   array_agg(distinct d.id) as doc_ids
             from cluster c
             left join artifact a on a.target_id = c.id and a.kind = 'cluster_summary'
             join cluster_member m on m.cluster_id = c.id
             join document d on d.id = m.document_id
             where (not :cross_only or c.document_count > 1)
-              and a.text is not null
+              and a.text is not null {scope}
             group by c.id, c.label, a.text, c.size, c.document_count, c.has_contradiction
-            order by c.has_contradiction desc, c.document_count desc, c.size desc
+            order by c.document_count desc, c.size desc
             """),
-            {"cross_only": cross_document_only},
+            {"cross_only": cross_document_only, **params},
         )
     ).all()
     return [
@@ -63,14 +99,27 @@ async def clusters(db: SessionDep, cross_document_only: bool = True) -> list[Clu
             document_count=r.document_count,
             has_contradiction=r.has_contradiction,
             documents=list(r.docs),
+            document_ids=[str(x) for x in r.doc_ids],
         )
         for r in rows
     ]
 
 
 @router.get("/contradictions")
-async def contradictions(db: SessionDep) -> list[dict]:
-    return await list_contradictions(db)
+async def contradictions(
+    db: SessionDep, categories: str | None = None, cartridges: str | None = None
+) -> list[dict]:
+    out = await list_contradictions(db)
+    if categories or cartridges:
+        scope, params = await _scope(db, categories, cartridges)
+        keep = {
+            str(x)
+            for x in (
+                await db.execute(text(f"select c.id from cluster c where true {scope}"), params)
+            ).scalars()
+        }
+        out = [x for x in out if x["cluster_id"] in keep]
+    return out
 
 
 @router.get("/graph")

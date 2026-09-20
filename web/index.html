@@ -456,6 +456,38 @@ select, .toggle {
 .edge { font:11px/1.7 var(--mono); color:var(--dim); }
 .edge em { font-style:normal; color:var(--faint); padding:0 5px; }
 .edge b { color:var(--fg); font-weight:500; }
+/* The highlighter: a marker-pen wash in amber (attention), never a box. */
+mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:inherit; padding:0 1px; border-radius:2px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+.hit-x .lift { color:var(--fg); opacity:1; font-weight:500; background:linear-gradient(transparent 62%, color-mix(in srgb, var(--amber) 22%, transparent) 62%); }
+/* Threads: the reach of a thread decides how much room it gets. */
+.tfilter { display:flex; align-items:center; gap:10px; margin:2px 0 12px; }
+.tfilter input { flex:0 1 32ch; font:12.5px/1.4 var(--sans); padding:5px 8px; border:1px solid var(--rule); border-radius:3px; background:transparent; color:var(--fg); }
+.tfilter span { font:10.5px/1 var(--mono); color:var(--faint); }
+.theme { cursor:pointer; max-width:calc(74ch + 16px); }
+.conflict { max-width:calc(88ch + 16px); }
+.theme:hover { box-shadow:inset 2px 0 0 var(--verdigris); }
+.theme .theme-h { padding-left:8px; } .theme .theme-s, .theme .spans { margin-left:8px; }
+.theme.big .theme-t { font-size:15.5px; }
+.theme.big .theme-s { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.theme.big.open .theme-s { display:block; }
+.conflict .why { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.conflict.open .why { display:block; }
+.more { font:10.5px/1 var(--mono); color:var(--faint); background:none; border:0; padding:6px 0 0; cursor:pointer; }
+.more:hover { color:var(--fg); }
+.theme.small { padding:0; border-bottom:0; max-width:calc(74ch + 16px); }
+.theme.small > summary { list-style:none; padding:7px 8px; font:13px/1.4 var(--serif); display:flex; align-items:baseline; gap:9px; cursor:pointer; border-bottom:1px solid var(--rule-soft); }
+.theme.small > summary::-webkit-details-marker { display:none; }
+.theme.small > summary::before { content:'▸'; font:10px/1 var(--mono); color:var(--faint); }
+.theme.small[open] > summary::before { content:'▾'; }
+.theme.small > summary .theme-n { margin-left:auto; }
+.theme.small .theme-s { margin:8px 0 8px 24px; } .theme.small .spans { margin:0 0 12px 24px; }
+.conflict { padding:14px 0 16px; border-bottom:1px solid var(--rule-soft); }
+.conflict-h { display:flex; align-items:baseline; gap:9px; }
+.pair { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:9px 0 8px; max-width:88ch; }
+.pair blockquote { margin:0; padding:9px 12px; border-left:2px solid var(--amber); font:13.5px/1.55 var(--serif); background:color-mix(in srgb, var(--amber) 6%, transparent); }
+.pair blockquote cite { display:block; font:10.5px/1.4 var(--mono); font-style:normal; color:var(--amber); margin-bottom:5px; }
+.conflict .why { font:12.5px/1.6 var(--serif); color:var(--dim); max-width:74ch; margin:0 0 6px; }
+@media (max-width:700px) { .pair { grid-template-columns:1fr; } }
 
 /* ── the reader ───────────────────────────────────────────────────────── */
 .reader-h { margin-bottom:18px; }
@@ -807,7 +839,7 @@ const web = {
     this.hueOf = Object.fromEntries(tops.map((t, i) => [t, this.HUES[i % this.HUES.length]]));
     // The cloud's radius grows with the library, gently.
     this.R = 150 + 14 * Math.sqrt(this.nodes.length);
-    this.canvas.dataset.on = String((view === 'ask' || view === 'find') && this.nodes.length > 0);
+    this.canvas.dataset.on = String((view === 'ask' || view === 'find' || view === 'threads') && this.nodes.length > 0);
     this.wake();
   },
   size() {
@@ -1055,8 +1087,8 @@ function setView(v) {
   if (v === 'make') renderMake();
   if (v === 'settings') loadSettings();
   if (v === 'write') renderWrite();
-  $('#web').dataset.on = String((v === 'ask' || v === 'find') && web.nodes.length > 0);
-  if (v !== 'find') { clearTimeout(web.tour.timer); web.focus(null); }
+  $('#web').dataset.on = String((v === 'ask' || v === 'find' || v === 'threads') && web.nodes.length > 0);
+  if (v !== 'find' && v !== 'threads') { clearTimeout(web.tour.timer); web.focus(null); }
   web.wake();
   e.focus();
 }
@@ -1322,6 +1354,7 @@ function toggleCartridge(id) {
   const room = roomName();
   desk(room ? `in ${esc(room)}'s shelf` : cartridges.size ? `across ${cartridges.size} cartridges` : '');
   if (view === 'find' && $('#entry').value.trim().length > 1) runFind($('#entry').value.trim());
+  if (view === 'threads') loadThreads();
 }
 async function ejectCartridge(id, btn) {
   if (btn.dataset.armed !== '1') {
@@ -1497,6 +1530,7 @@ function toggleSubject(id) {
   desk(subjects.size ? `narrowed to ${subjects.size} subject${subjects.size > 1 ? 's' : ''}` : '');
   writeScope();
   if (view === 'find' && $('#entry').value.trim().length > 1) runFind($('#entry').value.trim());
+  if (view === 'threads') loadThreads();
 }
 function clearSubjects() { subjects.clear(); loadSubjects(); loadShelf(); desk(''); }
 
@@ -1797,6 +1831,33 @@ async function deleteChat(id, btn) {
   $('#history').hidden = true; toggleHistory();
 }
 
+/* ── highlighter ──────────────────────────────────────────────────────── */
+const STOP = new Set('a an the and or of to in on for with by is are was were be as at from that this it its into how what why when which does do did not vs versus than'.split(' '));
+// The words worth lighting: three letters or more, not glue.
+function terms(q) { return [...new Set((q || '').toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'-]{2,}/gu) || [])].filter(w => !STOP.has(w)); }
+// Light the terms in already-escaped HTML text: word-start prefix match, so "inject"
+// lights "injection". Pass `lift` to wrap that exact sentence as well.
+function hl(html, words, lift) {
+  if (lift) {
+    const l = esc(lift.trim());
+    const at = html.indexOf(l);
+    if (at >= 0) html = html.slice(0, at) + '<span class="lift">' + l + '</span>' + html.slice(at + l.length);
+  }
+  if (!words.length) return html;
+  const re = new RegExp('(?<![\\p{L}\\p{N}])(' + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')[\\p{L}\\p{N}]*', 'giu');
+  // Never touch inside a tag.
+  return html.split(/(<[^>]+>)/).map(part => part.startsWith('<') ? part : part.replace(re, '<mark class="hl">$&</mark>')).join('');
+}
+
+// The excerpt is clamped to a few lines, so the sentence nearest the question leads it
+// when it would otherwise be cut off; the passage's own opening follows.
+function excerpt(text, lift) {
+  if (!lift) return text;
+  const at = text.indexOf(lift.trim());
+  if (at < 0 || at < 120) return text;
+  return lift.trim() + ' … ' + text.slice(0, at).trim();
+}
+
 /* ── find ─────────────────────────────────────────────────────────────── */
 let findTimer;
 async function runFind(q) {
@@ -1806,61 +1867,125 @@ async function runFind(q) {
   // The cloud closes in on where the findings are; each listed one picks out its dot.
   const found = [...new Set(r.hits.map(h => h.document_id))];
   web.focus(found); web.light(found); web.hover(null);
+  const words = terms(q);
   $('#view-find').innerHTML = r.hits.length ? r.hits.map(h => `
     <div class="hit" data-doc="${h.document_id}" onmouseenter="web.hover('${h.document_id}')" onmouseleave="web.hover(null)" onclick="openVolume('${h.document_id}')" title="Open the volume">
       <div class="hit-h">
-        <span class="hit-t">${esc(h.document_title)}</span>
+        <span class="hit-t">${hl(esc(h.document_title), words)}</span>
         ${h.page ? `<span class="hit-pg">p.${h.page}</span>` : ''}
         <span class="hit-rk">dense ${h.dense_rank ?? '–'} · lexical ${h.lexical_rank ?? '–'}</span>
       </div>
       <div class="hit-path">${esc((h.section_path || '').split(' › ').slice(1).join(' › ') || '—')}</div>
-      <div class="hit-x">${esc(plain(h.text))}</div>
-    </div>`).join('') + `<div class="empty">${r.hits.length} passages · ${r.elapsed_seconds}s</div>`
+      <div class="hit-x">${hl(esc(excerpt(plain(h.text), h.lift && plain(h.lift))), words, h.lift && plain(h.lift))}</div>
+    </div>`).join('') + `<div class="empty">${r.hits.length} passages · ${r.elapsed_seconds}s · <mark class="hl">your words</mark>, <span class="lift">the sentence nearest your question</span></div>`
     : `<div class="empty"><b>No passage matches that.</b>Try fewer words, or the exact term you are after.</div>`;
   desk(`${r.hits.length} passages · ${r.elapsed_seconds}s`);
 }
 
 /* ── threads ──────────────────────────────────────────────────────────── */
+// Threads are ranked by reach. The wide ones get a card; the long tail folds to a line
+// each. The chips scope them like everything else, and every thread talks to the nebula.
+let threadsData = null, threadsFilter = '', allConflicts = false;
+const CONFLICTS_SHOWN = 5;
 async function loadThreads() {
   const el = $('#view-threads');
   el.innerHTML = '<div class="empty">Reading the shelf…</div>';
+  const cats = subjects.size ? '&categories=' + [...subjects].join(',') : '';
+  const carts = cartridges.size ? '&cartridges=' + [...cartridges].join(',') : '';
   const [themes, graph, conflicts] = await Promise.all([
-    (await fetch('/api/library/clusters')).json(),
+    (await fetch(`/api/library/clusters?x=1${cats}${carts}`)).json(),
     (await fetch('/api/library/graph')).json(),
-    (await fetch('/api/library/contradictions')).json(),
+    (await fetch(`/api/library/contradictions?x=1${cats}${carts}`)).json(),
   ]);
+  threadsData = { themes, graph, conflicts };
+  // The filter box is built once so typing in it does not rebuild it under the caret.
+  el.innerHTML = `<div class="tfilter"><input id="tfilter" placeholder="a word in a thread…" value="${esc(threadsFilter)}" oninput="threadsFilter=this.value; renderThreads()"><span id="tcount"></span></div><div id="threads-body"></div>`;
+  renderThreads();
+}
+function threadLight(ids) { web.light(ids); }
+function threadDive(ids) { web.focus(ids); web.light(ids); }
+function renderThreads() {
+  const el = $('#threads-body');
+  if (!threadsData || !el) return;
+  const { themes, graph, conflicts } = threadsData;
+  const f = threadsFilter.trim().toLowerCase();
+  const fwords = terms(f);
+  const matches = txt => !f || (txt || '').toLowerCase().includes(f);
+  const shownThemes = themes.filter(t => matches([t.label, t.summary, ...(t.documents || [])].join(' ')));
+  const shownConf = conflicts.filter(c => matches([c.label, c.explanation, ...(c.sources || [])].join(' ')));
+  const where = roomName() ? `in ${roomName()}'s shelf` : subjects.size ? 'in what is chosen' : 'across the shelf';
+  const ids = new Set(shownThemes.flatMap(t => t.document_ids || []));
+  const docIds = t => JSON.stringify(t.document_ids || []).replace(/"/g, '&quot;');
+
+  $('#tcount').textContent = `${shownThemes.length} threads ${where}${shownConf.length ? ` · ${shownConf.length} where sources disagree` : ''}`;
   let h = '';
-  if (conflicts.length) {
+
+  if (shownConf.length) {
     h += `<p class="label">Where your sources disagree</p>`;
-    h += conflicts.map(c => `<div class="theme">
-      <div class="theme-h"><span class="theme-t">${esc(c.label)}</span><span class="flag">conflict</span></div>
-      <div class="theme-s">${esc(c.explanation)}</div>
-      <div class="spans">${(c.sources||[]).map(s=>`<span class="span">${esc(s)}</span>`).join('')}</div>
-    </div>`).join('');
+    const confList = allConflicts || f ? shownConf : shownConf.slice(0, CONFLICTS_SHOWN);
+    h += confList.map(c => {
+      const theme = themes.find(t => t.id === c.cluster_id);
+      const dids = theme ? docIds(theme) : '[]';
+      let body;
+      if (c.pair) {
+        // The words the two claims share are the pivot the disagreement turns on.
+        const a = terms(c.pair[0].claim), b = new Set(terms(c.pair[1].claim));
+        const shared = a.filter(w => b.has(w));
+        body = `<div class="pair">${c.pair.map(p => `<blockquote><cite>${esc(p.source || 'one source')}</cite>${hl(esc(p.claim), [...shared, ...fwords])}</blockquote>`).join('')}</div>
+          <p class="why">${hl(esc(c.explanation), fwords)}</p>`;
+      } else {
+        body = `<p class="why">${hl(esc(c.explanation), fwords)}</p>`;
+      }
+      return `<div class="conflict" onmouseenter='threadLight(${dids})' onclick='this.classList.toggle("open"); threadDive(${dids})'>
+        <div class="conflict-h"><span class="theme-t">${hl(esc(c.label), fwords)}</span><span class="flag">conflict</span><span class="theme-n">${(c.sources || []).length} volume${(c.sources || []).length === 1 ? '' : 's'}</span></div>
+        ${body}
+        <div class="spans">${(c.sources || []).map(s => `<span class="span">${esc(s.slice(0, 40))}</span>`).join('')}</div>
+      </div>`;
+    }).join('');
+    if (!f && shownConf.length > CONFLICTS_SHOWN) {
+      h += `<button class="more" onclick="allConflicts = !allConflicts; renderThreads()">${allConflicts ? 'fewer' : `all ${shownConf.length} disagreements`}</button>`;
+    }
   }
-  h += `<p class="label ${conflicts.length ? 'spaced' : ''}">Threads running across volumes</p>`;
-  h += themes.length ? themes.map(t => `<div class="theme">
+
+  const big = shownThemes.filter(t => t.document_count >= 4);
+  const rest = shownThemes.filter(t => t.document_count < 4);
+  const card = t => `<div class="theme big" onmouseenter='threadLight(${docIds(t)})' onclick='this.classList.toggle("open"); threadDive(${docIds(t)})'>
       <div class="theme-h">
-        <span class="theme-t">${esc(t.label || 'unnamed')}</span>
-        <span class="theme-n">${t.size} claims from ${t.document_count} volumes</span>
+        <span class="theme-t">${hl(esc(t.label || 'unnamed'), fwords)}</span>
+        <span class="theme-n">${t.document_count} volumes · ${t.size} claims</span>
         ${t.has_contradiction ? '<span class="flag">conflict</span>' : ''}
       </div>
-      <div class="theme-s">${esc(t.summary || '')}</div>
-      <div class="spans">${t.documents.map(d=>`<span class="span">${esc(d.slice(0,40))}</span>`).join('')}</div>
-    </div>`).join('')
-    : `<div class="empty"><b>No threads yet.</b>Threads appear once several volumes have been read and share ground.</div>`;
+      <div class="theme-s">${hl(esc(t.summary || ''), fwords)}</div>
+      <div class="spans">${t.documents.map(d => `<span class="span">${esc(d.slice(0, 40))}</span>`).join('')}</div>
+    </div>`;
+  const line = t => `<details class="theme small" onmouseenter='threadLight(${docIds(t)})'>
+      <summary><span class="theme-t">${hl(esc(t.label || 'unnamed'), fwords)}</span>${t.has_contradiction ? '<span class="flag">conflict</span>' : ''}<span class="theme-n">${t.document_count} volume${t.document_count === 1 ? '' : 's'}</span></summary>
+      <div class="theme-s">${hl(esc(t.summary || ''), fwords)}</div>
+      <div class="spans" onclick='threadDive(${docIds(t)})'>${t.documents.map(d => `<span class="span">${esc(d.slice(0, 40))}</span>`).join('')}</div>
+    </details>`;
 
-  if (graph.hubs?.length) {
-    h += `<p class="label spaced">Most leaned on</p>`;
-    h += graph.hubs.map(x => `<div class="edge"><b>${esc(x.title.slice(0,54))}</b> <em>cited by</em> ${x.cited_by}</div>`).join('');
+  if (big.length) {
+    h += `<p class="label ${shownConf.length ? 'spaced' : ''}">Threads with reach</p>`;
+    h += big.map(card).join('');
   }
-  if (graph.edges?.length) {
-    h += `<p class="label spaced">Who cites whom</p>`;
-    h += graph.edges.slice(0,18).map(e =>
-      `<div class="edge">${esc(e.citing.slice(0,30))} <em>→</em> <b>${esc(e.cited.slice(0,30))}</b></div>`).join('');
+  if (rest.length) {
+    h += `<p class="label spaced">${big.length ? 'Narrower threads' : 'Threads running across volumes'}</p>`;
+    h += rest.map(line).join('');
+  }
+  if (!shownThemes.length && !shownConf.length) {
+    h += f ? `<div class="empty"><b>Nothing carries that word.</b>Try another, or clear it.</div>`
+           : `<div class="empty"><b>No threads yet.</b>Threads appear once several volumes have been read and share ground.</div>`;
+  }
+  if (graph.hubs?.length && !f) {
+    h += `<p class="label spaced">Most leaned on</p>`;
+    h += graph.hubs.map(x => `<div class="edge"><b>${esc(x.title.slice(0, 54))}</b> <em>cited by</em> ${x.cited_by}</div>`).join('');
   }
   h += `<p class="label spaced">&nbsp;</p><button class="linkish" onclick="rebuild()">rebuild threads</button>`;
   el.innerHTML = h;
+  // The cloud lights what the page is about and settles on it when the scope is narrow;
+  // with the whole shelf in view it stays wide, and each thread dives on hover/click.
+  web.light([...ids]);
+  if (subjects.size || cartridges.size || f) web.focus([...ids]); else web.focus(null);
 }
 async function rebuild() {
   await fetch('/api/library/rebuild?kinds=citations,clusters,contradictions', { method:'POST' });

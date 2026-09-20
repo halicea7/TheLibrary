@@ -53,13 +53,13 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
 
 **Effort** — a dial in the tab bar: *quick* (3 passages, no reranker — a lookup, ~3 s), *normal* (5 passages, reranked, follow-ups rewritten, ~10 s), *deep* (the question is first broken into two to four searches, each retrieved, the union reranked to ten passages, a larger context — for comparisons and multi-part questions, ~25 s). The model has no clean effort knob of its own on these builds, so effort is the work around it, which is where answers actually change: on *compare SSTI and SQL injection*, quick and normal cite only the SSTI volumes; deep is the first level with both sides in hand. Also `effort` on `/api/v1/ask` and the MCP tool.
 
-**Find** — plain retrieval, showing each passage's dense and lexical rank. The nebula stays up behind it: when results land, the camera dives on each finding in turn with a spin and a large label, advancing every few seconds; hovering a row takes over, and clicking opens the volume.
+**Find** — plain retrieval, showing each passage's dense and lexical rank. Your words are lit in each passage, marker-pen style, and the **sentence nearest your question** is lifted — the passages that matter most are often the ones found by meaning, with none of your words in them, and that sentence is why they came up. The nebula stays up behind it: when results land, the camera dives on each finding in turn with a spin and a large label, advancing every few seconds; hovering a row takes over, and clicking opens the volume.
 
 <p align="center">
   <img src="docs/find.jpg" alt="Find. The camera has dived into the region of the nebula where the findings are; the one under the eye is ringed and named; the list beside it marks the same row." width="900"/>
 </p>
 
-**Threads** — themes spanning volumes, where your sources disagree, and who cites whom. Rebuilt automatically a few minutes after the last read finishes, so a folder of forty papers produces one rebuild rather than forty.
+**Threads** — themes spanning volumes, ranked by reach: the wide ones get a card, the long tail folds to a line each, and a word in the filter box narrows both and lights it wherever it appears. Where sources disagree, the two claims are quoted side by side with the words they share lit — that is the pivot the disagreement turns on. The chips scope Threads like everything else, and every thread talks to the nebula: hover to light its volumes, click to dive on them. Rebuilt automatically a few minutes after the last read finishes, so a folder of forty papers produces one rebuild rather than forty.
 
 **Write** — a brief in, a document out. The librarian plans an outline, then writes each section *retrieving for that section*, so every paragraph keeps its `[n]` margin notes, numbered across the whole document and verified per section; a references list closes it. Save it as `.md`, print it to PDF, or **shelve it** — it becomes a volume, and the library can read what it wrote. Scoped by the chips and the rack like everything else.
 

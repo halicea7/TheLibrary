@@ -64,6 +64,7 @@ class SearchHitOut(BaseModel):
     score: float
     dense_rank: int | None
     lexical_rank: int | None
+    lift: str | None = None  # the sentence nearest the query, for the highlighter
 
 
 class SearchResponse(BaseModel):

@@ -30,6 +30,10 @@ SCHEMA = {
         "analysis": {"type": "string"},
         "explanation": {"type": "string"},
         "sources": {"type": "array", "items": {"type": "string"}},
+        "claim_a": {"type": "string", "maxLength": 300},
+        "source_a": {"type": "string", "maxLength": 120},
+        "claim_b": {"type": "string", "maxLength": 300},
+        "source_b": {"type": "string", "maxLength": 120},
         "disagreement": {"type": "boolean"},
     },
     "required": ["analysis", "explanation", "sources", "disagreement"],
@@ -65,6 +69,9 @@ Return, in this order:
 - explanation: if they conflict, what each side claims and why they cannot both hold.
   Otherwise one sentence on why the differences are compatible.
 - sources: document titles involved in the conflict (empty list if none).
+- claim_a, source_a, claim_b, source_b: if they conflict, the two claims that cannot both
+  hold, copied word for word from the list above, each with the document in its brackets.
+  Leave all four empty if there is no conflict.
 - disagreement: your verdict, following from the analysis above."""
 
 
@@ -89,17 +96,33 @@ _INSTRUCTION_SHAPED = re.compile(
 )
 
 
+# A "conflict" between pages that each say their content moved elsewhere is the stub
+# pages of a mirrored wiki talking, not two sources disagreeing.
+_BOILERPLATE = re.compile(
+    r"\b(content|page|section)s?\b.{0,40}\b(moved|relocated)\b", re.IGNORECASE
+)
+
+
 def _explanation_is_junk(text: str | None) -> bool:
     if not text or len(text.strip()) < 40:
         return True
-    return bool(_INSTRUCTION_SHAPED.match(text))
+    return bool(_INSTRUCTION_SHAPED.match(text)) or bool(_BOILERPLATE.search(text[:300]))
 
 
 async def judge_cluster(
-    c: Ollama, model: str, label: str | None, claims: list, titles: list[str]
+    c: Ollama,
+    model: str,
+    label: str | None,
+    claims: list,
+    titles: list[str],
+    claim_sources: list | None = None,
 ) -> dict | None:
     """One cluster's verdict by majority. Returns None if no vote came back."""
-    body = "\n".join(f"- {str(x)[:220]}" for x in claims[:16])
+    srcs = list(claim_sources or [])
+    body = "\n".join(
+        f"- [{str(srcs[i])[:40]}] {str(x)[:220]}" if i < len(srcs) else f"- {str(x)[:220]}"
+        for i, x in enumerate(claims[:16])
+    )
     body += "\n\nDocuments involved: " + ", ".join(titles)
     # Identical runs used to return 0, 1, 3, 4 and 7 findings at temperature 0.1: which
     # borderline pairs fire is a coin flip. So each cluster is judged up to three times
@@ -138,6 +161,15 @@ async def judge_cluster(
     out = yes_votes[0] if len(yes_votes) >= 2 else votes[0]
     out["disagreement"] = len(yes_votes) >= 2
     out["votes"] = f"{len(yes_votes)}/{len(votes)}"
+    if out["disagreement"]:
+        # A quoted claim is shown as a quote, so it must be one: keep the pair only if
+        # both halves are found among the claims the model was given.
+        pool = " ".join(str(x) for x in claims).lower()
+        for k in ("claim_a", "claim_b"):
+            q = " ".join(str(out.get(k) or "").split())
+            if len(q) < 15 or q.lower()[:60] not in pool:
+                out["claim_a"] = out["claim_b"] = ""
+                break
     return out
 
 
@@ -149,6 +181,7 @@ async def find_contradictions(
         await db.execute(
             text("""
             select c.id, c.label, a.data->'claims' as claims,
+                   a.data->'claim_sources' as claim_sources,
                    array_agg(distinct d.title) as titles
             from cluster c
             join artifact a on a.target_id = c.id and a.kind = :ck
@@ -177,7 +210,9 @@ async def find_contradictions(
             claims = row.claims or []
             if len(claims) < 2:
                 continue
-            out = await judge_cluster(c, cfg.reader_model, row.label, claims, row.titles)
+            out = await judge_cluster(
+                c, cfg.reader_model, row.label, claims, row.titles, row.claim_sources
+            )
             if out is None:
                 continue
             if out.get("disagreement"):
@@ -223,7 +258,10 @@ async def list_contradictions(db: AsyncSession) -> list[dict]:
     rows = (
         await db.execute(
             text("""
-            select c.id, c.label, a.text, a.data->'sources' as sources
+            select c.id, c.label, a.text, a.data->'sources' as sources,
+                   a.data->>'claim_a' as claim_a, a.data->>'source_a' as source_a,
+                   a.data->>'claim_b' as claim_b, a.data->>'source_b' as source_b,
+                   c.document_count
             from cluster c
             join artifact a on a.target_id = c.id and a.kind = :k
             where c.has_contradiction
@@ -233,6 +271,20 @@ async def list_contradictions(db: AsyncSession) -> list[dict]:
         )
     ).all()
     return [
-        {"cluster_id": str(r.id), "label": r.label, "explanation": r.text, "sources": r.sources}
+        {
+            "cluster_id": str(r.id),
+            "label": r.label,
+            "explanation": r.text,
+            "sources": r.sources,
+            "document_count": r.document_count,
+            "pair": (
+                [
+                    {"source": r.source_a or "", "claim": r.claim_a},
+                    {"source": r.source_b or "", "claim": r.claim_b},
+                ]
+                if r.claim_a and r.claim_b
+                else None
+            ),
+        }
         for r in rows
     ]

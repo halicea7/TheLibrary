@@ -11,6 +11,7 @@ from fastapi import APIRouter, Query
 from library_agent.api.schemas import SearchHitOut, SearchResponse
 from library_agent.db.session import SessionDep
 from library_agent.library.shelving import expand_category_ids
+from library_agent.retrieval.lift import lift
 from library_agent.retrieval.pipeline import RetrievalConfig, retrieve
 
 router = APIRouter(prefix="/api", tags=["search"])
@@ -39,6 +40,7 @@ async def search(
         cartridge_ids=cart_ids,
         config=RetrievalConfig(name="api", use_reranker=rerank, use_router=router),
     )
+    lifts = await lift(q, [h.text for h in hits]) if hits else []
     return SearchResponse(
         query=q,
         hits=[
@@ -52,8 +54,9 @@ async def search(
                 score=h.score,
                 dense_rank=h.dense_rank,
                 lexical_rank=h.lexical_rank,
+                lift=lifted,
             )
-            for h in hits
+            for h, lifted in zip(hits, lifts, strict=True)
         ],
         elapsed_seconds=round(time.time() - started, 3),
     )

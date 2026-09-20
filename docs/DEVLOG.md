@@ -768,3 +768,38 @@ together drove Ollama to a 500 -- so borderline verdicts under GPU contention ar
 verdicts of a quiet pass. Majority-of-three removes the coin flip within a pass; it does
 not make the model the same machine under load as at rest. The rebuild runs alone on the
 worker, which is the normal case.
+
+
+## Follow-on: the highlighter, and Threads you can actually read
+
+"Keyword highlighting for easier read on Find and Threads; Threads is cluttered." What
+Threads was: 209 clusters as a flat list of equal cards (125 of them two-volume pairs),
+21 conflicts on top as paragraphs, then eighteen rows of truncated `A → B` citations --
+and none of it scoped by the chips, so a security reader scrolled past the ML threads.
+
+**Find.** The query's words lit in the passage, word-prefix so *inject* lights
+*injection*, a soft amber wash (amber is the attention colour and reads as a marker).
+The catch is dense retrieval: the best hit often has none of your words. So `/api/search`
+now embeds the sentences of the hits in one call (`retrieval/lift.py`) and returns each
+hit's sentence nearest the query; the UI underlines it, and leads the clamped excerpt
+with it when it would otherwise be cut off. About a second of extra latency on the
+tunnel, paid once per search.
+
+**Threads.** Ranked by reach; four or more volumes gets a card with the summary clamped
+to three lines (click opens it), fewer folds to a `<details>` line. Conflicts capped at
+five with an *all N* toggle. A filter box that lights the word wherever it appears --
+the summaries' own label words are *not* lit; that was tried and it made the SSTI cards
+a wall of amber. The chips scope Threads through a member-volume clause on
+`/api/library/clusters` and `/contradictions`. The nebula now stays up behind Threads:
+hover lights a thread's volumes, click dives on them. The citation rows are gone; the
+nebula draws those edges.
+
+**Conflicts as quotes.** The judge had never been told which document each claim came
+from, so its explanations paraphrased -- and on the stub pages invented ("one source
+claims DNS brute-forcing is insecure" from a claim that said "References section is
+included"). The cluster summary now keeps `claim_sources` parallel to `claims`, the
+judge sees `- [Title] claim`, and its schema gains `claim_a/source_a/claim_b/source_b`.
+A quoted claim is kept only if it is found among the claims the model was given; the
+UI shows the pair side by side with their shared words lit. A conflict whose explanation
+is that pages say their content moved to different URLs is the mirrored wiki's stubs
+talking, and is now junk. Needs a threads rebuild to take effect.

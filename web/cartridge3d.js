@@ -775,7 +775,8 @@ export function mountRack(canvas, handlers = {}) {
       if (isCur && it.seated && !it.booted && Math.abs(it.y - SEATED) < .04 && Math.abs(it.vy) < .6) { it.booted = true; it.cart.boot(); }
       const ta = isCur ? 1 : 0; it.alpha += (ta - it.alpha) * Math.min(1, dt * 9);
       g.position.set(it.x, it.y, 0); g.scale.setScalar(S * (.85 + .15 * it.alpha)); g.visible = it.alpha > .02;
-      g.rotation.y = Math.sin(now / 2600) * .07 + (hovered === id ? -.2 : 0) + (1 - it.alpha) * (it.x < 0 ? -.6 : .6);
+      // A seated cartridge is held by the socket: no idle sway, no turn toward the hand.
+      g.rotation.y = it.seated && isCur ? 0 : Math.sin(now / 2600) * .07 + (hovered === id ? -.2 : 0) + (1 - it.alpha) * (it.x < 0 ? -.6 : .6);
       it.cart.twinkle(now);
       if (isCur) { const lift = (it.y - SEATED) / (RAISED - SEATED); shadow.material.opacity = .85 - .45 * Math.max(0, lift); shadow.scale.setScalar(1 + .35 * Math.max(0, lift)); }
       if (Math.abs(it.vx) > .01 || Math.abs(it.vy) > .01 || Math.abs(it.alpha - ta) > .01 || it.cart.booting()) moving = true;

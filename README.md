@@ -51,6 +51,8 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
 
 Background work shows under **In hand** in the left column, with a bar — a reading, an annotation, a threads rebuild counting its clusters.
 
+The first visit is walked: a **tour** lights one part of the room at a time — the drop zone, the read and annotate buttons, *reshelve*, the rack, each tab, effort, stance, the two rooms — with a card saying what it is for, everything else dimmed and held until you go on. Esc or *skip* ends it; *show the tour* in Settings brings it back.
+
 ## The desk
 
 **Ask** — talk to the collection. Narrow it by subject with the chips or by clicking a subject on the shelf. Switch models per conversation. Set a **stance** to loosen the librarian's reserve: *opinionated*, *contrarian · charitable*, *cynical · optimistic*; answers given under a stance are labelled in violet so you always know which ones were the librarian speaking for itself. The desk bar names the conversation, starts a new one, and lists earlier ones; opening one replays it with its margin notes, and asking again continues it.

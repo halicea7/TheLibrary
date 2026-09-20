@@ -916,3 +916,15 @@ third hit. Runs at the end of Tier 1 for PDFs, its failure never the reading's; 
 `figures` job and `POST /api/read/figures` backfill volumes read before it existed.
 The four RTS pages the model refused twice read fine when called by hand, so they were
 queued a third time; HackTricks is being fed to the worker in batches of 150.
+
+**The tour.** "Reshelve would be easily missed by someone -- like when programs highlight
+sections and explain step by step, in the UI, a soft lock." Thirteen steps: the drop
+zone, read/annotate, reshelve (the one that prompted it), the rack, each tab, effort,
+stance, chips and rooms, the two rooms. A fixed spot element with a 100vmax box-shadow
+in the room's own background at 72% is the dimming and the cutout at once, a gilt
+hairline rings the target, a card sits to the right when there is room, else below, else
+above. Steps that need a tab switch it; steps whose target is not on screen are passed
+over, so an empty library gets a shorter tour. Esc, arrows and Enter drive it; clicking
+the dimmed page advances rather than escaping, since that is what a first-timer does.
+First visit only (`tour.done` in localStorage); *show the tour* in Settings brings it
+back.

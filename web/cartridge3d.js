@@ -5,7 +5,7 @@
  * power light, a screw -- so every recess is geometry with walls and chamfered edges,
  * not paint. A PCB with individual gold contacts shows at the bottom. The plastic has a
  * fine grain (a procedural normal map), a clearcoat, and is lit by a studio HDRI, so the
- * five materials -- solid, clear, smoke, glitter, metallic -- reflect and refract
+ * six materials -- solid, clear, frosted, smoke, glitter, metallic -- reflect and refract
  * something real. A see-through shell shows the cartridge's own constellation floating
  * inside.
  *
@@ -79,6 +79,18 @@ const spriteTex = (() => {
     const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
     const r = g.createRadialGradient(32, 32, 0, 32, 32, 32); r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(.35, 'rgba(255,255,255,.6)'); r.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = r; g.fillRect(0, 0, 64, 64); t = new THREE.CanvasTexture(c); return t;
+  };
+})();
+// Glitter flakes: a field of hard specks for a roughness/normal-ish surface, so the
+// shell itself catches the light in points rather than as one smooth sheet.
+const flakeTex = (() => {
+  let t = null;
+  return () => {
+    if (t) return t;
+    const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
+    g.fillStyle = '#808080'; g.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 9000; i++) { const v = 40 + Math.random() * 215; g.fillStyle = `rgb(${v},${v},${v})`; const s = 1 + Math.random() * 2; g.fillRect(Math.random() * 512, Math.random() * 512, s, s); }
+    t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2.5, 3.5); return t;
   };
 })();
 const shadowTex = (() => {
@@ -190,32 +202,66 @@ function makeCartridge() {
 
   function applyMaterial() {
     const d = state.design, col = new THREE.Color(state.colour), m = bodyMat;
-    Object.assign(m, { transmission: 0, opacity: 1, transparent: false, metalness: 0, clearcoat: 0, iridescence: 0, thickness: 0, attenuationDistance: Infinity, envMapIntensity: 1, sheen: 0 });
-    m.roughness = 0.1 + (d.roughness ?? .25) * 0.65;
-    const tint = d.tint ?? .55, opacity = d.opacity ?? .35;
+    Object.assign(m, { transmission: 0, opacity: 1, transparent: false, metalness: 0, clearcoat: 0, clearcoatRoughness: 0, iridescence: 0, thickness: 0, attenuationDistance: Infinity, envMapIntensity: 1, sheen: 0, roughnessMap: null, specularIntensity: 1 });
+    m.normalMap = grainNormal(); m.normalScale.set(.18, .18);
+    const rough = d.roughness ?? .25, tint = d.tint ?? .55, opacity = d.opacity ?? .35;
     const tinted = new THREE.Color(0xffffff).lerp(col, .6 + .4 * tint);
+    // Six plastics. What tells them apart is what light does at the surface and inside:
+    // solid stops it, metallic mirrors it, clear passes it straight, frosted scatters it
+    // at the surface, smoke absorbs it on the way through, glitter throws it back in
+    // points from flakes suspended in a milky body.
     switch (d.material || 'clear') {
-      case 'solid': m.color.copy(col); m.clearcoat = .5; m.clearcoatRoughness = .25; m.sheen = .15; m.sheenColor = col.clone().lerp(new THREE.Color(0xffffff), .5); break;
-      case 'metallic': m.color.copy(new THREE.Color(0x9aa3ad).lerp(col, tint)); m.metalness = .95; m.roughness = 0.14 + (d.roughness ?? .25) * .4; m.envMapIntensity = 1.3; break;
-      default: {
-        const dark = d.material === 'smoke';
-        m.color.copy(dark ? tinted.clone().multiplyScalar(.45) : tinted);
-        m.transmission = dark ? .78 - opacity * .5 : 1 - opacity * .55;
-        m.thickness = 1.4; m.ior = 1.49;
-        m.attenuationColor = col.clone().lerp(new THREE.Color(0xffffff), (1 - tint) * .6);
-        m.attenuationDistance = dark ? .35 + (1 - opacity) * .8 : .5 + (1 - opacity) * 1.6;
-        m.clearcoat = .3; m.clearcoatRoughness = .22; m.envMapIntensity = .22;
-        if (d.material === 'glitter') { m.iridescence = .6; m.iridescenceIOR = 1.3; }
-      }
+      case 'solid':
+        m.color.copy(col); m.roughness = .25 + rough * .5; m.clearcoat = .5; m.clearcoatRoughness = .25;
+        m.sheen = .15; m.sheenColor = col.clone().lerp(new THREE.Color(0xffffff), .5); break;
+      case 'metallic':
+        m.color.copy(new THREE.Color(0x9aa3ad).lerp(col, tint)); m.metalness = .95; m.roughness = .14 + rough * .4; m.envMapIntensity = 1.3; break;
+      case 'clear':
+        // Water-clear: everything inside is sharp; the surface is a hard gloss.
+        m.color.copy(new THREE.Color(0xffffff).lerp(col, .25 + .5 * tint * opacity));
+        m.transmission = 1 - opacity * .35; m.thickness = .9; m.ior = 1.52; m.roughness = .02 + rough * .12;
+        m.attenuationColor = col.clone().lerp(new THREE.Color(0xffffff), .55 - .4 * tint); m.attenuationDistance = 1.2 + (1 - opacity) * 3;
+        m.clearcoat = .9; m.clearcoatRoughness = .05; m.envMapIntensity = .55; m.normalScale.set(.05, .05); break;
+      case 'frosted':
+        // Sandblasted: light passes but the surface scatters it, so what is inside is a
+        // soft shadow and the shell itself glows with the colour.
+        m.color.copy(new THREE.Color(0xffffff).lerp(col, .35 + .35 * tint)); m.transmission = .92 - opacity * .3; m.thickness = .5; m.ior = 1.45;
+        m.roughness = .32 + rough * .25; m.attenuationColor = col.clone().lerp(new THREE.Color(0xffffff), .5); m.attenuationDistance = 1.5 + (1 - opacity);
+        m.envMapIntensity = .5; m.normalScale.set(.35, .35); break;
+      case 'smoke':
+        // Smoked: dark in the body, the colour only where light gets through thin parts.
+        m.color.copy(new THREE.Color(0x15171a).lerp(col, .25 * tint)); m.transmission = .72 - opacity * .45; m.thickness = 1.6; m.ior = 1.5;
+        m.roughness = .08 + rough * .3; m.attenuationColor = new THREE.Color(0x0b0c0e).lerp(col, .35 * tint); m.attenuationDistance = .18 + (1 - opacity) * .35;
+        m.clearcoat = .6; m.clearcoatRoughness = .12; m.envMapIntensity = .45; break;
+      case 'glitter':
+        // A milky body full of flakes: partly translucent, the surface itself flecked.
+        // The body keeps its colour (white flakes vanish against a pale shell); the
+        // surface is flecked, and the flakes inside are the brightest thing on it.
+        m.color.copy(col.clone().lerp(new THREE.Color(0xffffff), .35 * (1 - tint) + .1)); m.transmission = .8 - opacity * .35; m.thickness = 1; m.ior = 1.48;
+        m.roughness = .1 + rough * .2; m.roughnessMap = flakeTex(); m.normalScale.set(.6, .6);
+        m.attenuationColor = col.clone().lerp(new THREE.Color(0xffffff), .3); m.attenuationDistance = .8 + (1 - opacity) * .8;
+        m.iridescence = 1; m.iridescenceIOR = 1.7; m.iridescenceThicknessRange = [100, 700];
+        m.clearcoat = .8; m.clearcoatRoughness = .1; m.envMapIntensity = 1.1; break;
     }
     m.needsUpdate = true;
     inner.visible = !['solid', 'metallic'].includes(d.material);
-    if (sparkles) { inner.remove(sparkles); sparkles.geometry.dispose(); sparkles = null; }
+    if (sparkles) { inner.remove(sparkles); sparkles.geometry.dispose(); sparkles.material.dispose(); sparkles = null; }
     if (d.material === 'glitter') {
-      const n = Math.round(120 + (d.sparkle ?? .5) * 1400), pos = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) { pos[i * 3] = (Math.random() - .5) * (W - .4); pos[i * 3 + 1] = (Math.random() - .5) * (H - .5); pos[i * 3 + 2] = -.18 + Math.random() * .34; }
-      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      sparkles = new THREE.Points(geo, new THREE.PointsMaterial({ map: spriteTex(), color: 0xffffff, size: .05, alphaTest: .2, depthWrite: false }));
+      // Flakes in the body: many, bright, in the colour and in white, additive so they
+      // read as points of light rather than dots.
+      const n = Math.round(400 + (d.sparkle ?? .5) * 2600), pos = new Float32Array(n * 3), cols = new Float32Array(n * 3);
+      const c1 = new THREE.Color(0xffffff), c2 = col.clone().lerp(new THREE.Color(0xffffff), .35);
+      for (let i = 0; i < n; i++) {
+        pos[i * 3] = (Math.random() - .5) * (W - .3); pos[i * 3 + 1] = (Math.random() - .5) * (H - .4);
+        // Half the flakes sit just under the front face, where they read through any tint.
+        pos[i * 3 + 2] = i % 2 ? faceZ - .03 - Math.random() * .05 : -.2 + Math.random() * .42;
+        const c = Math.random() < .55 ? c1 : c2; cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
+      }
+      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+      // Opaque on purpose: three.js draws only opaque objects into the pass a
+      // transmissive shell looks through, so additive, transparent flakes would never
+      // show inside the body at all.
+      sparkles = new THREE.Points(geo, new THREE.PointsMaterial({ map: spriteTex(), vertexColors: true, size: .085, alphaTest: .55, transparent: false, depthWrite: true }));
       inner.add(sparkles);
     }
     const lvl = LEVELS[state.level] || 2, glow = col.clone().lerp(new THREE.Color(0xffffff), .35);
@@ -254,7 +300,14 @@ function makeCartridge() {
       if ('points' in next || 'colour' in next) applyConstellation();
       applyLabel();
     },
-    twinkle(now) { if (sparkles) sparkles.material.opacity = .55 + .4 * Math.sin(now / 240); if (state.lit) ledGlow.material.opacity = .75 + .2 * Math.sin(now / 700); },
+    twinkle(now) {
+      if (sparkles) {
+        // Flakes catch the light at different moments: the field breathes and turns a little.
+        sparkles.material.size = .075 + .025 * Math.sin(now / 330);
+        sparkles.rotation.z = Math.sin(now / 4000) * .02;
+      }
+      if (state.lit) ledGlow.material.opacity = .75 + .2 * Math.sin(now / 700);
+    },
     dispose() { dispose(); bodyMat.dispose(); label.material.map?.dispose(); },
   };
 }

@@ -939,3 +939,15 @@ least twenty) past the design; a reshelve already in hand silences it. The trace
 conic gradient with one bright arc, masked to a hairline border with `mask-composite:
 exclude`, its start angle a registered `@property` so it can animate -- one point of
 gilt light going round the button every 2.6 s. Reduced motion gets a still ring.
+
+**Materials, revisited.** "Clear, smoke and glitter look the same." They shared one
+transmission branch with small offsets; the folder of Godot materials left in `dump`
+was an encrypted export, unreadable, but its names said what the set should be. Six
+now, each defined by what light does: clear passes it straight (transmission near 1,
+roughness near 0, hard clearcoat); frosted, new, scatters it at the surface (rough
+transmission, thin); smoke absorbs it in the body (dark attenuation, short distance);
+glitter keeps its colour and is full of flakes, with a speckle roughness map so the
+surface itself catches light in points. The flakes had been invisible all along for a
+reason worth writing down: three.js draws only opaque objects into the buffer a
+transmissive shell looks through, so additive, transparent points inside the body never
+appeared. They are opaque points now, half of them just under the front face.

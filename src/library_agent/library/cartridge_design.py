@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from library_agent.config import settings
 
-MATERIALS = ("solid", "clear", "smoke", "glitter", "metallic")
+MATERIALS = ("solid", "clear", "frosted", "smoke", "glitter", "metallic")
 # Clearance is a marking, sealed in like the rest of the design: it says how the maker
 # meant the cartridge to travel. `restricted` is also enforced at one point -- the
 # receiving library will not re-export a restricted cartridge's volumes into another.

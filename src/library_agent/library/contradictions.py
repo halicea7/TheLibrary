@@ -34,44 +34,61 @@ SCHEMA = {
         "source_a": {"type": "string", "maxLength": 120},
         "claim_b": {"type": "string", "maxLength": 300},
         "source_b": {"type": "string", "maxLength": 120},
+        # The one thing both clashing claims are about, named the same way in both.
+        # Empty means they are about different things -- and then there is no conflict.
+        # Not required: an empty required string trips the placeholder guard, and empty
+        # is the honest answer for most clusters.
+        "subject": {"type": "string", "maxLength": 160},
         "disagreement": {"type": "boolean"},
     },
     "required": ["analysis", "explanation", "sources", "disagreement"],
 }
 
 PROMPT = """These claims come from different documents in one library, on the theme
-"{label}".
+"{label}". Each claim is prefixed with its document's title and, after a dash, what that
+document is about -- the claim's scope.
 
 {claims}
 
 Decide whether these sources genuinely conflict.
 
-A conflict means the sources cannot both be right about the same thing:
-- opposite directions for the same measurement ("X improved recall" vs "X degraded recall")
-- incompatible numbers for the same quantity under the same conditions
-- opposite recommendations about the same technique ("use X" vs "do not use X")
-- one source reporting a method works where another reports it does not
+A claim is about the thing its document is about. "The head node is login01" in a guide to
+one cluster and "the head node is cerberus" in a guide to another are two facts about two
+systems, not a disagreement. The same goes for different hosts, accounts, tenants, sites,
+versions, environments, datasets, hardware, or dates: a claim scoped to one is not
+contradicted by a claim scoped to another.
+
+A conflict means the sources cannot both be right about the SAME thing:
+- opposite directions for the same measurement of the same method
+- incompatible numbers for the same quantity of the same system under the same conditions
+- opposite instructions for the same system ("enable X on it" vs "disable X on it")
+- one source saying a method works where another, on the same setup, says it does not
 
 NOT a conflict:
-- different setups, datasets, hardware, or model sizes producing different numbers
-- sources covering different aspects of a topic
-- one source being more specific than another
+- claims scoped to different systems, hosts, accounts, versions, sites or setups
+- sources covering different aspects of a topic, or one being more specific
+- the same instruction stated as done and as to be done, or differing in wording, tense
+  or level of detail
+- a requirement in one place and a stricter requirement in another (they nest)
 - results that are simply unrelated
 
-Work through it in this order: identify what quantity or question each claim is about; if
-two claims are about the same thing, check whether they point in opposite directions. If
-they do, that is a conflict even when the sources study different systems -- say so and
-name it.
+Work through it in this order: name what each claim is about, including its scope; find
+two claims about the same thing under the same scope; only then check whether they point
+in opposite directions.
 
 Return, in this order:
-- analysis: brief — one line per claim naming what it is about, then one line on whether
-  any two are about the same thing and point in opposite directions. Under 120 words.
+- analysis: brief — one line per claim naming what it is about and its scope, then one
+  line on whether any two share a subject and point in opposite directions. Under 140
+  words.
 - explanation: if they conflict, what each side claims and why they cannot both hold.
   Otherwise one sentence on why the differences are compatible.
 - sources: document titles involved in the conflict (empty list if none).
 - claim_a, source_a, claim_b, source_b: if they conflict, the two claims that cannot both
   hold -- the claim text copied word for word from the list above, without the bracketed
   document name, which goes in source_a / source_b. Leave all four empty if no conflict.
+- subject: the single thing both clashing claims are about, named so that it is plainly
+  the same in both (the same host, the same method, the same quantity). Empty if there is
+  no such shared subject -- and then there is no conflict.
 - disagreement: your verdict, following from the analysis above."""
 
 
@@ -116,13 +133,22 @@ async def judge_cluster(
     claims: list,
     titles: list[str],
     claim_sources: list | None = None,
+    scopes: dict[str, str] | None = None,
 ) -> dict | None:
-    """One cluster's verdict by majority. Returns None if no vote came back."""
+    """One cluster's verdict by majority. Returns None if no vote came back. `scopes`
+    maps a document title to its orientation line, so the judge sees what each claim's
+    document is about -- the difference between two hosts and a disagreement."""
     srcs = list(claim_sources or [])
-    body = "\n".join(
-        f"- [{str(srcs[i])[:40]}] {str(x)[:220]}" if i < len(srcs) else f"- {str(x)[:220]}"
-        for i, x in enumerate(claims[:16])
-    )
+    scopes = scopes or {}
+
+    def tag(i: int) -> str:
+        if i >= len(srcs):
+            return ""
+        title = str(srcs[i])
+        scope = scopes.get(title, "")
+        return f"[{title[:40]} — {scope[:90]}] " if scope else f"[{title[:40]}] "
+
+    body = "\n".join(f"- {tag(i)}{str(x)[:220]}" for i, x in enumerate(claims[:16]))
     body += "\n\nDocuments involved: " + ", ".join(titles)
     # Identical runs used to return 0, 1, 3, 4 and 7 findings at temperature 0.1: which
     # borderline pairs fire is a coin flip. So each cluster is judged up to three times
@@ -149,6 +175,9 @@ async def judge_cluster(
             # The model can still answer true while its own reasoning says no --
             # "the claims are not in conflict because..." with disagreement=true was
             # observed even with the verdict field last. The reasoning wins.
+            out["disagreement"] = False
+        if out.get("disagreement") and len(str(out.get("subject") or "").strip()) < 3:
+            # No shared subject named means two facts about two things.
             out["disagreement"] = False
         votes.append(out)
         yes = sum(1 for v in votes if v.get("disagreement"))
@@ -191,15 +220,17 @@ async def find_contradictions(
             text("""
             select c.id, c.label, a.data->'claims' as claims,
                    a.data->'claim_sources' as claim_sources,
-                   array_agg(distinct d.title) as titles
+                   array_agg(distinct d.title) as titles,
+                   jsonb_object_agg(d.title, coalesce(o.data->>'one_liner', '')) as scopes
             from cluster c
             join artifact a on a.target_id = c.id and a.kind = :ck
             join cluster_member m on m.cluster_id = c.id
             join document d on d.id = m.document_id
+            left join artifact o on o.target_id = d.id and o.kind = :ok
             where c.document_count > 1
             group by c.id, c.label, a.data
             """),
-            {"ck": ArtifactKind.CLUSTER_SUMMARY.value},
+            {"ck": ArtifactKind.CLUSTER_SUMMARY.value, "ok": ArtifactKind.ORIENTATION.value},
         )
     ).all()
 
@@ -222,7 +253,7 @@ async def find_contradictions(
             if len(claims) < 2:
                 continue
             out = await judge_cluster(
-                c, cfg.reader_model, row.label, claims, row.titles, row.claim_sources
+                c, cfg.reader_model, row.label, claims, row.titles, row.claim_sources, row.scopes
             )
             if out is None:
                 continue

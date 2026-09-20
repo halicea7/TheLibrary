@@ -983,3 +983,24 @@ narrowed the stage. A note for the record: both passes landed in this checkout w
 my own commits were being made with `git add -A`, so they went to GitHub under the
 "pause" commits of 04:02 and 13:20 rather than their own message. This entry is the
 credit those commits should have carried.
+
+
+## Follow-on: scope
+
+"'SSH Access Configuration' is a conflict because it's different SSH addresses, not
+because the information conflicts -- it's simply a different host." Every conflict the
+library showed on the wiki was that shape: two clusters' head nodes, a key requirement
+and a key-plus-2FA requirement, the same instruction in past and future tense. Two
+causes. The judge never saw a claim's scope -- claims arrived as bare sentences under a
+title -- and the prompt said a clash "is a conflict even when the sources study
+different systems", written for papers, where a method's result should carry across
+setups, and exactly wrong for documentation, where a claim is about its document's
+host. Now each claim carries its document's orientation line (`[OSG Setup — OSG
+integration guide for the Viper cluster] Head node is login01…`), the prompt says a
+claim is about the thing its document is about and lists what is not a conflict, and
+the schema asks for the one `subject` both claims share -- optional, since an empty
+required string trips the placeholder guard (the first run lost every verdict that
+way), enforced after the fact: no shared subject, no conflict. Re-judging the 99
+flagged clusters by hand: 7 survive, each naming a specific thing -- the mount state of
+one filesystem, the log path on one system, rsyslog's direction to one host. The
+end-of-import rebuild applies it to the shelf.

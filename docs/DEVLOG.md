@@ -882,3 +882,12 @@ selection, *save to the rack* patches it, and *make it* exports with `as_cartrid
 keeps the id and moves the version on so the receiver upgrades in place. Along the way:
 the jobs listing now puts live jobs first, since a queue of 391 had hidden the one in
 hand behind the limit, and the UI counts the whole queue.
+
+**Seven rebuilds for one import.** The debounce was a ten-minute reservation key: the
+first read to finish in a quiet window scheduled a rebuild ten minutes out. An import
+whose reads run for eighty minutes crosses eight windows, so it scheduled a rebuild per
+window -- seven forty-minute passes queued behind each other, each blocking the reads
+still waiting. Now a scheduled rebuild carries the time it was asked for; when it comes
+due it first checks the shelf: reads still queued, it steps back into the queue behind
+them; a rebuild already started since it was asked for, it is covered and returns. The
+duplicates in Redis were dropped by hand this once.

@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from typing import Any, ClassVar
 
 from arq.connections import RedisSettings
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from library_agent.config import settings
 from library_agent.db.models import Document, Job, JobState
@@ -111,15 +112,52 @@ async def read_document(ctx: dict, document_id: str, job_id: str, tier: int = 1)
 
 
 REBUILD_KEY = "library:rebuild_scheduled"
+REBUILD_STARTED_KEY = "library:rebuild_started_at"
 
 
-async def build_library_layer(ctx: dict, kind: str) -> dict[str, Any]:
+async def _reads_pending() -> int:
+    async with session_scope() as db:
+        return (
+            await db.execute(
+                select(func.count())
+                .select_from(Job)
+                .where(
+                    Job.kind.in_(["tier1", "tier2"]),
+                    Job.state.in_([JobState.QUEUED, JobState.RUNNING, JobState.YIELDED]),
+                )
+            )
+        ).scalar() or 0
+
+
+async def build_library_layer(
+    ctx: dict, kind: str, requested_at: float | None = None
+) -> dict[str, Any]:
     """Cross-document passes. `all` runs the three in dependency order; each one is also
     available on its own. They hit the model, so contention with reading is real -- the
-    worker runs one job at a time for exactly that reason."""
+    worker runs one job at a time for exactly that reason.
+
+    A scheduled rebuild (`requested_at` set) waits for the shelf to go quiet: if reads
+    are still queued it steps back into the queue behind them rather than running a
+    forty-minute pass in the middle of a folder import, and if a rebuild has already
+    started since it was asked for, it is covered and does nothing. A 391-page import
+    once queued seven rebuilds this way, one per debounce window, each blocking the
+    reads behind it."""
     from library_agent.library.citations import build_citation_graph
     from library_agent.library.cluster import build_clusters
     from library_agent.library.contradictions import find_contradictions
+
+    redis = ctx.get("redis")
+    if requested_at is not None and redis is not None:
+        started = await redis.get(REBUILD_STARTED_KEY)
+        if started and float(started) >= requested_at:
+            return {"kind": kind, "skipped": "a later rebuild already ran"}
+        if await _reads_pending():
+            delay = settings().library_rebuild_delay_seconds
+            await redis.enqueue_job(
+                "build_library_layer", kind, requested_at=requested_at, _defer_by=delay
+            )
+            return {"kind": kind, "deferred": delay}
+        await redis.set(REBUILD_STARTED_KEY, str(time.time()))
 
     kinds = ["citations", "clusters", "contradictions"] if kind == "all" else [kind]
     out: dict[str, Any] = {"kind": kind}
@@ -221,7 +259,7 @@ async def schedule_library_rebuild(redis) -> bool:
     # SET NX with a TTL is the whole debounce: the key is the reservation.
     if not await redis.set(REBUILD_KEY, "1", ex=delay, nx=True):
         return False
-    await redis.enqueue_job("build_library_layer", "all", _defer_by=delay)
+    await redis.enqueue_job("build_library_layer", "all", requested_at=time.time(), _defer_by=delay)
     return True
 
 

@@ -1068,3 +1068,12 @@ the socket after the bounce starts the boot: the lit pips *turn*, one level at a
 only then does the power light come on. Seated, they stay green; lifted, back to
 colour. A cartridge arriving already seated arms rather than lights, so opening the
 page runs the sequence once.
+
+**The drawer.** "*all* should be a floating window with a grid of cartridges and info
+about them -- make it look good but useful." A gilt-lined window over the desk: cards
+with the label art, colour band, level pips, clearance banner, seated dot, count and
+origin; a side panel with the chosen cartridge turning live (one more `mount`, drag to
+turn, disposed on close) above its particulars -- clearance, material and label finish,
+origin, when, embedding model -- and the acts: seat or lift, show on the rack, edit for
+one made here. Double-click seats. Esc or the dim closes. The old two-column list of
+names is gone.

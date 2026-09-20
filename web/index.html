@@ -192,12 +192,6 @@ body {
 .rack3d .under .cnt { font:10px/1 var(--mono); }
 .rack3d .slot2d { position:absolute; right:6px; top:6px; }
 .rack3d .all { position:absolute; left:8px; top:6px; }
-.rackgrid { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:0 0 8px; }
-.rackgrid button { display:flex; align-items:center; gap:7px; padding:6px 8px; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; cursor:pointer; text-align:left; font:11.5px/1.3 var(--sans); color:var(--dim); }
-.rackgrid button:hover { color:var(--fg); border-color:var(--faint); }
-.rackgrid button[data-on=true] { border-color:var(--verdigris); color:var(--fg); }
-.rackgrid .dot { width:8px; height:8px; flex:0 0 8px; border-radius:50%; background:var(--c); }
-.rackgrid span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* ── the shelf itself ─────────────────────────────────────────────────── */
 /* Volumes are grouped by subject. A volume with three subjects sits on three shelves,
@@ -474,6 +468,46 @@ select, .toggle {
 .edge { font:11px/1.7 var(--mono); color:var(--dim); }
 .edge em { font-style:normal; color:var(--faint); padding:0 5px; }
 .edge b { color:var(--fg); font-weight:500; }
+/* ── the drawer: every cartridge on the rack, as a floating window ──────────── */
+.drawer-lock { position:fixed; inset:0; z-index:150; background:color-mix(in srgb, var(--bg) 55%, transparent); backdrop-filter:blur(2px); }
+.drawer { position:fixed; z-index:151; left:50%; top:50%; transform:translate(-50%,-50%); width:min(980px, 94vw); height:min(640px, 88vh);
+  display:grid; grid-template-rows:auto 1fr; background:var(--panel); border:1px solid var(--rule); border-top:2px solid var(--gilt); border-radius:6px;
+  box-shadow:0 24px 70px rgba(0,0,0,.45); overflow:hidden; }
+.drawer-h { display:flex; align-items:baseline; gap:14px; padding:14px 18px 10px; border-bottom:1px solid var(--rule-soft); }
+.drawer-h h2 { margin:0; font:600 16px/1.3 var(--serif); letter-spacing:.03em; }
+.drawer-h .n { font:10.5px/1 var(--mono); color:var(--faint); letter-spacing:.06em; }
+.drawer-h .x { margin-left:auto; }
+.drawer-b { display:grid; grid-template-columns:minmax(0,1fr) 340px; min-height:0; }
+.drawer-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:12px; padding:16px 18px; overflow-y:auto; align-content:start; scrollbar-width:thin; scrollbar-color:var(--rule) transparent; }
+.card { position:relative; display:grid; grid-template-rows:auto 1fr auto; border:1px solid var(--rule); border-radius:5px; background:var(--sunk); cursor:pointer; overflow:hidden; text-align:left; padding:0; font:inherit; color:inherit; transition:border-color .15s, transform .15s; }
+.card:hover { border-color:var(--faint); transform:translateY(-1px); }
+.card[aria-pressed=true] { border-color:var(--gilt); box-shadow:0 0 0 1px var(--gilt), 0 0 18px color-mix(in srgb, var(--gilt) 35%, transparent); }
+.card .band { height:4px; background:var(--c); }
+.card .art { position:relative; aspect-ratio:4/3; background:#0b0d11 center/cover no-repeat; border-bottom:1px solid var(--rule-soft); }
+.card .art img { width:100%; height:100%; object-fit:cover; display:block; }
+.card .art .clr { position:absolute; left:0; right:0; top:0; text-align:center; font:9px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; padding:4px 0; color:#fff; background:var(--k); opacity:.9; }
+.card .art .seat { position:absolute; right:8px; bottom:8px; width:9px; height:9px; border-radius:50%; background:#37e07a; box-shadow:0 0 8px #37e07a; }
+.card .body { padding:9px 11px 10px; }
+.card .nm { font:600 13.5px/1.3 var(--serif); color:var(--fg); display:flex; align-items:baseline; gap:8px; }
+.card .nm i { font:9.5px/1 var(--mono); color:var(--faint); font-style:normal; margin-left:auto; }
+.card .pips { display:inline-flex; gap:3px; margin:6px 0 4px; }
+.card .pips b { width:14px; height:5px; border-radius:1px; background:var(--rule); }
+.card .pips b.on { background:var(--c); }
+.card .m { font:10.5px/1.5 var(--mono); color:var(--dim); }
+.drawer-side { border-left:1px solid var(--rule-soft); display:grid; grid-template-rows:260px 1fr; min-height:0; }
+.drawer-side canvas { width:100%; height:260px; display:block; cursor:grab; }
+.drawer-info { padding:6px 18px 16px; overflow-y:auto; font:12.5px/1.55 var(--sans); color:var(--dim); }
+.drawer-info h3 { margin:0 0 2px; font:600 17px/1.25 var(--serif); color:var(--fg); }
+.drawer-info .sub { font:10.5px/1.6 var(--mono); color:var(--faint); margin-bottom:10px; }
+.drawer-info dl { display:grid; grid-template-columns:auto 1fr; gap:3px 12px; margin:0 0 12px; font:11px/1.6 var(--mono); }
+.drawer-info dt { color:var(--faint); } .drawer-info dd { margin:0; color:var(--fg); }
+.drawer-info .acts { display:flex; flex-wrap:wrap; gap:8px; }
+.drawer-info .acts button { font:12px/1 var(--sans); padding:7px 12px; border-radius:3px; border:1px solid var(--rule); background:transparent; color:var(--dim); cursor:pointer; }
+.drawer-info .acts button:hover { color:var(--fg); border-color:var(--faint); }
+.drawer-info .acts button.go { background:var(--gilt); border-color:var(--gilt); color:var(--bg); font-weight:600; }
+.drawer-info .empty { padding:24px 0; }
+@media (max-width: 860px) { .drawer-b { grid-template-columns:1fr; } .drawer-side { display:none; } }
+
 /* ── the tracer: a point of gilt light travelling the outline of a control that wants
    attention. Not a glowing box -- one bright arc on a conic gradient, masked to the
    border, turning. Reduced motion: a still gilt ring. */
@@ -774,7 +808,6 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
       <button class="slot slot2d" style="height:30px;width:20px;font-size:13px" onclick="openMake()" title="Make a cartridge from this library">+</button>
       <div class="under" id="rack-under"></div>
     </div>
-    <div class="rackgrid" id="rackgrid" hidden></div>
     <div class="rack" id="rack"></div>
     <div class="rack-note" id="rack-note"></div>
 
@@ -1444,12 +1477,75 @@ function rackUnder() {
   for (const a of document.querySelectorAll('.rack3d .arrow')) a.disabled = n < 2;
 }
 function rackStep(d) { rack3d.ctrl?.step(d); rackUnder(); }
-function rackGrid() {
-  const g = $('#rackgrid');
-  if (!g.hidden) { g.hidden = true; return; }
-  g.hidden = false;
-  g.innerHTML = Object.values(rackIndex).map(c => `<button data-on="${cartridges.has(c.id)}" style="--c:${esc(c.colour)}" onclick="rack3d.ctrl.show('${c.id}'); rackUnder(); $('#rackgrid').hidden = true" title="${esc(c.name)} · ${c.level} · ${c.document_count}"><i class="dot"></i><span>${esc(c.name)}</span></button>`).join('');
+// The drawer: every cartridge on the rack as a card -- its label, colour band, level
+// pips, clearance, count -- with the chosen one turning live beside its particulars.
+const drawer = { els: null, ctrl: null, id: null };
+function rackGrid() { drawer.els ? drawerClose() : drawerOpen(); }
+function drawerOpen() {
+  const lock = document.createElement('div'); lock.className = 'drawer-lock'; lock.onclick = drawerClose;
+  const box = document.createElement('div'); box.className = 'drawer';
+  box.innerHTML = `<div class="drawer-h"><h2>The rack</h2><span class="n" id="drawer-n"></span><button class="linkish x" onclick="drawerClose()">close</button></div>
+    <div class="drawer-b"><div class="drawer-grid" id="drawer-grid"></div>
+    <div class="drawer-side"><canvas id="drawer-canvas" title="Drag to turn it"></canvas><div class="drawer-info" id="drawer-info"></div></div></div>`;
+  document.body.append(lock, box);
+  drawer.els = { lock, box };
+  drawer.onKey = e => { if (e.key === 'Escape') drawerClose(); };
+  addEventListener('keydown', drawer.onKey);
+  drawerRender();
+  const cur = rack3d.ctrl?.current();
+  drawerPick(cur && rackIndex[cur] ? cur : Object.keys(rackIndex)[0]);
 }
+function drawerClose() {
+  if (!drawer.els) return;
+  removeEventListener('keydown', drawer.onKey);
+  drawer.ctrl?.dispose(); drawer.ctrl = null;
+  for (const el of Object.values(drawer.els)) el.remove();
+  drawer.els = null; drawer.id = null;
+}
+function drawerRender() {
+  if (!drawer.els) return;
+  const list = Object.values(rackIndex);
+  $('#drawer-n').textContent = `${list.length} cartridge${list.length === 1 ? '' : 's'}`;
+  const K = { open: 'transparent', internal: '#3e6b6b', confidential: '#9a6b1f', restricted: '#a3432a' };
+  $('#drawer-grid').innerHTML = list.length ? list.map(c => {
+    const lvl = { catalogue: 1, readings: 2, full: 3 }[c.level] || 2, clr = c.design?.clearance || 'open';
+    return `<button class="card" aria-pressed="${drawer.id === c.id}" style="--c:${esc(c.colour)}" onclick="drawerPick('${c.id}')" ondblclick="drawerSeat('${c.id}')" title="Click for its particulars; double-click to seat it">
+      <div class="band"></div>
+      <div class="art"><img src="/api/cartridges/${c.id}/art?c=${c.colour.slice(1)}" alt="" loading="lazy" onerror="this.remove()"/>
+        ${clr !== 'open' ? `<span class="clr" style="--k:${K[clr]}">${esc(clr)}</span>` : ''}${cartridges.has(c.id) ? '<span class="seat" title="Seated"></span>' : ''}</div>
+      <div class="body"><div class="nm">${esc(c.name)}<i>v${c.version}</i></div>
+        <div class="pips">${[1,2,3].map(k => `<b class="${k <= lvl ? 'on' : ''}"></b>`).join('')}</div>
+        <div class="m">${esc(c.level)} · ${c.document_count} volumes${c.editable ? ' · made here' : c.made_by ? ' · from ' + esc(c.made_by) : ''}</div></div>
+    </button>`;
+  }).join('') : '<div class="empty">Nothing on the rack yet. <b>+</b> makes a cartridge from what is scoped; a dropped .zip inserts one.</div>';
+}
+async function drawerPick(id) {
+  const c = rackIndex[id]; if (!c || !drawer.els) return;
+  drawer.id = id;
+  document.querySelectorAll('.card').forEach(b => b.setAttribute('aria-pressed', String(b.getAttribute('onclick').includes(id))));
+  const seated = cartridges.has(id);
+  const design = c.design || {};
+  $('#drawer-info').innerHTML = `<h3>${esc(c.name)}</h3><div class="sub">${esc(c.level)} · ${c.document_count} volumes · version ${c.version}</div>
+    <dl>
+      <dt>clearance</dt><dd>${esc(design.clearance || 'open')}</dd>
+      <dt>material</dt><dd>${esc(design.material || 'clear')}${design.labelFinish && design.labelFinish !== 'paper' ? ' · ' + esc(design.labelFinish) + ' label' : ''}</dd>
+      <dt>origin</dt><dd>${c.editable ? 'made here' : c.made_by ? 'from ' + esc(c.made_by) : 'inserted'}</dd>
+      <dt>${c.editable ? 'made' : 'inserted'}</dt><dd>${fmtWhen(c.imported_at || c.made_at)}</dd>
+      <dt>embeddings</dt><dd>${esc(c.embed_model || '')}</dd>
+    </dl>
+    <div class="acts">
+      <button class="go" onclick="drawerSeat('${id}')">${seated ? 'lift it out' : 'seat it'}</button>
+      <button onclick="rack3d.ctrl?.show('${id}'); rackUnder(); drawerClose()">show on the rack</button>
+      ${c.editable ? `<button onclick="drawerClose(); openEdit('${id}')">edit</button>` : ''}
+    </div>`;
+  if (!window.Cartridge3D) return;
+  if (!drawer.ctrl) drawer.ctrl = window.Cartridge3D.mount($('#drawer-canvas'), { interactive: true });
+  let points = [];
+  try { points = (await (await fetch(`/api/cartridges/${id}/constellation`)).json()).points || []; } catch {}
+  if (drawer.id !== id || !drawer.ctrl) return;
+  drawer.ctrl.set({ design, colour: c.colour, name: c.name, level: c.level, sub: `${c.level} · ${c.document_count} volumes`, points, artUrl: `/api/cartridges/${id}/art?c=${c.colour.slice(1)}`, lit: seated, face: true });
+}
+function drawerSeat(id) { toggleCartridge(id); setTimeout(() => { drawerRender(); if (drawer.id === id) drawerPick(id); }, 50); }
 function toggleCartridge(id) {
   // One room at a time: seating a cartridge lifts whatever was seated.
   const wasOn = cartridges.has(id);

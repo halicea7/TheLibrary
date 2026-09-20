@@ -248,6 +248,9 @@ function labelSurface(material) {
 
 /* ── one cartridge ────────────────────────────────────────────────────── */
 function makeCartridge() {
+  const concept = true; // Approved molded-shell construction and selective label finishes.
+  const grips = concept ? GROOVES.map(g => ({...g, w:1.12, x:-.34})) : GROOVES;
+  const extraScrews = [{x:-.94,y:-1.44,r:.065},{x:.94,y:-1.44,r:.065}];
   const group = new THREE.Group();
   const bodyMat = new THREE.MeshPhysicalMaterial({ color: 0x2f6f8f, normalMap: grainNormal(), normalScale: new THREE.Vector2(.18, .18) });
   const shellUniforms = shellSurface(bodyMat);
@@ -262,24 +265,50 @@ function makeCartridge() {
   const rimShape = outline();
   const rimHole = new THREE.Shape(outline().getPoints(24).map(p => new THREE.Vector2(p.x * .93, p.y * .95)));
   rimShape.holes.push(rimHole);
+  if (concept) {
+    // Two rim halves with a narrow assembly gap; recessed tongue closes the gap.
+    for (const [z, depth] of [[-.12, .113], [.007, .193]]) {
+      const part = new THREE.Mesh(new THREE.ExtrudeGeometry(rimShape, { depth, bevelEnabled:false, curveSegments:16 }), bodyMat);
+      part.geometry.translate(0,0,z); group.add(part);
+    }
+    const joint = new THREE.Mesh(new THREE.ExtrudeGeometry(rimShape, {depth:.018,bevelEnabled:false,curveSegments:16}), darkMat);
+    joint.geometry.scale(.991,.994,1);joint.geometry.translate(0,0,-.009);group.add(joint);
+  }
   const rim = new THREE.Mesh(new THREE.ExtrudeGeometry(rimShape, { depth: D * .64, bevelEnabled: false, curveSegments: 16 }), bodyMat);
-  rim.geometry.translate(0, 0, -D / 2 + .04 + D * .18); rim.castShadow = true; group.add(rim);
+  rim.geometry.translate(0, 0, -D / 2 + .04 + D * .18); rim.castShadow = true; if (!concept) group.add(rim);
   const shell = outline();
-  for (const gr of GROOVES) shell.holes.push(slot(gr.w, gr.h, gr.x, gr.y));
+  for (const gr of grips) shell.holes.push(slot(gr.w, gr.h, gr.x, gr.y));
   for (const p of PIPS) shell.holes.push(roundedRect(p.s, p.s, .02, p.x, p.y));
   shell.holes.push(circle(LED.r, LED.x, LED.y));
   shell.holes.push(circle(SCREW.r, SCREW.x, SCREW.y));
-  const front = new THREE.Mesh(new THREE.ExtrudeGeometry(shell, { depth: D * .18, bevelEnabled: true, bevelThickness: .04, bevelSize: .04, bevelSegments: 5, curveSegments: 16 }), bodyMat);
-  front.geometry.translate(0, 0, D / 2 - D * .18 - .04); front.castShadow = true; group.add(front);
+  for (const screw of extraScrews) shell.holes.push(circle(screw.r + .018, screw.x, screw.y));
+  if (concept) shell.holes.push(roundedRect(LABEL.w + .075, LABEL.h + .075, .08, LABEL.x, LABEL.y));
+  const front = new THREE.Mesh(new THREE.ExtrudeGeometry(shell, { depth: concept ? .026 : D * .18, bevelEnabled: true, bevelThickness: concept ? .012 : .04, bevelSize: concept ? .012 : .04, bevelSegments: 5, curveSegments: 16 }), bodyMat);
+  front.geometry.translate(0, 0, concept ? .212 : D / 2 - D * .18 - .04); front.castShadow = true; group.add(front);
   const faceZ = D / 2 + .001;            // the outside of the front plate
   const floorZ = D / 2 - D * .18 - .04;  // the inside of it: where the openings bottom out
 
+  if (concept) {
+    // Continuous molded floor under the pocket and grip depressions.
+    const foundation = outline();
+    for (const p of PIPS) foundation.holes.push(roundedRect(p.s,p.s,.02,p.x,p.y));
+    foundation.holes.push(circle(LED.r,LED.x,LED.y));
+    foundation.holes.push(circle(SCREW.r,SCREW.x,SCREW.y));
+    for (const screw of extraScrews) foundation.holes.push(circle(screw.r + .018,screw.x,screw.y));
+    const floor = new THREE.Mesh(new THREE.ExtrudeGeometry(foundation, {depth:.045,bevelEnabled:true,bevelThickness:.01,bevelSize:.01,bevelSegments:3,curveSegments:16}),bodyMat);
+    floor.geometry.translate(0,0,.155);group.add(floor);
+    for (const gr of grips) {
+      const bottom = new THREE.Mesh(new THREE.ShapeGeometry(slot(gr.w,gr.h,gr.x,gr.y)),bodyMat);
+      bottom.position.z=.225;group.add(bottom);
+    }
+  }
   // the board inside
   const pcb = new THREE.Mesh(new THREE.BoxGeometry(W * .84, H * .82, .07), new THREE.MeshStandardMaterial({ color: 0x143d24, roughness: .6, metalness: .05 }));
   pcb.position.set(0, -.05, -.06); group.add(pcb);
   // a few components on it, so there is something to see through a clear shell
   const chipMat = new THREE.MeshStandardMaterial({ color: 0x1a1d22, roughness: .5 });
   for (const [x, y, w, h] of [[-.55, .55, .9, .7], [.5, .35, .5, .5], [-.2, -.5, 1.1, .35], [.6, -.6, .3, .3]]) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, .07), chipMat); m.position.set(x, y, -.02); group.add(m); }
+  if (concept) addBoardDetails(group);
   // the edge connector: the board continues down, with individual gold contacts
   const tongue = new THREE.Mesh(new THREE.BoxGeometry(W * .72, .36, .07), pcb.material);
   tongue.position.set(0, -H / 2 - .12, -.06); group.add(tongue);
@@ -287,13 +316,33 @@ function makeCartridge() {
   for (let i = 0; i < 16; i++) { for (const z of [-.06 + .037, -.06 - .037]) { const m = new THREE.Mesh(new THREE.BoxGeometry(.06, .24, .006), gold); m.position.set(-W * .33 + i * (W * .66 / 15), -H / 2 - .15, z); group.add(m); } }
 
   // the sticker: a shallow raised label on the front face, with its own slight bevel
-  const label = new THREE.Mesh(new THREE.PlaneGeometry(LABEL.w, LABEL.h), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: .6 }));
-  const labelUniforms = labelSurface(label.material);
-  label.position.set(LABEL.x, LABEL.y, faceZ + .014); group.add(label);
+  const label = new THREE.Mesh(concept ? roundedLabelGeometry() : new THREE.PlaneGeometry(LABEL.w, LABEL.h), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: .6 }));
+  const labelUniforms = concept ? refinedLabelSurface(label.material) : labelSurface(label.material);
+  label.position.set(LABEL.x, LABEL.y, concept ? .218 : faceZ + .014); group.add(label);
   const stickerEdge = new THREE.Mesh(new THREE.ExtrudeGeometry(roundedRect(LABEL.w + .03, LABEL.h + .03, LABEL.r, LABEL.x, LABEL.y), { depth: .006, bevelEnabled: false }), new THREE.MeshStandardMaterial({ color: 0xe8e4dc, roughness: .8 }));
-  stickerEdge.position.z = faceZ; group.add(stickerEdge);
+  stickerEdge.position.z = concept ? .208 : faceZ; group.add(stickerEdge);
   // pips: a lit insert in each opening
   const pips = PIPS.map(p => { const m = new THREE.Mesh(new THREE.BoxGeometry(p.s - .03, p.s - .03, .05), new THREE.MeshStandardMaterial({ color: 0x0b0e12, roughness: .4, emissive: 0x000000 })); m.position.set(p.x, p.y, floorZ + .02); group.add(m); return m; });
+  if (concept) {
+    ['Full','Readings','Catalogue'].forEach((name,i) => {
+      const text = detailText(name, .43, .095, '#e3eadf');
+      text.position.set(.53,PIPS[i].y,.254);text.userData.shellDetail=true;group.add(text);
+    });
+    // Small molded shoulders around the connector and a recessed rear service panel.
+    for (const x of [-1.04,1.04]) {
+      const rail=new THREE.Mesh(new THREE.BoxGeometry(.09,.24,.12),bodyMat);
+      rail.position.set(x,-1.55,-.04);group.add(rail);
+    }
+    const rear=new THREE.Mesh(new THREE.ShapeGeometry(roundedRect(1.70,2.20,.10)),new THREE.MeshStandardMaterial({color:0x253c42,roughness:.7}));
+    rear.position.set(0,.06,-.254);rear.rotation.y=Math.PI;rear.userData.shellDetail=true;group.add(rear);
+    for(const [text,y,w,h] of [['THE LIBRARY',.81,1.32,.18],['ARCHIVE MODULE',.53,1.12,.10],['REV. 02  /  007',-.60,1.0,.09],['INSERT CONTACTS FIRST',-.80,1.28,.075]]) {
+      const mark=detailText(text,w,h,'#9bada9');mark.position.set(0,y,-.256);mark.rotation.y=Math.PI;mark.userData.shellDetail=true;group.add(mark);
+    }
+    for(const x of [-.69,.69])for(const y of [-.86,.99]){
+      const screw=new THREE.Mesh(new THREE.CylinderGeometry(.045,.045,.014,16),new THREE.MeshStandardMaterial({color:0x8d989b,metalness:.85,roughness:.36}));
+      screw.rotation.x=Math.PI/2;screw.position.set(x,y,-.261);screw.userData.shellDetail=true;group.add(screw);
+    }
+  }
   // the light: a dome in its opening, and a glow
   const led = new THREE.Mesh(new THREE.SphereGeometry(LED.r - .012, 16, 12), new THREE.MeshStandardMaterial({ color: 0x1a1f26, emissive: 0x000000, roughness: .25 }));
   led.position.set(LED.x, LED.y, floorZ + .02); group.add(led);
@@ -303,7 +352,19 @@ function makeCartridge() {
   const screw = new THREE.Mesh(new THREE.CylinderGeometry(SCREW.r - .012, SCREW.r - .012, .04, 20), new THREE.MeshStandardMaterial({ color: 0x8e949c, roughness: .4, metalness: .85 }));
   screw.rotation.x = Math.PI / 2; screw.position.set(SCREW.x, SCREW.y, floorZ + .03); group.add(screw);
   for (const rz of [0, Math.PI / 2]) { const m = new THREE.Mesh(new THREE.BoxGeometry(SCREW.r * 1.3, .022, .02), darkMat); m.rotation.z = rz; m.position.set(SCREW.x, SCREW.y, floorZ + .05); group.add(m); }
-  const dispose = () => { back.geometry.dispose(); rim.geometry.dispose(); front.geometry.dispose(); };
+
+  // Lower fasteners sit inside real shell openings, with a bezel and cross recess.
+  const fastenerMat = new THREE.MeshStandardMaterial({color:0x8e949c,metalness:.85,roughness:.36});
+  for (const p of extraScrews) {
+    const bezel = new THREE.Mesh(new THREE.RingGeometry(p.r + .003,p.r + .016,24),fastenerMat);
+    bezel.position.set(p.x,p.y,.238);group.add(bezel);
+    const head = new THREE.Mesh(new THREE.CylinderGeometry(p.r,p.r,.026,24),fastenerMat);
+    head.rotation.x=Math.PI/2;head.position.set(p.x,p.y,.217);group.add(head);
+    for(const angle of [0,Math.PI/2]) {
+      const slot = new THREE.Mesh(new THREE.BoxGeometry(.077,.016,.003),darkMat);
+      slot.rotation.z=angle;slot.position.set(p.x,p.y,.231);group.add(slot);
+    }
+  }
 
   const inner = new THREE.Group(); group.add(inner);
   let constellation = null, sparkles = null;
@@ -403,7 +464,7 @@ function makeCartridge() {
       inner.add(sparkles);
     }
     const lvl = LEVELS[state.level] || 2, glow = col.clone().lerp(new THREE.Color(0xffffff), .35);
-    pips.forEach((p, i) => { const on = i < lvl; p.material.emissive.copy(on ? glow : new THREE.Color(0)); p.material.emissiveIntensity = on ? 1.2 : 0; p.material.color.set(on ? glow : 0x0b0e12); });
+    pips.forEach((p, i) => { const on = concept ? i >= 3 - lvl : i < lvl; p.material.emissive.copy(on ? glow : new THREE.Color(0)); p.material.emissiveIntensity = on ? 1.2 : 0; p.material.color.set(on ? glow : 0x0b0e12); });
     const verd = new THREE.Color(cssColour('--verdigris') || '#4f9186');
     led.material.emissive.copy(state.lit ? verd : new THREE.Color(0)); led.material.emissiveIntensity = state.lit ? 2.4 : 0; led.material.color.set(state.lit ? verd : 0x1a1f26);
     ledGlow.material.color.copy(verd); ledGlow.material.opacity = state.lit ? .9 : 0;
@@ -430,10 +491,17 @@ function makeCartridge() {
     material.metalness = 0;
     material.clearcoat = finish === 'paper' ? 0 : .85;
     material.clearcoatRoughness = finish === 'gloss' ? .08 : .16;
+    if (concept) {
+      material.normalMap = grainNormal();
+      material.normalScale.setScalar(finish === 'paper' ? .11 : .018);
+      material.roughness = finish === 'paper' ? .82 : finish === 'gloss' ? .22 : .42;
+      material.clearcoat = finish === 'paper' ? 0 : finish === 'gloss' ? 1 : .35;
+      material.clearcoatRoughness = finish === 'gloss' ? .065 : .18;
+    }
     if (oldCoat !== material.clearcoat) material.needsUpdate = true;
     const key = `${state.artUrl}|${state.name}|${state.sub}|${state.colour}|${state.design.clearance}`;
     if (key === artKey) return; artKey = key;
-    const done = img => { if (disposed) return; label.material.map?.dispose(); label.material.map = labelTexture(img, state.name, state.sub, state.colour, state.design.clearance); label.material.needsUpdate = true; };
+    const done = img => { if (disposed) return; label.material.map?.dispose(); label.material.map = (concept ? conceptLabel : labelTexture)(img, state.name, state.sub, state.colour, state.design.clearance); label.material.needsUpdate = true; };
     if (!state.artUrl) { done(null); return; }
     const img = new Image();
     img.onload = () => { if (artKey === key) done(img); };
@@ -456,8 +524,17 @@ function makeCartridge() {
     },
     dispose() {
       disposed = true; artKey = null;
-      dispose(); bodyMat.dispose(); label.material.map?.dispose(); label.material.dispose();
-      if (sparkles) { sparkles.geometry.dispose(); sparkles.material.dispose(); }
+      const geometries = new Set(), materials = new Set(), maps = new Set();
+      group.traverse(o => {
+        if (o.geometry) geometries.add(o.geometry);
+        if (o.material) for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+          materials.add(m);
+          if (m.map && m.map !== spriteTex()) maps.add(m.map);
+        }
+      });
+      // The unused baseline rim is not attached to the revised shell.
+      geometries.add(rim.geometry);
+      geometries.forEach(g => g.dispose()); maps.forEach(t => t.dispose()); materials.forEach(m => m.dispose());
     },
   };
 }
@@ -702,3 +779,106 @@ export function mountRack(canvas, handlers = {}) {
   return api;
 }
 
+
+function roundedLabelGeometry() {
+ const geo = new THREE.ShapeGeometry(roundedRect(LABEL.w,LABEL.h,.055));
+ const pos=geo.attributes.position, uv=geo.attributes.uv;
+ for(let i=0;i<pos.count;i++)uv.setXY(i,pos.getX(i)/LABEL.w+.5,pos.getY(i)/LABEL.h+.5);
+ return geo;
+}
+function conceptLabel(art,name,sub,colour,clearance) {
+ const c=document.createElement('canvas');c.width=768;c.height=Math.round(768*LABEL.h/LABEL.w);const g=c.getContext('2d'),h=c.height;
+ g.fillStyle='#0d1117';g.fillRect(0,0,768,h);
+ if(art){const scale=Math.max(768/art.width,h/art.height);g.drawImage(art,(768-art.width*scale)/2,(h-art.height*scale)/2,art.width*scale,art.height*scale);}
+ const fade=g.createLinearGradient(0,h*.53,0,h);fade.addColorStop(0,'#080a0e00');fade.addColorStop(.6,'#080a0ee8');fade.addColorStop(1,'#080a0e');g.fillStyle=fade;g.fillRect(0,0,768,h);
+ if(CLEARANCE[clearance]){g.fillStyle=CLEARANCE[clearance];g.fillRect(0,0,768,46);g.fillStyle='#10141b';g.font='600 21px monospace';g.fillText(clearance.toUpperCase(),32,31);}
+ g.fillStyle=colour;g.fillRect(36,h-154,4,94);g.fillStyle='#f2f4f7';g.font='600 46px Georgia';
+ const words=(name||'Cartridge').split(' ');let line='',lines=[];
+ for(const w of words){const t=line?line+' '+w:w;if(g.measureText(t).width>640&&line){lines.push(line);line=w;}else line=t;}lines.push(line);
+ lines.slice(0,2).forEach((l,i)=>g.fillText(l,58,h-113+i*52));
+ g.fillStyle='#ced8df';g.font='18px monospace';g.fillText((sub||'').toUpperCase(),58,h-27);
+ const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;tex.anisotropy=8;return tex;
+}
+
+
+function detailText(text,w,h,colour) {
+ const c=document.createElement('canvas');c.width=1024;c.height=160;const g=c.getContext('2d');
+ g.fillStyle=colour;g.textAlign='center';g.textBaseline='middle';g.font='600 100px monospace';g.fillText(text,512,80,1000);
+ const texture=new THREE.CanvasTexture(c);texture.colorSpace=THREE.SRGBColorSpace;
+ return new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshStandardMaterial({map:texture,transparent:true,depthWrite:false,roughness:.8,polygonOffset:true,polygonOffsetFactor:-1}));
+}
+function addBoardDetails(group) {
+ const copper=new THREE.LineBasicMaterial({color:0x9a9453}),silver=new THREE.MeshStandardMaterial({color:0xaeb5af,metalness:.85,roughness:.3});
+ const boardZ=-.023;
+ // Routed copper paths with 45-degree corners, ending at small plated vias.
+ for(let i=0;i<16;i++){
+   const x=-.79+i*.105,target=-.73+(i%8)*.20,y=-.75+(i%5)*.27;
+   const pts=[new THREE.Vector3(x,-1.53,boardZ),new THREE.Vector3(x,-1.03,boardZ),new THREE.Vector3(target,y-.14,boardZ),new THREE.Vector3(target,y,boardZ)];
+   group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),copper));
+   const via=new THREE.Mesh(new THREE.RingGeometry(.011,.022,12),silver);via.position.set(target,y,boardZ+.001);group.add(via);
+ }
+ const chips=[[-.55,.55,.9,.7,'LIB-07'],[.5,.35,.5,.5,'ROM'],[-.2,-.5,1.1,.35,'ARCHIVE'],[.6,-.6,.3,.3,'CTRL']];
+ for(const [x,y,w,h,name] of chips){
+  for(const side of [-1,1])for(let i=0;i<8;i++){
+   const pin=new THREE.Mesh(new THREE.BoxGeometry(.075,.027,.019),silver);pin.position.set(x+side*(w/2+.026),y-h*.4+i*h*.8/7,-.012);group.add(pin);
+  }
+  const text=detailText(name,w*.78,Math.min(.10,h*.25),'#b8beb4');text.position.set(x,y,.016);group.add(text);
+  const dot=new THREE.Mesh(new THREE.CircleGeometry(.018,12),new THREE.MeshBasicMaterial({color:0x77837d}));dot.position.set(x-w*.34,y+h*.30,.017);group.add(dot);
+ }
+ for(let i=0;i<7;i++){
+  const x=-.80+i*.25,y=1.09;
+  const resistor=new THREE.Mesh(new THREE.BoxGeometry(.10,.052,.035),new THREE.MeshStandardMaterial({color:0x8a724e,roughness:.75}));resistor.position.set(x,y,-.005);group.add(resistor);
+  for(const side of [-1,1]){const cap=new THREE.Mesh(new THREE.BoxGeometry(.024,.056,.037),silver);cap.position.set(x+side*.052,y,-.005);group.add(cap);}
+ }
+ const silk=detailText('LIBRARY PCB / R2',1.1,.075,'#d4debd');silk.position.set(0,-1.25,-.022);group.add(silk);
+}
+
+// Selective foil: retain ink, metallize fine art lines and a narrow border.
+function refinedLabelSurface(material) {
+ const u={socketFinish:{value:0},socketFinishStrength:{value:.65}};
+ surfaceShader(material,'label-refined',u,`
+ uniform float socketFinish, socketFinishStrength;
+ `,`
+ vec2 uv = vSocketUv;
+ float grain = socketHash(floor(uv * vec2(768.0, 676.0)));
+ float grainAA = 1.0-smoothstep(.5,2.0,max(length(dFdx(uv*768.0)),length(dFdy(uv*676.0))));
+ roughnessFactor = clamp(roughnessFactor + (grain-.5)*.07*grainAA, .045, 1.0);
+ if(socketFinish > 1.5) {
+   vec3 view=normalize(vSocketView);
+   float facing=clamp(dot(normal,normalize(vViewPosition)),0.0,1.0);
+   float angle=atan(view.x,max(abs(view.z),.001));
+   float zone=smoothstep(.29,.36,uv.y)*(1.0-smoothstep(.89,.915,uv.y));
+   float luma=dot(diffuseColor.rgb,vec3(.299,.587,.114));
+   float lineMask=smoothstep(.075,.28,luma);
+   float edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+   float border=smoothstep(.014,.019,edge)*(1.0-smoothstep(.024,.030,edge));
+   float mask=max(lineMask*zone,border*zone)*socketFinishStrength;
+   float phase=angle*8.0+view.y*4.0+(1.0-facing)*3.0;
+   vec3 foil=vec3(.8);
+   float foilRoughness=.15;
+   if(socketFinish < 2.5) {
+     // Embossed radial diffraction follows the printed concentric artwork.
+     phase += length((uv-vec2(.5,.59))*vec2(1.0,.88))*19.0;
+     foil=.5+.5*cos(phase+vec3(0.0,2.094,4.188));
+     foil=mix(vec3(.74),foil,.70);
+   } else if(socketFinish < 3.5) {
+     // Larger directional facets, distinct from the flowing holo sheen.
+     vec2 cell=floor(uv*vec2(18.0,16.0));
+     float facet=socketHash(cell);
+     phase+=(uv.x+uv.y)*25.0+facet*1.4;
+     foil=.5+.5*cos(phase+vec3(0.0,2.094,4.188));
+     foil=mix(vec3(.72),foil,.80);
+     foilRoughness=.11;
+   } else if(socketFinish < 4.5) {
+     foil=vec3(1.0,.66,.19);
+     foilRoughness=.20;
+   } else {
+     foil=vec3(.82,.87,.94);
+     foilRoughness=.085;
+   }
+   diffuseColor.rgb=mix(diffuseColor.rgb,foil,mask);
+   metalnessFactor=mix(metalnessFactor,1.0,mask);
+   roughnessFactor=mix(roughnessFactor,foilRoughness,mask);
+ }
+ `);return u;
+}

@@ -1046,3 +1046,13 @@ note in the margin says *held*, so the answer shows which evidence was chosen an
 found. A tray under the composer lists what is in hand across tabs and follow-ups. One
 bug on the way: titles with quotes broke an inline handler that inlined them; the
 button carries data attributes now.
+
+**The cartridge, remade (contribution).** A second pass by GPT Astra on
+`web/cartridge3d.js`: a molded-shell construction with two rim halves and an assembly
+gap closed by a recessed tongue, a continuous molded floor under the label pocket and
+grip depressions, the label as a rounded pocket with its own texture (a fade under the
+wordmark, the name wrapped), level pips labelled Catalogue / Readings / Full, lower
+fasteners in real openings with bezels and a cross recess, a recessed rear service
+panel with engraved marks, and traces and parts on the board so a clear shell has
+something to show. Reviewed: nothing fetched, the design contract untouched, disposal
+covers the new geometry. It deploys to the hosted demo on push like any UI change.

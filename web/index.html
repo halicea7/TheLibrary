@@ -827,7 +827,7 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
   // Hosted demo: on GitHub Pages (or with ?demo) a stand-in for the server loads before
   // the page's own script, answering every /api call with placeholder material. Nothing
   // else about the page changes, so the demo is always the current UI.
-  if (/\.github\.io$/.test(location.hostname) || /[?&]demo\b/.test(location.search)) document.write('<script src="./demo.js"><\/script>');
+  if (/\.github\.io$/.test(location.hostname) || /[?&]demo\b/.test(location.search)) document.write('<script src="./demo.js?t=' + Date.now() + '"><\/script>');  // never a stale demo behind the CDN
 </script>
 <script>
 const $ = s => document.querySelector(s);

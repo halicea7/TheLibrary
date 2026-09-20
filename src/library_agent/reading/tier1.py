@@ -49,6 +49,7 @@ class Tier1Result:
     sections_skipped: int
     categories: list[str] = field(default_factory=list)
     orientation: str = ""
+    figures_described: int = 0
     reembedded_chunks: int = 0
 
 
@@ -383,6 +384,17 @@ async def run_tier1(
         await db.execute(update(Document).where(Document.id == doc.id).values(tier=1))
         await db.flush()
 
+        # The figures, read by the vision model into passages. Its own failure is not
+        # the reading's: a paper without its figures described is still read.
+        try:
+            from library_agent.reading.figures import describe_figures
+
+            fr = await describe_figures(db, doc.id, client=c, gate=gate)
+            figures_described = fr.described
+        except Exception:
+            log.warning("figure pass failed for %s", doc.title[:40], exc_info=True)
+            figures_described = 0
+
         return Tier1Result(
             document_id=doc.id,
             title=doc.title,
@@ -391,6 +403,7 @@ async def run_tier1(
             categories=[c.name for c in cats],
             orientation=one_liner,
             reembedded_chunks=reembedded,
+            figures_described=figures_described,
         )
     finally:
         if own:

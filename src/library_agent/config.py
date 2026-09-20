@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # retrieval across the corpus. Pin one; artifact.model records it either way.
     reader_model: str = "qwen3:30b-a3b"
     deep_reader_model: str = "qwen3:30b-a3b"
+    # Reads a PDF's figures into caption passages at Tier 1. Empty turns it off.
+    vision_model: str = "qwen2.5vl:latest"
 
     # Chat model is switchable per conversation. Both options are ~19GB and cannot be
     # co-resident on a 48GB machine, so switching costs a ~8-10s model swap.

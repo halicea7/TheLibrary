@@ -536,6 +536,8 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .page figure.wide img { cursor:zoom-out; }
 .page figure figcaption { font:italic 12.5px/1.5 var(--serif); color:var(--dim); margin-top:8px; }
 .page figure figcaption small { font:10.5px/1 var(--mono); font-style:normal; color:var(--faint); margin-left:6px; }
+/* What the vision model saw: set apart from the page's own caption. */
+.page figure figcaption .seen { display:block; margin-top:6px; padding-top:6px; border-top:1px solid var(--rule-soft); font:12.5px/1.5 var(--sans); font-style:normal; color:var(--dim); }
 .page figure.wide { grid-column:1 / -1; }
 .page .gloss span {
   display:block; font:12px/1.5 var(--serif); color:var(--dim);
@@ -2059,7 +2061,7 @@ async function openVolume(id) {
   };
   const figHtml = f => `<figure onclick="this.classList.toggle('wide')">
       <img src="/api/documents/${d.id}/figures/${f.n}.png" width="${f.width}" height="${f.height}" loading="lazy" alt="${esc(f.caption || 'Figure on page ' + f.page)}">
-      <figcaption>${f.caption ? esc(f.caption) : 'Figure'}<small>p.${f.page}</small></figcaption></figure>`;
+      <figcaption>${f.caption ? esc(f.caption) : 'Figure'}<small>p.${f.page}</small>${f.description ? `<span class="seen">${esc(f.description)}</span>` : ''}</figcaption></figure>`;
   const body = d.sections.map((s, i) => {
     let h = s.title
       ? `<h3 id="sec-${i}">${esc(s.title)}${s.page_start ? `<small>p.${s.page_start}</small>` : ''}</h3>`

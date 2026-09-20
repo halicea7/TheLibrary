@@ -184,6 +184,9 @@ class Chunk(Base):
     )
     order_index: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
+    # "text" is a passage of the document; "figure" is the vision model's reading of a
+    # figure, kept as a passage so retrieval and citation treat it like one.
+    kind: Mapped[str] = mapped_column(String(16), default="text", server_default="text")
     # "Title › section path › orientation line" — built without an LLM call.
     context_prefix: Mapped[str] = mapped_column(Text, default="")
     token_count: Mapped[int] = mapped_column(Integer, default=0)

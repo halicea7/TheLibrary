@@ -21,7 +21,7 @@ from library_agent.db.models import (
 )
 from library_agent.db.session import SessionDep
 from library_agent.library.shelving import expand_category_ids
-from library_agent.worker.tasks import enqueue_read, enqueue_reshelve
+from library_agent.worker.tasks import enqueue_figures, enqueue_read, enqueue_reshelve
 
 router = APIRouter(prefix="/api", tags=["reading"])
 
@@ -83,12 +83,18 @@ async def start_backfill(
     cartridge_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     only_tier: int | None = None,
+    limit: int | None = None,
 ) -> dict[str, int]:
     """Queue everything below `tier` -- optionally only what is in one cartridge or on one
     shelf, and optionally only volumes currently at `only_tier` (so "annotate the read"
     does not also read the unread). Volumes with a job already queued or running are
-    skipped, so pressing the button twice queues nothing twice."""
-    q = select(Document.id).where(Document.tier < tier, Document.status == "ready")
+    skipped, so pressing the button twice queues nothing twice. `limit` takes a batch
+    of that many (oldest first), for feeding a thousand-volume read in slices."""
+    q = (
+        select(Document.id)
+        .where(Document.tier < tier, Document.status == "ready")
+        .order_by(Document.added_at)
+    )
     if only_tier is not None:
         q = q.where(Document.tier == only_tier)
     if cartridge_id:
@@ -119,6 +125,8 @@ async def start_backfill(
         ).scalars()
     )
     ids = [d for d in (await db.execute(q)).scalars() if d not in busy]
+    if limit:
+        ids = ids[:limit]
     redis = await _redis()
     try:
         for did in ids:
@@ -195,6 +203,58 @@ async def list_categories(db: SessionDep) -> list[CategoryOut]:
         if c.parent_id is None and any(x.parent_id == c.id for x in out.values()):
             c.documents = c.shelved
     return sorted(out.values(), key=lambda c: (-c.documents, c.name))
+
+
+@router.post("/read/figures")
+async def start_figures(
+    db: SessionDep,
+    cartridge_id: uuid.UUID | None = None,
+    category_id: uuid.UUID | None = None,
+    limit: int | None = None,
+) -> dict[str, int]:
+    """Queue the vision pass for read PDFs that have no figure passages yet -- the
+    volumes read before the pass existed. New reads get it at Tier 1 anyway."""
+    from library_agent.db.models import Chunk
+
+    has_figures = select(Chunk.document_id).where(Chunk.kind == "figure")
+    q = (
+        select(Document.id)
+        .where(
+            Document.tier >= 1,
+            Document.status == "ready",
+            Document.source_path.ilike("%.pdf"),
+            Document.id.not_in(has_figures),
+        )
+        .order_by(Document.added_at)
+    )
+    if cartridge_id:
+        q = q.where(
+            Document.id.in_(
+                select(CartridgeDocument.document_id).where(
+                    CartridgeDocument.cartridge_id == cartridge_id
+                )
+            )
+        )
+    if category_id:
+        ids_ = await expand_category_ids(db, [category_id])
+        q = q.where(Document.shelf_id.in_(ids_))
+    busy = set(
+        (
+            await db.execute(
+                select(Job.document_id).where(Job.state.in_(["queued", "running", "yielded"]))
+            )
+        ).scalars()
+    )
+    ids = [d for d in (await db.execute(q)).scalars() if d not in busy]
+    if limit:
+        ids = ids[:limit]
+    redis = await _redis()
+    try:
+        for did in ids:
+            await enqueue_figures(redis, did)
+    finally:
+        await redis.aclose()
+    return {"queued": len(ids)}
 
 
 @router.post("/shelf/reshelve")

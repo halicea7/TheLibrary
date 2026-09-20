@@ -69,7 +69,7 @@ Background work shows under **In hand** in the left column, with a bar — a rea
   <img src="docs/threads.jpg" alt="Threads in the day room. Where sources disagree: each conflict as two quoted claims side by side with their shared words lit, the explanation beneath; the nebula behind as a chart of coloured inks." width="900"/>
 </p>
 
-**Reading** — click a volume and it opens as a page: sections in order, the section summary as an italic lead, reflections in the margin beside their passage, and the **figures** of a PDF set into the section whose pages hold them, each with its caption from the page (click one to widen it). Figures are found from the original's drawings and images and rendered on first view — nothing extracted at ingest, nothing added to the database; the renders are a cache that goes with the document. Images referenced from a Markdown volume are not fetched; they stay as their alt text, since the file was shelved, not the site it came from.
+**Reading** — click a volume and it opens as a page: sections in order, the section summary as an italic lead, reflections in the margin beside their passage, and the **figures** of a PDF set into the section whose pages hold them, each with its caption from the page (click one to widen it). Figures are found from the original's drawings and images and rendered on first view — nothing extracted at ingest; the renders are a cache that goes with the document. At Tier 1 a **vision model** (`qwen2.5vl`) reads each figure with its caption and writes what it sees as a passage of its own — so Find lights it, Ask cites it by page (*as Figure 3 shows [2]*), and it travels in a cartridge; the reader shows that reading under the figure, set apart from the page's own caption. `POST /api/read/figures` queues the pass for PDFs read before it existed; `LIBRARY_VISION_MODEL=` empty turns it off. Images referenced from a Markdown volume are not fetched; they stay as their alt text, since the file was shelved, not the site it came from.
 
 <p align="center">
   <img src="docs/reader.jpg" alt="Reading BERT. The passage about WordPiece embeddings with the library's reflection beside it in the margin, and Figure 1 set into the section with its caption from the page." width="900"/>
@@ -190,6 +190,7 @@ A team's documentation comes in as its own cartridge (`./library import ~/docs -
 | Chat — technical | `huihui_ai/qwen3-coder-abliterated` | Per-conversation toggle |
 | Embeddings | `bge-m3` | 1024-dim, stored as `halfvec` |
 | Reranker | `BAAI/bge-reranker-v2-m3` | In-process torch; the one thing not served by Ollama |
+| Figures | `qwen2.5vl` | Reads each figure into a passage at Tier 1; optional |
 
 Ollama can be local or remote — every model call follows `LIBRARY_OLLAMA_URL`, which defaults to `localhost:11434`, so an SSH tunnel to a GPU box needs no configuration at all.
 

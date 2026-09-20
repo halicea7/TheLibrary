@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import tempfile
 import time
@@ -364,8 +365,16 @@ async def read_document(document_id: uuid.UUID, db: SessionDep) -> dict:
             {"text": a.text, "cartridge": carts.get(a.cartridge_id) if a.cartridge_id else None}
         )
 
+    # Figure passages are the vision model's readings; they belong under the figure,
+    # not in the running text.
+    figure_text = {}
     by_section: dict[uuid.UUID | None, list[Chunk]] = {}
     for c in chunks:
+        if c.kind == "figure":
+            m = re.match(r"Figure (\d+),", c.text)
+            if m:
+                figure_text[int(m.group(1))] = c.text.split("\n\n", 1)[-1]
+            continue
         by_section.setdefault(c.section_id, []).append(c)
 
     out_sections = []
@@ -435,7 +444,7 @@ async def read_document(document_id: uuid.UUID, db: SessionDep) -> dict:
         "page_count": doc.page_count,
         "sections": out_sections,
         # Figures are read from the original, so a readings-only volume has none.
-        "figures": [asdict(f) for f in _figures(doc)],
+        "figures": [{**asdict(f), "description": figure_text.get(f.n)} for f in _figures(doc)],
     }
 
 

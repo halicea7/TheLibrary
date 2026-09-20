@@ -263,6 +263,36 @@ async def schedule_library_rebuild(redis) -> bool:
     return True
 
 
+async def describe_figures_job(ctx: dict, document_id: str, job_id: str) -> dict[str, Any]:
+    """The vision pass alone, for PDFs read before it existed."""
+    from library_agent.reading.figures import describe_figures
+
+    did, jid = uuid.UUID(document_id), uuid.UUID(job_id)
+    await _set_job(jid, state=JobState.RUNNING)
+    try:
+        async with Ollama() as client, session_scope() as db:
+            r = await describe_figures(db, did, client=client, gate=_make_gate(jid))
+        await _set_job(jid, state=JobState.DONE, yielded_reason=None)
+        return {"document_id": document_id, "figures": r.figures, "described": r.described}
+    except Exception as exc:
+        await record_exception(
+            exc, source="worker", context={"job": "figures", "document": document_id}
+        )
+        log.exception("figure pass failed")
+        await _set_job(jid, state=JobState.ERROR, error=str(exc)[:2000])
+        raise
+
+
+async def enqueue_figures(redis, document_id: uuid.UUID) -> uuid.UUID:
+    async with session_scope() as db:
+        job = Job(kind="figures", document_id=document_id, state=JobState.QUEUED)
+        db.add(job)
+        await db.flush()
+        job_id = job.id
+    await redis.enqueue_job("describe_figures_job", str(document_id), str(job_id))
+    return job_id
+
+
 async def enqueue_read(redis, document_id: uuid.UUID, *, tier: int = 1) -> uuid.UUID:
     """Create the Job row first so the UI has something to poll immediately."""
     async with session_scope() as db:
@@ -290,7 +320,13 @@ async def _startup(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    functions: ClassVar[list] = [read_document, backfill, build_library_layer, reshelve_library]
+    functions: ClassVar[list] = [
+        read_document,
+        backfill,
+        build_library_layer,
+        reshelve_library,
+        describe_figures_job,
+    ]
     on_startup = _startup
     redis_settings = RedisSettings.from_dsn(settings().redis_url)
     job_timeout = JOB_TIMEOUT

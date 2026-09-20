@@ -898,3 +898,21 @@ restricted from the panel, and `resolve_selection` excluded every volume introdu
 restricted cartridge -- a rule written for cartridges that arrive. A cartridge made here
 is the maker's own; the mark is for whoever receives it. The exclusion now applies only
 to cartridges not made on this machine. 391 pages, 387 read, 15 MB, version 3.
+
+
+## Follow-on: the model sees the figures
+
+`qwen2.5vl` was pulled on the GH. `reading/figures.py` sends each figure the extractor
+already finds (rendered at 2x) to it with the page's caption and asks for one plain
+paragraph, at most 120 words: what it shows, the axes, the trend, the numbers. The
+answer becomes a chunk of kind `figure` -- a new column, default `text` -- with the page
+it sits on, filed under the section that holds it, sorted after every text chunk, and
+embedded like any passage. So nothing downstream changes: Find lights it, Ask cites it by
+page, a cartridge ships it (`kind` joined the chunk columns), and the reader keeps it out
+of the running text and shows it under the figure instead, below a rule, in the sans so
+it does not read as the page's own caption. Five seconds a figure; BERT's five took ten.
+On "how is BERT fine-tuned on different tasks, diagram", Figure 1's passage was the
+third hit. Runs at the end of Tier 1 for PDFs, its failure never the reading's; a
+`figures` job and `POST /api/read/figures` backfill volumes read before it existed.
+The four RTS pages the model refused twice read fine when called by hand, so they were
+queued a third time; HackTricks is being fed to the worker in batches of 150.

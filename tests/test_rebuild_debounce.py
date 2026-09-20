@@ -5,7 +5,7 @@ from library_agent.worker import tasks
 
 class FakeRedis:
     def __init__(self, started=None):
-        self.kv = {} if started is None else {tasks.REBUILD_STARTED_KEY: str(started)}
+        self.kv = {} if started is None else {tasks.REBUILD_DONE_KEY: str(started)}
         self.enqueued = []
 
     async def get(self, k):

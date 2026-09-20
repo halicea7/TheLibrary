@@ -183,7 +183,7 @@ async def judge_cluster(
 
 
 async def find_contradictions(
-    db: AsyncSession, *, client: Ollama | None = None, progress=None
+    db: AsyncSession, *, client: Ollama | None = None, progress=None, gate=None
 ) -> dict[str, int]:
     cfg = settings()
     rows = (
@@ -216,6 +216,8 @@ async def find_contradictions(
     found = 0
     try:
         for n, row in enumerate(rows):
+            if gate:
+                await gate()
             claims = row.claims or []
             if len(claims) < 2:
                 continue

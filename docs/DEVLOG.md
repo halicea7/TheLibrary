@@ -951,3 +951,15 @@ surface itself catches light in points. The flakes had been invisible all along 
 reason worth writing down: three.js draws only opaque objects into the buffer a
 transmissive shell looks through, so additive, transparent points inside the body never
 appeared. They are opaque points now, half of them just under the front face.
+
+**Pause.** One Redis key, `library:paused`, checked by the same gate that already
+steps aside for chat: between sections of a read, between clusters of a rebuild (the
+library passes now take the gate too), and at the door of every job before it starts.
+The job row says *paused* while it waits; a rebuild that finds the flag at its door
+defers itself two minutes rather than hold a row open. `POST /api/jobs/pause?paused=`,
+`GET /api/jobs/state`, and the *In hand* header grows the control -- amber *resume*
+while paused. Found on the way: the "already ran" check for duplicate rebuilds was
+keyed on *start* time, so a rebuild cut off by a worker restart skipped its own retry;
+it is keyed on completion now. And the batch feeder tops the queue up at ten remaining
+instead of letting it drain, so a batched import gets one rebuild at the end rather than
+one per batch.

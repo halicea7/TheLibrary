@@ -32,6 +32,22 @@ class TestDesign:
         assert clamp_design({"material": "lava"})["material"] == DEFAULT_DESIGN["material"]
 
 
+    @pytest.mark.parametrize("finish", ["paper", "gloss", "holo", "prism", "gold", "chrome"])
+    def test_label_finish_survives_serialization(self, finish):
+        design = clamp_design({"material": "smoke", "labelFinish": finish, "labelFinishStrength": .37})
+        assert clamp_design(json.loads(json.dumps(design))) == design
+        assert design["labelFinish"] == finish
+        assert design["labelFinishStrength"] == .37
+        assert design["material"] == "smoke"
+
+    def test_label_finish_defaults_and_limits(self):
+        assert clamp_design({})["labelFinish"] == "paper"
+        assert clamp_design({"labelFinish": "unknown"})["labelFinish"] == "paper"
+        assert clamp_design({"labelFinish": "HOLO"})["labelFinish"] == "holo"
+        for value, expected in [(-1, 0), (2, 1), ("0.4", .4), (None, .65), ("bad", .65), (float("nan"), .65), (float("inf"), .65)]:
+            assert clamp_design({"labelFinishStrength": value})["labelFinishStrength"] == expected
+
+
 class TestArt:
     def test_generated_label_is_a_png(self):
         png = render_constellation([(0.1, 0.2), (0.8, 0.7), (0.5, 0.5)], "#4f7a3a", size=256)

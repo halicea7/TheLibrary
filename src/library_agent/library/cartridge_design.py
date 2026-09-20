@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import io
+import math
 import re
 import uuid
 from pathlib import Path
@@ -28,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from library_agent.config import settings
 
 MATERIALS = ("solid", "clear", "frosted", "smoke", "glitter", "metallic")
+LABEL_FINISHES = ("paper", "gloss", "holo", "prism", "gold", "chrome")
 # Clearance is a marking, sealed in like the rest of the design: it says how the maker
 # meant the cartridge to travel. `restricted` is also enforced at one point -- the
 # receiving library will not re-export a restricted cartridge's volumes into another.
@@ -41,6 +43,8 @@ DEFAULT_DESIGN: dict[str, Any] = {
     "opacity": 0.35,  # 0 clear .. 1 solid (matters for clear/smoke/glitter)
     "sparkle": 0.5,  # glitter density
     "roughness": 0.25,
+    "labelFinish": "paper",
+    "labelFinishStrength": 0.65,
     "art": "generated",  # generated | upload
     "clearance": "open",
 }
@@ -56,6 +60,14 @@ def clamp_design(raw: Any) -> dict[str, Any]:
                 d[k] = round(min(1.0, max(0.0, float(raw.get(k, d[k])))), 3)
             except (TypeError, ValueError):
                 pass
+        finish = str(raw.get("labelFinish") or d["labelFinish"]).lower()
+        d["labelFinish"] = finish if finish in LABEL_FINISHES else d["labelFinish"]
+        try:
+            strength = float(raw.get("labelFinishStrength", d["labelFinishStrength"]))
+            if math.isfinite(strength):
+                d["labelFinishStrength"] = round(min(1.0, max(0.0, strength)), 3)
+        except (TypeError, ValueError, OverflowError):
+            pass
         d["art"] = "upload" if raw.get("art") == "upload" else "generated"
         c = str(raw.get("clearance") or d["clearance"]).lower()
         d["clearance"] = c if c in CLEARANCES else d["clearance"]

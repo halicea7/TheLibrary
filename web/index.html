@@ -749,7 +749,7 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
     <div class="notice" id="notice" role="status"></div>
 
     <div id="jobs-wrap" hidden>
-      <p class="label spaced">In hand</p>
+      <div class="shelf-h" style="padding:0"><p class="label spaced" style="margin-bottom:0">In hand</p><button class="linkish" id="pause" onclick="pauseJobs()" title="Pause background work; the piece in progress finishes, nothing new starts">pause</button></div>
       <div id="jobs"></div>
     </div>
 
@@ -1576,12 +1576,21 @@ $('#drop').addEventListener('drop', async e => {
 });
 
 /* ── jobs ─────────────────────────────────────────────────────────────── */
+let jobsPaused = false;
+async function pauseJobs() {
+  jobsPaused = !jobsPaused;
+  await fetch('/api/jobs/pause?paused=' + jobsPaused, { method: 'POST' });
+  say(jobsPaused ? 'Background work is paused. Whatever is mid-piece finishes; nothing new starts until you resume.' : 'Background work resumed.');
+  loadJobs();
+}
 async function loadJobs() {
-  let jobs = [];
-  try { jobs = await (await fetch('/api/jobs?limit=600')).json(); } catch { return; }
+  let jobs = [], st = {};
+  try { [jobs, st] = await Promise.all([(await fetch('/api/jobs?limit=600')).json(), (await fetch('/api/jobs/state')).json()]); } catch { return; }
+  jobsPaused = !!st.paused;
+  const pb = $('#pause'); if (pb) { pb.textContent = jobsPaused ? 'resume' : 'pause'; pb.style.color = jobsPaused ? 'var(--amber)' : ''; }
   const live = jobs.filter(j => ['queued','running','yielded'].includes(j.state));
-  $('#jobs-wrap').hidden = !live.length;
-  if (!live.length) { if (loadJobs.had) { loadShelf(); holdings(); loadSubjects(); loadJobs.had = false; } return; }
+  $('#jobs-wrap').hidden = !live.length && !jobsPaused;
+  if (!live.length) { $('#jobs').innerHTML = jobsPaused ? '<div class="job paused">paused — nothing queued</div>' : ''; if (loadJobs.had) { loadShelf(); holdings(); loadSubjects(); loadJobs.had = false; } return; }
   loadJobs.had = true;
   const active = live.filter(j => j.state !== 'queued');
   const waiting = live.length - active.length;
@@ -1590,7 +1599,7 @@ async function loadJobs() {
     const paused = j.state === 'yielded';
     return `<div class="job ${paused ? 'paused' : ''}">
       ${j.document_title ? esc(j.document_title.slice(0,30)) + '<br>' : ''}
-      ${paused ? 'paused — you are talking' : j.kind === 'library' ? `rebuilding threads · ${esc(j.yielded_reason || '')}${j.progress_total > 1 ? ` ${j.progress_current} of ${j.progress_total}` : ''}` : j.kind === 'reshelve' ? `shelving · ${j.progress_current} of ${j.progress_total}` : `${j.kind === 'tier2' ? 'annotating' : 'reading'} · section ${j.progress_current} of ${j.progress_total}`}
+      ${paused ? (j.yielded_reason === 'paused' ? 'paused' : 'paused — you are talking') : j.kind === 'library' ? `rebuilding threads · ${esc(j.yielded_reason || '')}${j.progress_total > 1 ? ` ${j.progress_current} of ${j.progress_total}` : ''}` : j.kind === 'reshelve' ? `shelving · ${j.progress_current} of ${j.progress_total}` : `${j.kind === 'tier2' ? 'annotating' : 'reading'} · section ${j.progress_current} of ${j.progress_total}`}
       <span class="bar"><i style="width:${pct}%"></i></span>
     </div>`;
   }).join('') + (waiting ? `<div class="job">${waiting} waiting</div>` : '');
@@ -2386,16 +2395,23 @@ const GLYPHS = {
   leaf:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 19C5 9 11 4 20 4c0 9-5 15-15 15z"/><path d="M5 19l8-8"/></svg>',
 };
 const make = { name:'', colour:null, glyph:'book', level:'readings', timer:null,
-  design: { material:'clear', tint:.55, opacity:.35, sparkle:.5, roughness:.25, art:'generated', clearance:'open' }, artUrl:null, artData:null, points:[], stage:null };
+  design: { material:'clear', tint:.55, opacity:.35, sparkle:.5, roughness:.25, labelFinish:'paper', labelFinishStrength:.65, art:'generated', clearance:'open' }, artUrl:null, artData:null, points:[], stage:null };
 const CLEARANCES = [['open','Open','travels freely'],['internal','Internal','for your own people'],['confidential','Confidential','handle with care'],['restricted','Restricted','a receiving library will not re-export its volumes']];
 const MATERIALS = [['solid','Solid'],['clear','Clear'],['frosted','Frosted'],['smoke','Smoke'],['glitter','Glitter'],['metallic','Metallic']];
+const LABEL_FINISHES = [['paper','Paper'],['gloss','Gloss'],['holo','Holographic'],['prism','Prism'],['gold','Gold'],['chrome','Chrome']];
+function chooseLabelFinish(value) {
+  make.design.labelFinish = value;
+  document.querySelectorAll('[data-label-finish]').forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.labelFinish === value)));
+  $('#mk-foil-strength').hidden = ['paper', 'gloss'].includes(value);
+  stageUpdate();
+}
 function openMake() { make.editing = null; $('#tab-make').hidden = false; setView('make'); }
 // A cartridge made on this machine is the maker's to change: the panel opens filled
 // from it, saves back to the rack, and exports it as itself (same id, next version).
 async function openEdit(id) {
   const c = rackIndex[id]; if (!c || !c.editable) return;
   make.editing = id; make.name = c.name; make.colour = c.colour; make.level = c.level || 'full';
-  make.design = { ...make.design, ...(c.design || {}) };
+  make.design = { ...make.design, labelFinish:'paper', labelFinishStrength:.65, ...(c.design || {}) };
   make.artData = null; make.artUrl = null;
   if (c.has_art && make.design.art === 'upload') {
     try {
@@ -2415,8 +2431,16 @@ async function saveEdit() {
   try {
     const r = await fetch(`/api/cartridges/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) { say((await r.json()).detail || 'Could not save it.', true); return; }
+    const saved = await r.json();
     await loadRack(); rackUnder();
+    if ((make.design.labelFinish || 'paper') !== (saved.design?.labelFinish || 'paper') ||
+        (make.design.labelFinish !== 'paper' && make.design.labelFinishStrength !== undefined &&
+         Math.abs(make.design.labelFinishStrength - (saved.design?.labelFinishStrength ?? .65)) > .001)) {
+      say('The other changes were saved, but this running server does not yet retain label finishes. Restart the app when its current work is finished, then save this design again.', true);
+      return;
+    }
     say(`${make.name} is changed on the rack.`);
+    return true;
   } finally { btn.disabled = false; btn.textContent = 'save to the rack'; }
 }
 function renderMake(flip) {
@@ -2445,6 +2469,14 @@ function renderMake(flip) {
           <input type="range" min="0" max="1" step=".01" value="${make.design[k]}" oninput="make.design.${k}=+this.value; this.nextElementSibling.value=Math.round(this.value*100); stageUpdate()"/><output>${Math.round(make.design[k]*100)}</output></label>`).join('')}
       </div>
       <div class="locked">The design is sealed into the cartridge: it looks like this on every rack.</div></div></div>
+    <div class="row"><label>Label finish</label><div>
+      <div class="mats" role="group" aria-label="Label finish">${LABEL_FINISHES.map(([v, l]) =>
+        `<button type="button" data-label-finish="${v}" aria-pressed="${(make.design.labelFinish || 'paper') === v}" onclick="chooseLabelFinish('${v}')">${l}</button>`).join('')}</div>
+      <div class="dials" id="mk-foil-strength" ${['paper','gloss'].includes(make.design.labelFinish || 'paper') ? 'hidden' : ''}>
+        <label class="dial"><span>Foil strength</span><input aria-label="Foil strength" type="range" min="0" max="1" step=".01" value="${make.design.labelFinishStrength ?? .65}" oninput="make.design.labelFinishStrength=+this.value; this.nextElementSibling.value=Math.round(this.value*100); stageUpdate()"/><output>${Math.round((make.design.labelFinishStrength ?? .65)*100)}</output></label>
+      </div>
+      <div class="locked">Changes the printed label independently of the shell. Tilt the preview to see the foil catch the light.</div>
+    </div></div>
     <div class="row"><label>Clearance</label><div><div class="mats">${CLEARANCES.map(([v, l, d]) =>
       `<button aria-pressed="${make.design.clearance === v}" title="${d}" onclick="make.design.clearance='${v}'; renderMake(true)">${l}</button>`).join('')}</div>
       <div class="locked">${esc(CLEARANCES.find(x => x[0] === make.design.clearance)?.[2] || '')}. Printed on the label; sealed with the design.</div></div></div>
@@ -2530,7 +2562,7 @@ async function exportCartridge() {
   const sel = makeSelection();
   if (!sel.category_ids.length && !sel.cartridge_ids.length) sel.document_ids = await allDocumentIds();
   const body = { ...sel, name:make.name.trim(), colour:make.colour, icon_svg:GLYPHS[make.glyph], design:make.design, art: make.design.art === 'upload' ? make.artData : null, as_cartridge: make.editing || null };
-  if (make.editing) await saveEdit();
+  if (make.editing && !(await saveEdit())) return;
   $('#mk-go').disabled = true; $('#mk-go').textContent = 'making…';
   try {
     const r = await fetch('/api/cartridges/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });

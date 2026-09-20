@@ -13,6 +13,7 @@ from redis.asyncio import Redis
 
 from library_agent.config import settings
 
+PAUSED_KEY = "library:paused"  # set by hand from the UI: background work waits
 CHAT_ACTIVE_KEY = "library:llm:chat_active"
 LAST_CHAT_KEY = "library:llm:last_chat_ts"
 
@@ -40,6 +41,8 @@ async def mark_chat_done(r: Redis) -> None:
 
 async def reading_may_proceed(r: Redis) -> tuple[bool, str | None]:
     """Checked by the worker between units of work, never mid-call."""
+    if await r.exists(PAUSED_KEY):
+        return False, "paused"
     if await r.exists(CHAT_ACTIVE_KEY):
         return False, "chat_active"
     last = await r.get(LAST_CHAT_KEY)

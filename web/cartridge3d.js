@@ -81,18 +81,6 @@ const spriteTex = (() => {
     g.fillStyle = r; g.fillRect(0, 0, 64, 64); t = new THREE.CanvasTexture(c); return t;
   };
 })();
-// Glitter flakes: a field of hard specks for a roughness/normal-ish surface, so the
-// shell itself catches the light in points rather than as one smooth sheet.
-const flakeTex = (() => {
-  let t = null;
-  return () => {
-    if (t) return t;
-    const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
-    g.fillStyle = '#808080'; g.fillRect(0, 0, 512, 512);
-    for (let i = 0; i < 9000; i++) { const v = 40 + Math.random() * 215; g.fillStyle = `rgb(${v},${v},${v})`; const s = 1 + Math.random() * 2; g.fillRect(Math.random() * 512, Math.random() * 512, s, s); }
-    t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2.5, 3.5); return t;
-  };
-})();
 const shadowTex = (() => {
   let t = null;
   return () => {
@@ -138,10 +126,131 @@ function labelTexture(artImg, name, sub, colour, clearance) {
   return tex;
 }
 
+/* Socket-inspired behavioral port for Three r170. No external texture dependencies.
+ * References: casing_common, casing_metallic, frosted_glass, cartridge_casing,
+ * selectables/sticker. Physical transmission replaces Godot's screen blur.
+ */
+const unit = (value, fallback) => Number.isFinite(value) ? THREE.MathUtils.clamp(value, 0, 1) : fallback;
+const SHELLS = ['solid', 'clear', 'frosted', 'smoke', 'glitter', 'metallic'];
+const FINISHES = ['paper', 'gloss', 'holo', 'prism', 'gold', 'chrome'];
+const seededRandom = (seed = 137) => () => ((seed = Math.imul(seed, 1664525) + 1013904223 >>> 0) / 4294967296);
+
+// Explicit varyings: extrusion UVs are model units; label UVs are 0..1.
+// View direction transformed into object space keeps facets attached to the shell.
+const surfaceVertex = `
+varying vec2 vSocketUv;
+varying vec3 vSocketPosition;
+varying vec3 vSocketView;
+`;
+const surfaceFragment = `
+varying vec2 vSocketUv;
+varying vec3 vSocketPosition;
+varying vec3 vSocketView;
+float socketHash(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+`;
+function surfaceShader(material, key, uniforms, declarations, fragment) {
+  material.customProgramCacheKey = () => `library-socket-v1-${key}`;
+  material.onBeforeCompile = shader => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = surfaceVertex + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+      #include <begin_vertex>
+      vSocketUv = uv;
+      vSocketPosition = position;
+      vec3 socketEye = -(modelViewMatrix * vec4(position, 1.0)).xyz;
+      vSocketView = vec3(dot(modelViewMatrix[0].xyz, socketEye),
+                        dot(modelViewMatrix[1].xyz, socketEye),
+                        dot(modelViewMatrix[2].xyz, socketEye));
+    `);
+    shader.fragmentShader = surfaceFragment + declarations + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <lights_physical_fragment>',
+      fragment + '\n#include <lights_physical_fragment>');
+  };
+}
+function shellSurface(material) {
+  const u = {
+    socketRim: { value: 0 }, socketGrain: { value: 0 },
+    socketGlitter: { value: 0 }, socketTint: { value: new THREE.Color() },
+  };
+  surfaceShader(material, 'shell', u, `
+    uniform float socketRim, socketGrain, socketGlitter;
+    uniform vec3 socketTint;
+  `, `
+    float socketFacing = clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
+    float socketEdge = pow(1.0 - socketFacing, 4.0) * socketRim;
+    diffuseColor.rgb = mix(diffuseColor.rgb, socketTint, socketEdge);
+    // Neutral brightness variation preserves the chosen tint (Socket's luma contract).
+    float socketTexture = socketHash(floor(vSocketPosition.xy * 210.0));
+    float socketAA = 1.0 - smoothstep(0.5, 2.0,
+      max(length(dFdx(vSocketPosition.xy * 210.0)), length(dFdy(vSocketPosition.xy * 210.0))));
+    roughnessFactor = clamp(roughnessFactor + (socketTexture - 0.5) * socketGrain * socketAA, 0.025, 1.0);
+    if (socketGlitter > 0.0) {
+      vec2 cell = vSocketPosition.xy * 82.0;
+      vec2 id = floor(cell);
+      vec2 jitter = vec2(socketHash(id + 1.7), socketHash(id + 5.3)) - 0.5;
+      float dist = length(fract(cell) - 0.5 - jitter * 0.6);
+      float aa = max(fwidth(dist), 0.035);
+      float flake = 1.0 - smoothstep(max(0.0, 0.19 - aa), 0.19 + aa, dist);
+      flake *= step(socketHash(id + 17.13), socketGlitter * 0.65);
+      vec2 tilt = vec2(socketHash(id + 3.7), socketHash(id + 9.1)) * 2.0 - 1.0;
+      vec3 facet = normalize(vec3(tilt, sign(vSocketView.z)));
+      float spark = pow(max(dot(facet, normalize(vSocketView)), 0.0), 28.0);
+      // Suppress subpixel noise on the small rack cartridge.
+      float coverage = 1.0 - smoothstep(1.0, 3.0, max(length(dFdx(cell)), length(dFdy(cell))));
+      totalEmissiveRadiance += mix(vec3(1.0), socketTint, 0.2) * flake * spark * coverage * 1.8;
+      roughnessFactor = mix(roughnessFactor, 0.08, flake * 0.5);
+    }
+  `);
+  return u;
+}
+function labelSurface(material) {
+  const u = { socketFinish: { value: 0 }, socketFinishStrength: { value: .65 } };
+  surfaceShader(material, 'label', u, `
+    uniform float socketFinish, socketFinishStrength;
+  `, `
+    if (socketFinish > 1.5) {
+      vec2 uv = vSocketUv;
+      vec3 view = normalize(vSocketView);
+      float angle = atan(view.x, max(abs(view.z), 0.001));
+      float facing = clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
+      // Keep the lower title/subtitle band and upper clearance band as printed ink.
+      float area = smoothstep(0.30, 0.43, uv.y) * (1.0 - smoothstep(0.89, 0.915, uv.y));
+      float ink = 1.0 - smoothstep(0.60, 0.93, dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)));
+      float mask = area * ink * socketFinishStrength;
+      vec3 foil;
+      if (socketFinish < 3.5) {
+        float pattern = socketHash(floor(uv * vec2(110.0, 75.0)));
+        float phase = angle * 5.0 + view.y * 3.0 + (1.0 - facing) * 4.0;
+        if (socketFinish > 2.5) phase += (uv.x + uv.y) * 15.0;
+        else phase += pattern * 0.25;
+        foil = 0.5 + 0.5 * sin(vec3(phase + uv.x * 6.0, phase + uv.y * 4.0 + 2.0, phase + (uv.x + uv.y) * 5.0 + 4.0));
+        foil *= 0.94 + 0.06 * pattern;
+      } else if (socketFinish < 4.5) {
+        float shine = pow(0.5 + 0.5 * sin((uv.x - uv.y) * 12.0 + angle), 4.0);
+        foil = mix(vec3(1.0, 0.54, 0.065), vec3(1.0, 0.87, 0.45), shine);
+      } else {
+        foil = vec3(0.78, 0.84, 0.92);
+        // Chrome perimeter, rather than silver paint covering the artwork.
+        float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+        mask *= 1.0 - smoothstep(0.025, 0.065, edge);
+      }
+      diffuseColor.rgb = mix(diffuseColor.rgb, foil, mask);
+      metalnessFactor = mix(metalnessFactor, 0.92, mask);
+      roughnessFactor = mix(roughnessFactor, 0.16, mask);
+    }
+  `);
+  return u;
+}
+
 /* ── one cartridge ────────────────────────────────────────────────────── */
 function makeCartridge() {
   const group = new THREE.Group();
   const bodyMat = new THREE.MeshPhysicalMaterial({ color: 0x2f6f8f, normalMap: grainNormal(), normalScale: new THREE.Vector2(.18, .18) });
+  const shellUniforms = shellSurface(bodyMat);
   const darkMat = new THREE.MeshStandardMaterial({ color: 0x0a0d12, roughness: .85 });
 
   // The shell is three pieces of the same plastic: a front plate carrying every opening,
@@ -178,7 +287,8 @@ function makeCartridge() {
   for (let i = 0; i < 16; i++) { for (const z of [-.06 + .037, -.06 - .037]) { const m = new THREE.Mesh(new THREE.BoxGeometry(.06, .24, .006), gold); m.position.set(-W * .33 + i * (W * .66 / 15), -H / 2 - .15, z); group.add(m); } }
 
   // the sticker: a shallow raised label on the front face, with its own slight bevel
-  const label = new THREE.Mesh(new THREE.PlaneGeometry(LABEL.w, LABEL.h), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .6 }));
+  const label = new THREE.Mesh(new THREE.PlaneGeometry(LABEL.w, LABEL.h), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: .6 }));
+  const labelUniforms = labelSurface(label.material);
   label.position.set(LABEL.x, LABEL.y, faceZ + .014); group.add(label);
   const stickerEdge = new THREE.Mesh(new THREE.ExtrudeGeometry(roundedRect(LABEL.w + .03, LABEL.h + .03, LABEL.r, LABEL.x, LABEL.y), { depth: .006, bevelEnabled: false }), new THREE.MeshStandardMaterial({ color: 0xe8e4dc, roughness: .8 }));
   stickerEdge.position.z = faceZ; group.add(stickerEdge);
@@ -198,70 +308,98 @@ function makeCartridge() {
   const inner = new THREE.Group(); group.add(inner);
   let constellation = null, sparkles = null;
   let state = { design: {}, colour: '#2f6f8f', name: '', sub: '', points: [], artUrl: null, level: 'readings', lit: false };
-  let artKey = null;
+  let artKey = null, disposed = false;
 
   function applyMaterial() {
     const d = state.design, col = new THREE.Color(state.colour), m = bodyMat;
-    Object.assign(m, { transmission: 0, opacity: 1, transparent: false, metalness: 0, clearcoat: 0, clearcoatRoughness: 0, iridescence: 0, thickness: 0, attenuationDistance: Infinity, envMapIntensity: 1, sheen: 0, roughnessMap: null, specularIntensity: 1 });
-    m.normalMap = grainNormal(); m.normalScale.set(.18, .18);
-    const rough = d.roughness ?? .25, tint = d.tint ?? .55, opacity = d.opacity ?? .35;
-    const tinted = new THREE.Color(0xffffff).lerp(col, .6 + .4 * tint);
-    // Six plastics. What tells them apart is what light does at the surface and inside:
-    // solid stops it, metallic mirrors it, clear passes it straight, frosted scatters it
-    // at the surface, smoke absorbs it on the way through, glitter throws it back in
-    // points from flakes suspended in a milky body.
-    switch (d.material || 'clear') {
+    const kind = SHELLS.includes(d.material) ? d.material : 'clear';
+    const rough = unit(d.roughness, .25), tint = unit(d.tint, .55), opacity = unit(d.opacity, .35);
+    const sparkle = unit(d.sparkle, .5), white = new THREE.Color(0xffffff);
+    // Reset every touched parameter so switching finishes cannot leak optical state.
+    Object.assign(m, { transmission: 0, opacity: 1, transparent: false, depthWrite: true,
+      metalness: 0, roughness: .3, clearcoat: 0, clearcoatRoughness: .1,
+      iridescence: 0, thickness: 0, ior: 1.5, attenuationDistance: Infinity,
+      envMapIntensity: 1, sheen: 0, roughnessMap: null, specularIntensity: 1,
+      anisotropy: 0, anisotropyRotation: 0 });
+    m.attenuationColor.set(0xffffff); m.sheenColor.set(0xffffff);
+    m.normalMap = grainNormal(); m.normalScale.set(.12, .12);
+    shellUniforms.socketTint.value.copy(col);
+    shellUniforms.socketRim.value = .12;
+    shellUniforms.socketGrain.value = .05;
+    shellUniforms.socketGlitter.value = 0;
+    switch (kind) {
       case 'solid':
-        m.color.copy(col); m.roughness = .25 + rough * .5; m.clearcoat = .5; m.clearcoatRoughness = .25;
-        m.sheen = .15; m.sheenColor = col.clone().lerp(new THREE.Color(0xffffff), .5); break;
+        m.color.copy(col); m.roughness = .18 + rough * .60;
+        m.clearcoat = .35; m.clearcoatRoughness = .16 + rough * .3;
+        shellUniforms.socketTint.value.copy(col).lerp(white, .22);
+        shellUniforms.socketRim.value = .25;
+        break;
       case 'metallic':
-        m.color.copy(new THREE.Color(0x9aa3ad).lerp(col, tint)); m.metalness = .95; m.roughness = .14 + rough * .4; m.envMapIntensity = 1.3; break;
+        m.color.copy(white).lerp(col, .35 + tint * .65);
+        m.metalness = 1; m.roughness = .12 + rough * .48;
+        m.anisotropy = .38; m.anisotropyRotation = Math.PI / 2;
+        m.clearcoat = .18; m.envMapIntensity = 1.15;
+        m.normalScale.set(.07, .12); shellUniforms.socketRim.value = 0;
+        break;
       case 'clear':
-        // Water-clear: everything inside is sharp; the surface is a hard gloss.
-        m.color.copy(new THREE.Color(0xffffff).lerp(col, .25 + .5 * tint * opacity));
-        m.transmission = 1 - opacity * .35; m.thickness = .9; m.ior = 1.52; m.roughness = .02 + rough * .12;
-        m.attenuationColor = col.clone().lerp(new THREE.Color(0xffffff), .55 - .4 * tint); m.attenuationDistance = 1.2 + (1 - opacity) * 3;
-        m.clearcoat = .9; m.clearcoatRoughness = .05; m.envMapIntensity = .55; m.normalScale.set(.05, .05); break;
+        m.color.copy(white).lerp(col, .035 + tint * opacity * .18);
+        m.transmission = 1 - opacity * .16; m.thickness = .16; m.ior = 1.49;
+        m.roughness = .025 + rough * .13;
+        m.attenuationColor.copy(white).lerp(col, .25 + .65 * tint);
+        m.attenuationDistance = .55 + (1 - opacity) * 2.0;
+        m.clearcoat = 1; m.clearcoatRoughness = .055;
+        m.normalScale.set(.025, .025); shellUniforms.socketGrain.value = .012;
+        shellUniforms.socketRim.value = .28;
+        break;
       case 'frosted':
-        // Sandblasted: light passes but the surface scatters it, so what is inside is a
-        // soft shadow and the shell itself glows with the colour.
-        m.color.copy(new THREE.Color(0xffffff).lerp(col, .35 + .35 * tint)); m.transmission = .92 - opacity * .3; m.thickness = .5; m.ior = 1.45;
-        m.roughness = .32 + rough * .25; m.attenuationColor = col.clone().lerp(new THREE.Color(0xffffff), .5); m.attenuationDistance = 1.5 + (1 - opacity);
-        m.envMapIntensity = .5; m.normalScale.set(.35, .35); break;
+        m.color.copy(white).lerp(col, .2 + tint * .42);
+        m.transmission = .92 - opacity * .27; m.thickness = .24; m.ior = 1.46;
+        m.roughness = .36 + rough * .4;
+        m.attenuationColor.copy(white).lerp(col, .3 + .5 * tint);
+        m.attenuationDistance = .55 + (1 - opacity) * .9;
+        m.normalScale.set(.5, .5); shellUniforms.socketGrain.value = .18;
+        shellUniforms.socketRim.value = .32;
+        break;
       case 'smoke':
-        // Smoked: dark in the body, the colour only where light gets through thin parts.
-        m.color.copy(new THREE.Color(0x15171a).lerp(col, .25 * tint)); m.transmission = .72 - opacity * .45; m.thickness = 1.6; m.ior = 1.5;
-        m.roughness = .08 + rough * .3; m.attenuationColor = new THREE.Color(0x0b0c0e).lerp(col, .35 * tint); m.attenuationDistance = .18 + (1 - opacity) * .35;
-        m.clearcoat = .6; m.clearcoatRoughness = .12; m.envMapIntensity = .45; break;
+        // Absorption carries the darkness, rather than black paint blocking the PCB.
+        m.color.copy(white).lerp(col, .08 + tint * .18);
+        m.transmission = .9 - opacity * .3; m.thickness = .32; m.ior = 1.49;
+        m.roughness = .065 + rough * .28;
+        m.attenuationColor.set(0x59616b).lerp(col, .65 * tint);
+        m.attenuationDistance = .12 + (1 - opacity) * .6;
+        m.clearcoat = .7; m.clearcoatRoughness = .09;
+        m.normalScale.set(.055, .055); shellUniforms.socketRim.value = .2;
+        break;
       case 'glitter':
-        // A milky body full of flakes: partly translucent, the surface itself flecked.
-        // The body keeps its colour (white flakes vanish against a pale shell); the
-        // surface is flecked, and the flakes inside are the brightest thing on it.
-        m.color.copy(col.clone().lerp(new THREE.Color(0xffffff), .35 * (1 - tint) + .1)); m.transmission = .8 - opacity * .35; m.thickness = 1; m.ior = 1.48;
-        m.roughness = .1 + rough * .2; m.roughnessMap = flakeTex(); m.normalScale.set(.6, .6);
-        m.attenuationColor = col.clone().lerp(new THREE.Color(0xffffff), .3); m.attenuationDistance = .8 + (1 - opacity) * .8;
-        m.iridescence = 1; m.iridescenceIOR = 1.7; m.iridescenceThicknessRange = [100, 700];
-        m.clearcoat = .8; m.clearcoatRoughness = .1; m.envMapIntensity = 1.1; break;
+        m.color.copy(white).lerp(col, .35 + tint * .55);
+        m.transmission = .84 - opacity * .3; m.thickness = .22; m.ior = 1.49;
+        m.roughness = .12 + rough * .3;
+        m.attenuationColor.copy(white).lerp(col, .35 + tint * .5);
+        m.attenuationDistance = .5 + (1 - opacity) * 1.2;
+        m.clearcoat = .85; m.clearcoatRoughness = .08;
+        m.normalScale.set(.1, .1); shellUniforms.socketGlitter.value = sparkle;
+        shellUniforms.socketRim.value = .22;
+        break;
     }
     m.needsUpdate = true;
-    inner.visible = !['solid', 'metallic'].includes(d.material);
+    inner.visible = !['solid', 'metallic'].includes(kind);
     if (sparkles) { inner.remove(sparkles); sparkles.geometry.dispose(); sparkles.material.dispose(); sparkles = null; }
-    if (d.material === 'glitter') {
-      // Flakes in the body: many, bright, in the colour and in white, additive so they
-      // read as points of light rather than dots.
-      const n = Math.round(400 + (d.sparkle ?? .5) * 2600), pos = new Float32Array(n * 3), cols = new Float32Array(n * 3);
+    if (kind === 'glitter' && sparkle > 0) {
+      // Stable inclusions inside the shell complement the view-dependent surface facets.
+      const rnd = seededRandom();
+      const n = Math.round(sparkle * 1600), pos = new Float32Array(n * 3), cols = new Float32Array(n * 3);
       const c1 = new THREE.Color(0xffffff), c2 = col.clone().lerp(new THREE.Color(0xffffff), .35);
       for (let i = 0; i < n; i++) {
-        pos[i * 3] = (Math.random() - .5) * (W - .3); pos[i * 3 + 1] = (Math.random() - .5) * (H - .4);
+        pos[i * 3] = (rnd() - .5) * (W - .3); pos[i * 3 + 1] = (rnd() - .5) * (H - .4);
         // Half the flakes sit just under the front face, where they read through any tint.
-        pos[i * 3 + 2] = i % 2 ? faceZ - .03 - Math.random() * .05 : -.2 + Math.random() * .42;
-        const c = Math.random() < .55 ? c1 : c2; cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
+        pos[i * 3 + 2] = i % 2 ? faceZ - .03 - rnd() * .05 : -.2 + rnd() * .42;
+        const c = rnd() < .55 ? c1 : c2; cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
       }
       const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
       // Opaque on purpose: three.js draws only opaque objects into the pass a
       // transmissive shell looks through, so additive, transparent flakes would never
       // show inside the body at all.
-      sparkles = new THREE.Points(geo, new THREE.PointsMaterial({ map: spriteTex(), vertexColors: true, size: .085, alphaTest: .55, transparent: false, depthWrite: true }));
+      sparkles = new THREE.Points(geo, new THREE.PointsMaterial({ map: spriteTex(), vertexColors: true, size: .035, alphaTest: .55, transparent: false, depthWrite: true }));
       inner.add(sparkles);
     }
     const lvl = LEVELS[state.level] || 2, glow = col.clone().lerp(new THREE.Color(0xffffff), .35);
@@ -282,9 +420,20 @@ function makeCartridge() {
     inner.add(constellation);
   }
   function applyLabel() {
+    const d = state.design || {}, material = label.material;
+    const finish = FINISHES.includes(d.labelFinish) ? d.labelFinish : 'paper';
+    const finishId = FINISHES.indexOf(finish);
+    labelUniforms.socketFinish.value = finishId;
+    labelUniforms.socketFinishStrength.value = unit(d.labelFinishStrength, .65);
+    const oldCoat = material.clearcoat;
+    material.roughness = finish === 'paper' ? .68 : .30;
+    material.metalness = 0;
+    material.clearcoat = finish === 'paper' ? 0 : .85;
+    material.clearcoatRoughness = finish === 'gloss' ? .08 : .16;
+    if (oldCoat !== material.clearcoat) material.needsUpdate = true;
     const key = `${state.artUrl}|${state.name}|${state.sub}|${state.colour}|${state.design.clearance}`;
     if (key === artKey) return; artKey = key;
-    const done = img => { label.material.map?.dispose(); label.material.map = labelTexture(img, state.name, state.sub, state.colour, state.design.clearance); label.material.needsUpdate = true; };
+    const done = img => { if (disposed) return; label.material.map?.dispose(); label.material.map = labelTexture(img, state.name, state.sub, state.colour, state.design.clearance); label.material.needsUpdate = true; };
     if (!state.artUrl) { done(null); return; }
     const img = new Image();
     img.onload = () => { if (artKey === key) done(img); };
@@ -296,19 +445,20 @@ function makeCartridge() {
     get state() { return state; },
     set(next) {
       state = { ...state, ...next };
+      state.design = state.design || {};
       if ('design' in next || 'colour' in next || 'level' in next || 'lit' in next) applyMaterial();
       if ('points' in next || 'colour' in next) applyConstellation();
       applyLabel();
     },
     twinkle(now) {
-      if (sparkles) {
-        // Flakes catch the light at different moments: the field breathes and turns a little.
-        sparkles.material.size = .075 + .025 * Math.sin(now / 330);
-        sparkles.rotation.z = Math.sin(now / 4000) * .02;
-      }
+      // Facet highlights follow the view in the shader; flakes stay embedded.
       if (state.lit) ledGlow.material.opacity = .75 + .2 * Math.sin(now / 700);
     },
-    dispose() { dispose(); bodyMat.dispose(); label.material.map?.dispose(); },
+    dispose() {
+      disposed = true; artKey = null;
+      dispose(); bodyMat.dispose(); label.material.map?.dispose(); label.material.dispose();
+      if (sparkles) { sparkles.geometry.dispose(); sparkles.material.dispose(); }
+    },
   };
 }
 
@@ -511,3 +661,4 @@ export function mountRack(canvas, handlers = {}) {
   };
   return api;
 }
+

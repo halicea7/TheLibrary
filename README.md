@@ -49,7 +49,7 @@ Drop PDFs, Markdown, HTML, or text onto the shelf — folders are walked. An HTM
 curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything once read
 ```
 
-Background work shows under **In hand** in the left column, with a bar — a reading, an annotation, a threads rebuild counting its clusters.
+Background work shows under **In hand** in the left column, with a bar — a reading, an annotation, a threads rebuild counting its clusters — and a **pause**: the piece in progress finishes (a section, a cluster), nothing new starts until you resume, the queue keeps its order. Chat is never paused; it already has priority over reading.
 
 The first visit is walked: a **tour** lights one part of the room at a time — the drop zone, the read and annotate buttons, *reshelve*, the rack, each tab, effort, stance, the two rooms — with a card saying what it is for, everything else dimmed and held until you go on. Esc or *skip* ends it; *show the tour* in Settings brings it back.
 
@@ -64,6 +64,8 @@ The first visit is walked: a **tour** lights one part of the room at a time — 
 <p align="center">
   <img src="docs/find.jpg" alt="Find. The query's words lit in each passage and the sentence nearest the question underlined; behind, the camera has dived on the finding under the eye, ringed and named." width="900"/>
 </p>
+
+Threads are rebuilt on their own — once, ten minutes after the last read of a batch finishes, or when a cartridge is inserted or ejected — never by opening the tab.
 
 **Threads** — themes spanning volumes, ranked by reach: the wide ones get a card, the long tail folds to a line each, and a word in the filter box narrows both and lights it wherever it appears. Where sources disagree, **the two claims are quoted side by side** with the words they share lit — that is the pivot the disagreement turns on. The chips scope Threads like everything else, and every thread talks to the nebula: hover to light its volumes, click to dive on them. Rebuilt automatically a few minutes after the last read finishes, so a folder of forty papers produces one rebuild rather than forty.
 

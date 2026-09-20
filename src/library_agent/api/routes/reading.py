@@ -169,6 +169,36 @@ async def list_jobs(db: SessionDep, limit: int = 25) -> list[JobOut]:
     ]
 
 
+@router.get("/jobs/state")
+async def jobs_state() -> dict:
+    """Whether background work is paused."""
+    from library_agent.llm.lease import PAUSED_KEY, redis_client
+
+    r = redis_client()
+    try:
+        return {"paused": bool(await r.exists(PAUSED_KEY))}
+    finally:
+        await r.aclose()
+
+
+@router.post("/jobs/pause")
+async def jobs_pause(paused: bool = True) -> dict:
+    """Pause background work -- reading, annotating, rebuilding, shelving. The unit in
+    progress finishes (a section, a cluster); nothing new starts until resumed. The
+    queue keeps its order. Chat is never paused; it has its own priority."""
+    from library_agent.llm.lease import PAUSED_KEY, redis_client
+
+    r = redis_client()
+    try:
+        if paused:
+            await r.set(PAUSED_KEY, "1")
+        else:
+            await r.delete(PAUSED_KEY)
+        return {"paused": paused}
+    finally:
+        await r.aclose()
+
+
 @router.get("/categories", response_model=list[CategoryOut])
 async def list_categories(db: SessionDep) -> list[CategoryOut]:
     rows = (

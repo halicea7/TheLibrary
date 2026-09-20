@@ -18,7 +18,7 @@ from sqlalchemy import func, select, update
 from library_agent.config import settings
 from library_agent.db.models import Document, Job, JobState
 from library_agent.db.session import session_scope
-from library_agent.llm.lease import reading_may_proceed, redis_client
+from library_agent.llm.lease import PAUSED_KEY, reading_may_proceed, redis_client
 from library_agent.llm.ollama import Ollama
 from library_agent.ops.incidents import record_exception
 from library_agent.reading.tier1 import run_tier1
@@ -71,6 +71,7 @@ async def read_document(ctx: dict, document_id: str, job_id: str, tier: int = 1)
             )
             return {"document_id": document_id, "skipped": "removed"}
     await _set_job(jid, state=JobState.RUNNING)
+    await _make_gate(jid)()  # paused, or a chat in progress: wait before starting
 
     async def progress(current: int, total: int) -> None:
         await _set_job(jid, progress_current=current, progress_total=total)
@@ -112,7 +113,7 @@ async def read_document(ctx: dict, document_id: str, job_id: str, tier: int = 1)
 
 
 REBUILD_KEY = "library:rebuild_scheduled"
-REBUILD_STARTED_KEY = "library:rebuild_started_at"
+REBUILD_DONE_KEY = "library:rebuild_done_at"
 
 
 async def _reads_pending() -> int:
@@ -148,8 +149,11 @@ async def build_library_layer(
 
     redis = ctx.get("redis")
     if requested_at is not None and redis is not None:
-        started = await redis.get(REBUILD_STARTED_KEY)
-        if started and float(started) >= requested_at:
+        # Covered if a rebuild *finished* after this one was asked for -- judged on
+        # completion, not start, so a rebuild cut off by a worker restart is not
+        # mistaken for done when arq retries it.
+        done = await redis.get(REBUILD_DONE_KEY)
+        if done and float(done) >= requested_at:
             return {"kind": kind, "skipped": "a later rebuild already ran"}
         if await _reads_pending():
             delay = settings().library_rebuild_delay_seconds
@@ -157,10 +161,15 @@ async def build_library_layer(
                 "build_library_layer", kind, requested_at=requested_at, _defer_by=delay
             )
             return {"kind": kind, "deferred": delay}
-        await redis.set(REBUILD_STARTED_KEY, str(time.time()))
 
     kinds = ["citations", "clusters", "contradictions"] if kind == "all" else [kind]
     out: dict[str, Any] = {"kind": kind}
+    if redis is not None and await redis.exists(PAUSED_KEY):
+        # Paused: come back later rather than hold the job row open for hours.
+        await redis.enqueue_job(
+            "build_library_layer", kind, requested_at=requested_at, _defer_by=120
+        )
+        return {"kind": kind, "deferred": "paused"}
     # A job row, so the UI's "In hand" and anything waiting for an idle worker can see
     # that a rebuild is holding it -- these run for many minutes on a large library.
     async with session_scope() as db:
@@ -183,14 +192,16 @@ async def build_library_layer(
                         r = await build_citation_graph(db, progress=progress)
                         out["citations"] = {"matched": r.matched, "references": r.references_found}
                     elif k == "clusters":
-                        r = await build_clusters(db, client=client, progress=progress)
+                        r = await build_clusters(
+                            db, client=client, progress=progress, gate=_make_gate(jid)
+                        )
                         out["clusters"] = {
                             "clusters": r.clusters,
                             "cross_document": r.cross_document,
                         }
                     elif k == "contradictions":
                         out["contradictions"] = await find_contradictions(
-                            db, client=client, progress=progress
+                            db, client=client, progress=progress, gate=_make_gate(jid)
                         )
             except Exception as exc:
                 # One pass failing must not take the others with it.
@@ -200,6 +211,8 @@ async def build_library_layer(
     await _set_job(
         jid, state=JobState.DONE, progress_current=1, progress_total=1, yielded_reason=None
     )
+    if redis is not None:
+        await redis.set(REBUILD_DONE_KEY, str(time.time()))
     return out
 
 

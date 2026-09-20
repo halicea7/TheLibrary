@@ -128,6 +128,7 @@ async def build_clusters(
     method: str = "leaf",
     summarise: bool = True,
     progress=None,
+    gate=None,
 ) -> ClusterResult:
     cfg = settings()
     own = client is None
@@ -162,6 +163,8 @@ async def build_clusters(
         to_embed: list[tuple[uuid.UUID, str]] = []
 
         for n, (_lab, idxs) in enumerate(sorted(groups.items())):
+            if gate:
+                await gate()
             docs_in = {doc_ids[i] for i in idxs}
             cluster = Cluster(method="hdbscan", size=len(idxs), document_count=len(docs_in))
             db.add(cluster)

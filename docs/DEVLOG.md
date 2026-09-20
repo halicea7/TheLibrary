@@ -971,3 +971,15 @@ back to the queue (`Retry`, deferred five minutes) instead of holding it; what t
 had already written stays, and `max_tries` is raised so a long pause is many small
 retries rather than a failure. Genuine exceptions are never retried by arq, so the
 limit only bounds pausing.
+
+**Materials from the decompiled set -- a contribution.** The Godot materials in `dump`
+were decompiled by another assistant (GPT Astra) working directly in this checkout,
+which ported the casing and label shaders into `web/cartridge3d.js` through
+`onBeforeCompile` hooks on the physical material: a brushed shell surface, and label
+*finishes* -- paper, gloss, holographic, prism, gold, chrome -- with a strength dial,
+sealed into the design like everything else (`LABEL_FINISHES`, clamped, tested). A
+second pass made the make-panel preview draggable (pointer capture, pitch clamped) and
+narrowed the stage. A note for the record: both passes landed in this checkout while
+my own commits were being made with `git add -A`, so they went to GitHub under the
+"pause" commits of 04:02 and 13:20 rather than their own message. This entry is the
+credit those commits should have carried.

@@ -697,6 +697,12 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .swatches { display:flex; gap:6px; flex-wrap:wrap; padding-top:4px; }
 .swatches button { width:22px; height:22px; border-radius:3px; border:2px solid transparent; cursor:pointer; background:var(--c); }
 .swatches button[aria-pressed=true] { border-color:var(--fg); }
+/* The wheel: any colour at all. A conic ring with the chosen colour at its centre; the
+   native picker sits inside it, invisible, so the ring is the control. */
+.swatches .wheel { position:relative; width:22px; height:22px; border-radius:50%; cursor:pointer; border:2px solid transparent;
+  background:radial-gradient(circle, var(--c) 0 36%, transparent 40%), conic-gradient(#e33 0, #ec3 60deg, #3c3 120deg, #3cc 180deg, #33e 240deg, #c3c 300deg, #e33 360deg); }
+.swatches .wheel[aria-pressed=true] { border-color:var(--fg); }
+.swatches .wheel input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
 .glyphs { display:flex; gap:6px; flex-wrap:wrap; padding-top:4px; }
 .glyphs button { width:26px; height:26px; border-radius:3px; border:1px solid var(--rule); background:var(--sunk); color:var(--dim); cursor:pointer; display:grid; place-items:center; }
 .glyphs button svg { width:14px; height:14px; }
@@ -2428,7 +2434,8 @@ function renderMake(flip) {
       : 'A cartridge is a slice of this library another one can put on its rack. The level sets what leaves: the volumes themselves, only what this library understood of them, or just the fact that they exist.'}</p>
     <div class="row"><label>Name</label><input type="text" id="mk-name" value="${esc(make.name)}" placeholder="Security's shelf" oninput="make.name=this.value; previewMake()"/></div>
     <div class="row"><label>Colour</label><div class="swatches">${palette.map(c =>
-      `<button style="--c:${c}" aria-pressed="${c === make.colour}" title="${c}" onclick="make.colour='${c}'; renderMake()"></button>`).join('')}</div></div>
+      `<button style="--c:${c}" aria-pressed="${c === make.colour}" title="${c}" onclick="make.colour='${c}'; renderMake()"></button>`).join('')}
+      <label class="wheel" style="--c:${esc(make.colour)}" aria-pressed="${!palette.includes(make.colour)}" title="Any colour — ${esc(make.colour)}"><input type="color" value="${esc(make.colour)}" oninput="make.colour=this.value; this.parentElement.style.setProperty('--c', this.value); this.parentElement.title='Any colour — ' + this.value; stageUpdate(); previewMake()" onchange="renderMake()"/></label></div></div>
     <div class="row"><label>Icon</label><div class="glyphs">${Object.entries(GLYPHS).map(([k, svg]) =>
       `<button aria-pressed="${k === make.glyph}" title="${k}" onclick="make.glyph='${k}'; renderMake()">${svg}</button>`).join('')}</div></div>
     <div class="row"><label>Material</label><div><div class="mats">${MATERIALS.map(([v, l]) =>

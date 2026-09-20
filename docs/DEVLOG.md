@@ -844,3 +844,15 @@ in it. Day chart: ink lightened to `92,72,48`, points at 40% lightness and 42%
 saturation so the shelves read as coloured inks, edge alphas roughly halved, haze to
 .014. It is a drawing now, not a stain. And with the `[Title]` prefix peeled, all 13
 conflicts carry their quoted pair.
+
+**Screenshots and the README, reworked.** Every screenshot retaken on the current build:
+the night Ask and the day Ask-in-a-room as the pair of heroes, an answer with its
+apparatus, Find with the highlighter and the lift, Threads in the day room with the
+quoted pairs, the reader on BERT with Figure 1 and a reflection beside the passage, the
+pedestal in both rooms as one composite. The README's front half was rewritten into
+*What it is → Using it → The desk → How it works*, with each image beside the feature
+it shows, the duplicated nebula paragraph gone, and the newer mechanics (per-document
+cap, placement evidence, quoted conflicts, figures from the same regions extraction
+already finds) folded into *How it works*. The reference sections were kept as they
+were. Found on the way: the figure card in the night room was a white box with an
+invisible caption; it takes the panel colour now, with the render on its own white paper.

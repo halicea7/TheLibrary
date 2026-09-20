@@ -6,11 +6,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/web.jpg" alt="The Ask pane. Behind it, the library drawn as a nebula: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning. On the left, the rack with a cartridge seated in its socket, and the shelf." width="900"/>
+  <img src="docs/web.jpg" alt="The night room. The Ask pane with the library drawn as a nebula behind it: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning. On the left, the rack with a cartridge above its pedestal, and the shelf." width="900"/>
 </p>
 
 <p align="center">
-  <img src="docs/ask.jpg" alt="An answer, asked inside a cartridge's room. A reading column with markdown rendered; every citation resolves into a note in the margin beside the block that cites it, with a stripe in the colour of the cartridge it came from." width="900"/>
+  <img src="docs/day.jpg" alt="The day room, inside a cartridge's room: papyrus and ink, gilt on the edges, the cartridge seated on a limestone pedestal, and the nebula closed in on that cartridge's volumes as coloured inks." width="900"/>
 </p>
 
 <p align="center">
@@ -23,12 +23,12 @@
 
 Most "chat with your documents" tools are a search box with a language model bolted on: embed the chunks, retrieve the nearest ones, hope the answer is in there. The Library does that too — but it also **reads**. Every document goes through a background pass that writes a summary of each section, extracts the claims it makes, and tags its subjects. Documents you care about get a deeper pass that writes **marginalia**: what a thoughtful reader thinks while reading each passage, not a restatement of it.
 
-Then the collection is treated as one thing. Claims are clustered *across* documents so a theme running through five papers becomes a single, readable entry. Citations between papers are extracted and matched. Where two sources genuinely disagree, the Library says so.
+Then the collection is treated as one thing. Claims are clustered *across* documents so a theme running through five papers becomes a single, readable entry. Citations between papers are extracted and matched. Where two sources genuinely disagree, the Library quotes both.
 
 And when you ask it something, the answer is a reading column with an apparatus: each `[n]` resolves into a note in the margin naming the volume, page, and section it came from. Those markers are **verified after generation** — a citation the model invents is stripped rather than shown — so a flash of red always means provenance. Anything unmarked is the librarian's own reasoning, and it's meant to reason: the answering policy is deliberately open.
 
 <p align="center">
-  <img src="docs/reader.jpg" alt="Reading a volume. The section summary is the italic lead; the library's reflection sits in the margin beside the passage it is about." width="900"/>
+  <img src="docs/ask.jpg" alt="An answer. A reading column with markdown rendered; every citation resolves into a note in the margin beside the block that cites it, naming the volume, page and section. Six of six citations verified against the shelf." width="900"/>
 </p>
 
 ## Using it
@@ -42,24 +42,38 @@ You need Postgres 16, Redis, [Ollama](https://ollama.com), and [uv](https://docs
 
 `./library stop`, `restart`, and `status` do what they say. `uv run python scripts/verify.py` exercises every surface against the running instance — ingest, read, annotate, search, chat on both models, the library layer, delete — and reports pass/fail per check. Ctrl-C in the foreground closes everything.
 
-Drop PDFs, Markdown, or text onto the shelf — folders are walked. A document is **searchable within seconds**. Click *have it read* for section summaries and subjects (a couple of minutes), then *annotate it* for marginalia — or use the two buttons under the shelf header, *read the N unread* and *annotate the N read*, which queue everything in view (the whole shelf, a subject, or a seated cartridge), skip what is already queued, and say how long it will take before they do it. A third button appears when one shelf is chosen — *re-shelve these N* — which places that shelf's volumes again from what they say, not where they sit; it is the remedy when a sub-shelf has collected things that do not belong on it. For a first load from the terminal:
+Drop PDFs, Markdown, or text onto the shelf — folders are walked. A document is **searchable within seconds**. Click *have it read* for section summaries and subjects (a couple of minutes), then *annotate it* for marginalia — or use the buttons under the shelf header: *read the N unread* and *annotate the N read* queue everything in view (the whole shelf, a subject, or a seated cartridge), skip what is already queued, and say how long it will take first; *re-shelve these N* appears when one shelf is chosen and places its volumes again from what they say rather than where they sit. For a first load from the terminal:
 
 ```sh
 ./library import ~/papers ~/books --read     # walks directories, skips what's already shelved
 curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything once read
 ```
 
-**Ask** — talk to the collection. Narrow it by subject with the chips or by clicking a subject on the shelf. Switch models per conversation. Set a **stance** to loosen the librarian's reserve: *opinionated*, *contrarian · charitable*, *cynical · optimistic*. Answers given under a stance are labelled in violet so you always know which ones were the librarian speaking for itself.
+Background work shows under **In hand** in the left column, with a bar — a reading, an annotation, a threads rebuild counting its clusters.
 
-**Effort** — a dial in the tab bar: *quick* (3 passages, no reranker — a lookup, ~3 s), *normal* (5 passages, reranked, follow-ups rewritten, ~10 s), *deep* (the question is first broken into two to four searches, each retrieved, the union reranked to ten passages, a larger context — for comparisons and multi-part questions, ~25 s). The model has no clean effort knob of its own on these builds, so effort is the work around it, which is where answers actually change: on *compare SSTI and SQL injection*, quick and normal cite only the SSTI volumes; deep is the first level with both sides in hand. Also `effort` on `/api/v1/ask` and the MCP tool.
+## The desk
 
-**Find** — plain retrieval, showing each passage's dense and lexical rank. Your words are lit in each passage, marker-pen style, and the **sentence nearest your question** is lifted — the passages that matter most are often the ones found by meaning, with none of your words in them, and that sentence is why they came up. The nebula stays up behind it: when results land, the camera dives on each finding in turn with a spin and a large label, advancing every few seconds; hovering a row takes over, and clicking opens the volume.
+**Ask** — talk to the collection. Narrow it by subject with the chips or by clicking a subject on the shelf. Switch models per conversation. Set a **stance** to loosen the librarian's reserve: *opinionated*, *contrarian · charitable*, *cynical · optimistic*; answers given under a stance are labelled in violet so you always know which ones were the librarian speaking for itself. The desk bar names the conversation, starts a new one, and lists earlier ones; opening one replays it with its margin notes, and asking again continues it.
+
+**Effort** — a dial in the tab bar. *quick*: three passages, no reranker, a lookup (~3 s). *normal*: five passages, reranked, follow-ups rewritten (~10 s). *deep*: the question is broken into two to four searches, each retrieved, the union reranked to ten passages, a larger context — for comparisons and multi-part questions (~25 s). The model has no clean effort knob of its own, so effort is the work around it, which is where answers actually change: on *compare SSTI and SQL injection*, quick and normal cite only the SSTI volumes; deep is the first level with both sides in hand. Also `effort` on `/api/v1/ask` and the MCP tool.
+
+**Find** — plain retrieval, showing each passage's dense and lexical rank. Your words are lit in each passage, marker-pen style, and the **sentence nearest your question** is lifted — the passages that matter most are often the ones found by meaning, with none of your words in them, and that sentence is why they came up. The nebula stays up behind it: when results land, the camera dives on each finding in turn with a spin and a large label; hovering a row takes over, and clicking opens the volume.
 
 <p align="center">
-  <img src="docs/find.jpg" alt="Find. The camera has dived into the region of the nebula where the findings are; the one under the eye is ringed and named; the list beside it marks the same row." width="900"/>
+  <img src="docs/find.jpg" alt="Find. The query's words lit in each passage and the sentence nearest the question underlined; behind, the camera has dived on the finding under the eye, ringed and named." width="900"/>
 </p>
 
-**Threads** — themes spanning volumes, ranked by reach: the wide ones get a card, the long tail folds to a line each, and a word in the filter box narrows both and lights it wherever it appears. Where sources disagree, the two claims are quoted side by side with the words they share lit — that is the pivot the disagreement turns on. The chips scope Threads like everything else, and every thread talks to the nebula: hover to light its volumes, click to dive on them. Rebuilt automatically a few minutes after the last read finishes, so a folder of forty papers produces one rebuild rather than forty.
+**Threads** — themes spanning volumes, ranked by reach: the wide ones get a card, the long tail folds to a line each, and a word in the filter box narrows both and lights it wherever it appears. Where sources disagree, **the two claims are quoted side by side** with the words they share lit — that is the pivot the disagreement turns on. The chips scope Threads like everything else, and every thread talks to the nebula: hover to light its volumes, click to dive on them. Rebuilt automatically a few minutes after the last read finishes, so a folder of forty papers produces one rebuild rather than forty.
+
+<p align="center">
+  <img src="docs/threads.jpg" alt="Threads in the day room. Where sources disagree: each conflict as two quoted claims side by side with their shared words lit, the explanation beneath; the nebula behind as a chart of coloured inks." width="900"/>
+</p>
+
+**Reading** — click a volume and it opens as a page: sections in order, the section summary as an italic lead, reflections in the margin beside their passage, and the **figures** of a PDF set into the section whose pages hold them, each with its caption from the page (click one to widen it). Figures are found from the original's drawings and images and rendered on first view — nothing extracted at ingest, nothing added to the database; the renders are a cache that goes with the document. Images referenced from a Markdown volume are not fetched; they stay as their alt text, since the file was shelved, not the site it came from.
+
+<p align="center">
+  <img src="docs/reader.jpg" alt="Reading BERT. The passage about WordPiece embeddings with the library's reflection beside it in the margin, and Figure 1 set into the section with its caption from the page." width="900"/>
+</p>
 
 **Write** — a brief in, a document out. The librarian plans an outline, then writes each section *retrieving for that section*, so every paragraph keeps its `[n]` margin notes, numbered across the whole document and verified per section; a references list closes it. Save it as `.md`, print it to PDF, or **shelve it** — it becomes a volume, and the library can read what it wrote. Scoped by the chips and the rack like everything else.
 
@@ -67,19 +81,7 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
   <img src="docs/write.jpg" alt="Write. A brief at the top; below it the document the library composed: title, the plan's reasoning, the outline, and each section with its own margin notes." width="900"/>
 </p>
 
-**Reading** — click a volume and it opens as a page: sections in order, the section summary as an italic lead, reflections in the margin beside their passage, and the **figures** of a PDF set into the section whose pages hold them, each with its caption from the page (click one to widen it). Figures are found from the original's drawings and images and rendered on first view, so nothing is extracted at ingest and nothing is added to the database; the renders are a cache that goes with the document. Images referenced from a Markdown volume are not fetched — they stay as their alt text, since the file was shelved, not the site it came from.
-
-**Two rooms** — *appearance* in the masthead switches them. The night room is slate and verdigris; the day room is papyrus and ink, with gilt on the edges — the lintel under the masthead, the frieze rules beside each section label, the chosen tab — and the nebula drawn as a star chart in sepia rather than a cloud. The socket the cartridges drop into is a pedestal: a stepped base, a fluted drum, a Doric capital whose abacus carries the bronze mouth, a gilt fillet at the lip; limestone by day, basalt by night. The cartridge itself is the same object in both rooms — its design is sealed in the manifest, so it does not take the room's colour.
-
-<p align="center">
-  <img src="docs/day.jpg" alt="The day room. Threads on papyrus: conflicts quoted side by side with their shared words lit, the nebula drawn as a sepia star chart, the cartridge on its limestone pedestal." width="900"/>
-</p>
-
-**Conversations** — the desk bar names the current one, starts a new one, and lists earlier ones; opening one replays it with its margin notes, and asking again continues it.
-
-<p align="center">
-  <img src="docs/threads.jpg" alt="Threads across the collection: themes drawn from claims in several volumes, and the citation graph." width="900"/>
-</p>
+**Two rooms** — *appearance* in the masthead switches them. The night room is near-black and verdigris, the nebula an additive cloud. The day room is papyrus and ink, with gilt on the edges — the lintel under the masthead, the frieze rules beside each section label, the chosen tab — and the same nebula drawn as a chart of coloured inks. The pigments keep their meanings in both: rubric is *from the shelf*, verdigris is *the system*, amber is *attention*, violet is *a stance*; gilt is chrome and never a signal. The cartridge is the same object in both rooms — its design is sealed in its manifest, so it does not take the room's colour.
 
 ## How it works
 
@@ -93,19 +95,19 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
 
 This is what makes a 500-document backfill a single overnight rather than the ~260 GPU-hours a per-chunk deep pass would cost.
 
-**Retrieval** is dense + lexical fused with reciprocal rank fusion, in one Postgres query, then reranked by a cross-encoder — every stage measured against a generated question set and switchable. Chat reranks; keyword search doesn't, because the eval showed the cross-encoder *hurts* short keyword queries.
+**Retrieval** is dense + lexical fused with reciprocal rank fusion, in one Postgres query, then reranked by a cross-encoder — every stage measured against a generated question set and switchable. Chat reranks; keyword search doesn't, because the eval showed the cross-encoder *hurts* short keyword queries. After fusion, passages are capped per document (two in chat, three in deep) so a question that spans two volumes reaches the model with both in hand.
 
-**The nebula.** Behind Ask and Find the library is drawn as a cloud: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning, laid out by a small force simulation in three dimensions and turning slowly. It thickens as the library grows; the volumes an answer drew on light up as they are retrieved.
+**The nebula.** Behind Ask, Find and Threads the library is drawn as a cloud: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning, laid out by a small force simulation in three dimensions and turning slowly. It thickens as the library grows; the volumes an answer drew on light up as they are retrieved.
 
-**The shelf is two levels, and every volume sits in one place.** Tier 1 tags each document with up to four subjects, which is right for finding things and wrong for shelving them. So shelving is a separate pass: the model organises the collection into a handful of *top shelves* (fields — Cybersecurity, Machine Learning) each with *sub-shelves* named from the titles actually on them, then files every volume on exactly one sub-shelf. Crowded sub-shelves are split from their own titles; sub-shelves with a volume or two are dissolved into their neighbours. New volumes are shelved as they are read. *Reshelve* redoes the whole thing; the tags remain for filtering.
+**The shelf is two levels, and every volume sits in one place.** Tier 1 tags each document with up to four subjects, which is right for finding things and wrong for shelving them. So shelving is a separate pass: the model organises the collection into a handful of *top shelves* (fields — Cybersecurity, Machine Learning) each with *sub-shelves* named from the titles actually on them, then files every volume on exactly one sub-shelf. Crowded sub-shelves are split from their own titles; sub-shelves with a volume or two are dissolved into their neighbours. New volumes are shelved as they are read. A volume is placed from its summary — or its opening, when a stub has none — and its tags, never from the shelf it already sits on, so a wrong placement is not its own evidence. *Reshelve* redoes the whole thing; the tags remain for filtering.
 
-**The library layer** clusters extracted claims (not section summaries — measured: summaries cluster with their own paper, claims cluster across papers) and summarises each cluster once. Citations are parsed from reference sections and matched by title. Contradiction detection runs over cross-document clusters only.
+**The library layer** clusters extracted claims (not section summaries — measured: summaries cluster with their own paper, claims cluster across papers) and summarises each cluster once, keeping which document said each claim. Citations are parsed from reference sections and matched by title. Contradiction detection runs over cross-document clusters only; each cluster is judged up to three times at temperature 0 with fixed seeds and a finding needs two votes, and the two clashing claims are quoted word for word — a quote is kept only if it is found among the claims the judge was given.
 
 **One store.** Postgres with `pgvector` holds documents, sections, chunks, artifacts, vectors, and the lexical index. Vectors commit in the same transaction as the rows they describe, so there is nothing to reconcile. Every generated artifact records the model and prompt version that produced it, so changing a prompt regenerates only what that prompt owns.
 
-**Extraction does the unglamorous work.** Two-column papers are read column by column. Figure labels, axis ticks and legend text are dropped by position and font size rather than by regex. Footnotes are lifted out of the flow and placed after the page's prose with their numbers; the superscript markers they leave in the body are removed. Running headers are detected by frequency and stripped. Papers with no PDF bookmarks get their section tree from numbered headings in the text — which, it turns out, is most of them.
+**Extraction does the unglamorous work.** Two-column papers are read column by column. Figure labels, axis ticks and legend text are dropped by position and font size rather than by regex — and the same regions, read the other way, are the figures the reader shows. Footnotes are lifted out of the flow and placed after the page's prose with their numbers; the superscript markers they leave in the body are removed. Running headers are detected by frequency and stripped. Papers with no PDF bookmarks get their section tree from numbered headings in the text — which, it turns out, is most of them.
 
-**Behind the Ask pane is the library itself**, drawn as a nebula: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning, laid out by a small force simulation in three dimensions and turning slowly. It thickens as the library grows, and the volumes an answer drew on light up as they are retrieved. Answers and markdown volumes are rendered as markdown; each block of an answer keeps its own margin notes.
+**Answers and Markdown volumes are rendered as markdown**; each block of an answer keeps its own margin notes. Quoted passages, wherever they came from, are always declared to the model as data, never instructions.
 
 ## Settings and incidents
 
@@ -137,12 +139,16 @@ At `readings`, each section's summary stands in as its passage, so retrieval, th
 ```
 
 <p align="center">
+  <img src="docs/pedestal.jpg" alt="The socket in both rooms: a cartridge seated on a basalt pedestal at night, and lifted above a limestone one by day." width="700"/>
+</p>
+
+<p align="center">
   <img src="docs/cartridge.jpg" alt="Making a cartridge: name, colour, material and dials, clearance, art, level — and the object itself turning on the right: a clear green shell with the constellation of its thousand volumes floating inside, the label a sticker on the front with CONFIDENTIAL across its top." width="900"/>
 </p>
 
 **A cartridge is an object.** Built the way the real thing is: a front plate with the grip grooves, three level pips, a power light and a screw cut into it, a PCB inside with an edge of gold contacts, and the label a sticker on the front. The label carries art — an image you upload, or by default the cartridge's own *constellation*, its volumes laid out from their vectors in its colour. The plastic is one of five materials — solid, clear, smoke, glitter, metallic — with dials for tint, opacity, sparkle and roughness; through a clear shell you see the board and the constellation floating in front of it. The pips light by level; the power light comes on when the cartridge is in use. A **clearance** — open, internal, confidential, restricted — prints as a band across the label; a receiving library will not re-export the volumes of a restricted cartridge. The whole design is sealed into the manifest, so a cartridge looks the same on every rack it lands on; only its maker sets it. Lit by a studio HDRI, rendered with one vendored library (three.js), nothing fetched from a network. Uploaded and shipped art is re-encoded on the way in.
 
-**The rack is one socket.** Step or scroll through your cartridges; the one in view hangs above the socket until you click, then it drops in with a bounce and the light comes on — you are in its room: the composer becomes *Ask HackTricks's shelf*, and Find, the shelf and follow-ups stay inside it. Click again to lift it out; *all* opens a grid to jump straight to one; hovering lifts the cartridge up large beside the nebula.
+**The rack is one socket, and the socket is a pedestal** — a stepped base, a fluted drum, a Doric capital whose abacus carries the bronze mouth, gilt at the lip; limestone by day, basalt by night. Step or scroll through your cartridges; the one in view hangs above it until you click, then it drops in with a bounce and the light comes on — you are in its room: the composer becomes *Ask HackTricks's shelf*, and Find, the shelf and follow-ups stay inside it. Click again to lift it out; *all* opens a grid to jump straight to one; hovering lifts the cartridge up large beside the nebula.
 
 A folder can also arrive as a cartridge directly: `./library import ~/hacktricks --cartridge "HackTricks"`.
 

@@ -529,7 +529,9 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .page .pass.md > *:first-child { margin-top:0; }
 .page .pass.md p, .page .pass.md li { font:15px/1.72 var(--serif); }
 .page .gloss { grid-column:2; align-self:start; padding-top:.2em; }
-.page figure { grid-column:1; margin:6px 0 18px; padding:10px 12px 8px; border:1px solid var(--line); border-radius:4px; background:rgba(255,255,255,.55); }
+.page figure { grid-column:1; margin:6px 0 18px; padding:10px 12px 8px; border:1px solid var(--rule); border-radius:4px; background:var(--panel); }
+/* The render is white paper; a hairline keeps it from floating in the night room. */
+.page figure img { border:1px solid var(--rule-soft); background:#fff; }
 .page figure img { display:block; max-width:100%; height:auto; cursor:zoom-in; }
 .page figure.wide img { cursor:zoom-out; }
 .page figure figcaption { font:italic 12.5px/1.5 var(--serif); color:var(--dim); margin-top:8px; }

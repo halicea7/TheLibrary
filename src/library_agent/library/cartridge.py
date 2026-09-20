@@ -247,7 +247,8 @@ async def resolve_selection(
         )
     if not ids:
         return []
-    # A volume that arrived only in a restricted cartridge does not leave again.
+    # A volume that *arrived* in a restricted cartridge does not leave again. One made
+    # here is the maker's own: marking it restricted binds the receiver, not the maker.
     restricted = set(
         (
             await db.execute(
@@ -257,6 +258,7 @@ async def resolve_selection(
                     CartridgeDocument.document_id.in_(ids),
                     CartridgeDocument.introduced.is_(True),
                     Cartridge.design["clearance"].astext == "restricted",
+                    Cartridge.made_by.is_distinct_from("import"),
                 )
             )
         ).scalars()

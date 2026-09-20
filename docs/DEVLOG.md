@@ -891,3 +891,10 @@ still waiting. Now a scheduled rebuild carries the time it was asked for; when i
 due it first checks the shelf: reads still queued, it steps back into the queue behind
 them; a rebuild already started since it was asked for, it is covered and returns. The
 duplicates in Redis were dropped by hand this once.
+
+**Restricted binds the receiver.** The first automatic export of the wiki cartridge
+came back *nothing selected*: while it read, its maker had set the clearance to
+restricted from the panel, and `resolve_selection` excluded every volume introduced by a
+restricted cartridge -- a rule written for cartridges that arrive. A cartridge made here
+is the maker's own; the mark is for whoever receives it. The exclusion now applies only
+to cartridges not made on this machine. 391 pages, 387 read, 15 MB, version 3.

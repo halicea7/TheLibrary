@@ -212,3 +212,37 @@ async def test_a_cartridge_made_here_is_editable_and_exports_as_itself(db, tmp_p
     m = read_manifest(path)
     assert m["id"] == str(cid) and m["version"] == 2
     assert m["design"]["material"] == "glitter" and m["design"]["clearance"] == "internal"
+
+
+async def test_a_restricted_cartridge_made_here_still_exports(db, tmp_path, monkeypatch):
+    """Restricted binds the receiver. The maker marked it, and may still ship it."""
+    import uuid
+    from datetime import UTC, datetime
+
+    from library_agent import config
+    from library_agent.db.models import Cartridge, CartridgeDocument
+    from library_agent.library.cartridge import resolve_selection
+
+    monkeypatch.setattr(config.settings(), "storage_dir", tmp_path / "documents")
+    doc = await make_document(db, title="Runbook", body=BODY_A)
+    cid = uuid.uuid4()
+    db.add(
+        Cartridge(
+            id=cid,
+            name="Ops",
+            slug="ops",
+            version=1,
+            colour="#4f7a3a",
+            made_by="import",
+            made_at=datetime.now(UTC),
+            level="full",
+            embed_model=config.settings().embed_model,
+            manifest={"origin": "import"},
+            content_hash="0" * 64,
+            document_count=1,
+            design={"clearance": "restricted"},
+        )
+    )
+    db.add(CartridgeDocument(cartridge_id=cid, document_id=doc.id, introduced=True))
+    await db.flush()
+    assert await resolve_selection(db, cartridge_ids=[cid]) == [doc.id]

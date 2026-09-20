@@ -86,6 +86,10 @@ async def edit(cartridge_id: uuid.UUID, req: DesignPatch, db: SessionDep) -> dic
     if req.colour:
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", req.colour):
             raise HTTPException(422, "colour must be #rrggbb")
+        if req.colour != row.colour and (row.design or {}).get("art", "generated") != "upload":
+            # The constellation is drawn in the cartridge's colour and kept; a new
+            # colour means it must be drawn again.
+            row.art_path = None
         row.colour = req.colour
     if req.icon_svg is not None:
         row.icon_svg = cart.sanitize_svg(req.icon_svg) if req.icon_svg else None
@@ -213,8 +217,9 @@ async def art(cartridge_id: uuid.UUID, db: SessionDep) -> Response:
     row = await db.get(Cartridge, cartridge_id)
     if not row:
         raise HTTPException(404, "no such cartridge")
+    headers = {"Cache-Control": "no-cache"}  # the label can change; ask each time
     if row.art_path and Path(row.art_path).exists():
-        return FileResponse(row.art_path, media_type="image/png")
+        return FileResponse(row.art_path, media_type="image/png", headers=headers)
     ids = list(
         (
             await db.execute(
@@ -227,7 +232,7 @@ async def art(cartridge_id: uuid.UUID, db: SessionDep) -> Response:
     png = render_constellation(await constellation_points(db, ids), row.colour)
     row.art_path = str(store_art(cartridge_id, png))
     await db.commit()
-    return Response(png, media_type="image/png")
+    return Response(png, media_type="image/png", headers=headers)
 
 
 @router.post("/import")

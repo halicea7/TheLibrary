@@ -1004,3 +1004,12 @@ way), enforced after the fact: no shared subject, no conflict. Re-judging the 99
 flagged clusters by hand: 7 survive, each naming a specific thing -- the mount state of
 one filesystem, the log path on one system, rsyslog's direction to one host. The
 end-of-import rebuild applies it to the shelf.
+
+**The rack kept the old label.** Changing a cartridge's colour recoloured the make
+panel's preview but not the rack's: the panel renders the constellation fresh through
+`/art/preview?colour=`, while the rack fetches `/art`, which draws the constellation
+*once* in the cartridge's colour and stores it -- and then serves that file forever,
+with no cache headers, so even a regenerated one came back from the browser's cache
+under the same URL. Three small changes: a colour change on a generated label drops the
+stored render; `/art` answers `Cache-Control: no-cache`; the rack and the inspect card
+put the colour in the art URL so the label texture's cache key changes with it.

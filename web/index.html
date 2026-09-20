@@ -1366,7 +1366,7 @@ async function loadRack(justInserted) {
     }));
     rack3d.ctrl.setCartridges(r.cartridges.map(c => ({
       id: c.id, design: c.design, colour: c.colour, name: c.name, level: c.level,
-      sub: `${c.level} · ${c.document_count} volumes`, points: rack3d.points[c.id], artUrl: `/api/cartridges/${c.id}/art`,
+      sub: `${c.level} · ${c.document_count} volumes`, points: rack3d.points[c.id], artUrl: `/api/cartridges/${c.id}/art?c=${c.colour.slice(1)}`,
       seated: cartridges.has(c.id),
     })));
     rackUnder();
@@ -1401,7 +1401,7 @@ async function inspectShow(id) {
     $('#inspect-meta').textContent = `${c.level} · ${c.document_count} volumes · v${c.version}${c.made_by ? ' · made by ' + c.made_by : ''}`;
     let points = [];
     try { points = (await (await fetch(`/api/cartridges/${id}/constellation`)).json()).points || []; } catch {}
-    inspect.ctrl.set({ design: c.design || {}, colour: c.colour, name: c.name, level: c.level, sub: `${c.level} · ${c.document_count} volumes`, points, artUrl: `/api/cartridges/${id}/art`, lit: cartridges.has(id), flip: fresh });
+    inspect.ctrl.set({ design: c.design || {}, colour: c.colour, name: c.name, level: c.level, sub: `${c.level} · ${c.document_count} volumes`, points, artUrl: `/api/cartridges/${id}/art?c=${c.colour.slice(1)}`, lit: cartridges.has(id), flip: fresh });
     el.dataset.on = 'true';
   }, 140);
 }

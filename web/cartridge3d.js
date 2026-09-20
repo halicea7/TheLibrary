@@ -372,30 +372,31 @@ function makeCartridge() {
   let bootAt = 0;  // when the cartridge landed in the socket; 0 when not booting
   let artKey = null, disposed = false;
 
-  // The pips and the power light. At rest: the level's pips glow in the cartridge's
-  // colour, the LED follows `lit`. When the cartridge lands in the socket, they boot:
-  // the pips come on one level at a time in verdigris -- catalogue, readings, full --
-  // each with a flash, and the power light comes on last. Seated, they stay verdigris:
-  // the cartridge is in use. Lifted out, they return to the colour.
-  const BOOT_STEP = 380, BOOT_LED = 260;
+  // The pips and the power light. The level's pips are always lit -- in the cartridge's
+  // own colour at rest. Seating it starts a boot once it lands in the socket: the lit
+  // pips turn, one level at a time, to a green that pops -- catalogue, readings, full,
+  // each with a flash -- and only then does the power light come on. Nothing goes dark
+  // on the way. Seated, the pips stay green (in use); lifted, they go back to colour.
+  const BOOT_STEP = 380, BOOT_LED = 260, PENDING = -1;
+  const LIT = new THREE.Color(0x37e07a);
   function lights(now) {
     const lvl = LEVELS[state.level] || 2, col = new THREE.Color(state.colour);
     const glow = col.clone().lerp(new THREE.Color(0xffffff), .35);
     const verd = new THREE.Color(cssColour('--verdigris') || '#4f9186');
-    const booting = bootAt > 0, t = booting ? now - bootAt : 0;
+    const pending = bootAt === PENDING, booting = bootAt > 0, t = booting ? now - bootAt : 0;
     const levelOf = i => (concept ? 3 - i : i + 1);  // pip index -> level 1..3, in lighting order
     pips.forEach((p, i) => {
-      const k = levelOf(i), belongs = k <= lvl;
-      let on = belongs, colour = state.lit ? verd : glow, intensity = 1.2;
-      if (booting && belongs) {
-        const since = t - (k - 1) * BOOT_STEP;
-        on = since >= 0;
-        colour = verd;
-        intensity = on ? 1.2 + 2.2 * Math.max(0, 1 - since / 320) : 0;  // a flash on arrival, then steady
+      const k = levelOf(i), on = k <= lvl;
+      let colour = glow, intensity = 1.2;
+      if (on && state.lit && !pending) {
+        if (booting) {
+          const since = t - (k - 1) * BOOT_STEP;
+          if (since >= 0) { colour = LIT; intensity = 1.4 + 2.4 * Math.max(0, 1 - since / 320); }  // turned: a flash, then steady green
+        } else colour = LIT;  // seated and booted: green
       }
       p.material.emissive.copy(on ? colour : new THREE.Color(0)); p.material.emissiveIntensity = on ? intensity : 0; p.material.color.set(on ? colour : 0x0b0e12);
     });
-    const ledOn = state.lit && (!booting || t >= lvl * BOOT_STEP + BOOT_LED);
+    const ledOn = state.lit && !pending && (!booting || t >= lvl * BOOT_STEP + BOOT_LED);
     led.material.emissive.copy(ledOn ? verd : new THREE.Color(0)); led.material.emissiveIntensity = ledOn ? 2.4 : 0; led.material.color.set(ledOn ? verd : 0x1a1f26);
     ledGlow.material.color.copy(verd); ledGlow.material.opacity = ledOn ? .9 : 0;
     if (booting && t > lvl * BOOT_STEP + BOOT_LED + 400) bootAt = 0;  // sequence over; rest state from here
@@ -492,7 +493,7 @@ function makeCartridge() {
       sparkles = new THREE.Points(geo, new THREE.PointsMaterial({ map: spriteTex(), vertexColors: true, size: .035, alphaTest: .55, transparent: false, depthWrite: true }));
       inner.add(sparkles);
     }
-    if (!bootAt) lights(performance.now());
+    if (bootAt <= 0) lights(performance.now());
   }
   function applyConstellation() {
     if (constellation) { inner.remove(constellation); constellation.geometry.dispose(); constellation = null; }
@@ -545,10 +546,12 @@ function makeCartridge() {
     },
     twinkle(now) {
       // Facet highlights follow the view in the shader; flakes stay embedded.
-      if (bootAt) lights(now);
-      else if (state.lit) ledGlow.material.opacity = .75 + .2 * Math.sin(now / 700);
+      if (bootAt > 0) lights(now);
+      else if (state.lit && bootAt === 0) ledGlow.material.opacity = .75 + .2 * Math.sin(now / 700);
     },
-    // The cartridge has landed in the socket: run the lights up.
+    // Seated but still falling: hold the lights as they were until it lands.
+    arm() { bootAt = PENDING; lights(performance.now()); },
+    // Landed in the socket: run the lights up.
     boot() { bootAt = performance.now(); lights(bootAt); },
     booting() { return bootAt > 0; },
     dispose() {
@@ -793,6 +796,7 @@ export function mountRack(canvas, handlers = {}) {
         if (!it) { it = { cart: makeCartridge(), x: SIDE, vx: 0, y: RAISED + .6, vy: 0, alpha: 0, seated: !!c.seated }; scene.add(it.cart.group); items.set(c.id, it); }
         it.seated = !!c.seated;
         it.cart.set({ design: c.design || {}, colour: c.colour, name: c.name, sub: c.sub, level: c.level, points: c.points || [], artUrl: c.artUrl, lit: !!c.seated });
+        if (it.seated && !it.booted) it.cart.arm();  // arriving seated: boot once it lands
       }
       order = list.map(c => c.id);
       const seated = list.find(c => c.seated);
@@ -802,7 +806,7 @@ export function mountRack(canvas, handlers = {}) {
     },
     show(id) { const i = order.indexOf(id); if (i < 0) return; const from = index; index = i; const it = items.get(id); if (it && it.alpha < .05) { it.x = i >= from ? SIDE : -SIDE; it.vx = 0; } wake(); handlers.onChange?.(id); },
     step(d) { if (!order.length) return; const i = (index + d + order.length) % order.length; const it = items.get(order[i]); if (it) { it.x = d > 0 ? SIDE : -SIDE; it.vx = 0; } index = i; wake(); handlers.onChange?.(order[i]); },
-    seat(id, on) { const it = items.get(id); if (!it) return; it.seated = on; it.booted = false; it.vy = on ? -6 : 4; it.cart.set({ lit: on }); wake(); },
+    seat(id, on) { const it = items.get(id); if (!it) return; it.seated = on; it.booted = false; it.vy = on ? -6 : 4; it.cart.set({ lit: on }); if (on) it.cart.arm(); wake(); },
     current, count: () => order.length,
     wake,
     dispose() { alive = false; if (frame) cancelAnimationFrame(frame); ro.disconnect(); for (const it of items.values()) it.cart.dispose(); renderer.dispose(); },

@@ -507,6 +507,18 @@ select, .toggle {
 .tour-card button.skip { border:0; padding:7px 4px; }
 @media (prefers-reduced-motion: reduce) { .tour-spot, .tour-card { transition:none; } }
 
+/* ── held passages: chosen from Find or Threads, they lead the next answer ── */
+.hold { font:10px/1 var(--mono); color:var(--faint); border:1px solid var(--rule); border-radius:2px; padding:3px 6px; background:transparent; cursor:pointer; margin-left:8px; }
+.hold:hover { color:var(--fg); border-color:var(--faint); }
+.hold[aria-pressed=true] { color:var(--bg); background:var(--amber); border-color:var(--amber); }
+.tray { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:0 0 8px; font:11px/1.4 var(--mono); color:var(--dim); }
+.tray .chip { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--amber); color:var(--fg); border-radius:2px; padding:3px 7px; font:10.5px/1 var(--mono); max-width:34ch; }
+.tray .chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tray .chip b { color:var(--amber); font-weight:500; cursor:pointer; }
+.tray .clear { margin-left:auto; }
+.note.held b::after { content:' held'; font:9px/1 var(--mono); color:var(--amber); letter-spacing:.06em; font-weight:400; }
+.note.held { border-left-color:var(--amber); }
+
 /* The highlighter: a marker-pen wash in amber (attention), never a box. */
 mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:inherit; padding:0 1px; border-radius:2px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
 .hit-x .lift { color:var(--fg); opacity:1; font-weight:500; background:linear-gradient(transparent 62%, color-mix(in srgb, var(--amber) 22%, transparent) 62%); }
@@ -817,6 +829,7 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
     <div id="inspect" data-on="false" aria-hidden="true"><canvas id="inspect-canvas"></canvas><div class="who" id="inspect-who"></div><div class="meta" id="inspect-meta"></div></div>
 
     <form class="composer" id="composer" autocomplete="off">
+      <div class="tray" id="tray" hidden></div>
       <input id="entry" placeholder="Ask the library something" aria-label="Ask the library"/>
       <div class="desk" id="desk"></div>
     </form>
@@ -1184,6 +1197,7 @@ function roomName() {
 }
 function placeholderFor(v) {
   const room = roomName();
+  if (v === 'ask' && held.size) return 'Ask about the passages in hand';
   if (v === 'ask') return room ? `Ask ${room}'s shelf` : 'Ask the library something';
   return room ? `Search ${room}'s shelf` : 'Search for a passage';
 }
@@ -1756,7 +1770,7 @@ function renderAnswer(el, text) {
       // A note from a cartridge wears its colour beside the rubric; a reading-only
       // source says so, since what it cites is their reading, not the page.
       const who = c ? `<span class="who">${esc(c.name)}${s.readings_only ? "'s reading" : ''}</span>` : '';
-      return `<span class="note ${c ? 'from' : ''}" data-n="${n}" ${c ? `style="--c:${esc(c.colour)}"` : ''}>${who}<b>${esc(short)}</b>${
+      return `<span class="note ${c ? 'from' : ''}${s.held ? ' held' : ''}" data-n="${n}" ${c ? `style="--c:${esc(c.colour)}"` : ''}>${who}<b>${esc(short)}</b>${
         s.page ? `<span class="pg">p.${s.page}</span>` : ''}${where ? ` · ${esc(where.slice(0,40))}` : ''}</span>`;
     }).join('');
     return `${html}<div class="apparatus">${notes}</div>`;
@@ -1798,7 +1812,8 @@ async function ask(text) {
 
   const body = { message:text, conversational:$('#multi').checked, model:$('#model').value,
                  conversation_id:convId, category_ids:subjects.size ? [...subjects] : null,
-                 cartridge_ids:cartridges.size ? [...cartridges] : null, stance, effort: $('#effort').value };
+                 cartridge_ids:cartridges.size ? [...cartridges] : null, stance, effort: $('#effort').value,
+                 pinned_chunk_ids: held.size ? [...held.keys()] : null };
   let answer = '', ev = null, buf = '', thought = '';
   try {
     const res = await fetch('/api/chat', {
@@ -1962,6 +1977,40 @@ function excerpt(text, lift) {
   return lift.trim() + ' … ' + text.slice(0, at).trim();
 }
 
+/* ── held passages ────────────────────────────────────────────────────── */
+// Passages the person chose -- from a Find hit, or a disagreement's two claims -- lead
+// the next answer's context; retrieval fills the rest of the budget around them.
+const held = new Map();  // chunk_id -> { title, page, document_id }
+function holdChunk(id, meta, btn) {
+  if (held.has(id)) held.delete(id); else held.set(id, meta);
+  if (btn) btn.setAttribute('aria-pressed', String(held.has(id)));
+  renderTray();
+}
+function holdFrom(btn) { const d = btn.dataset; holdChunk(d.id, { title: d.title, page: d.page ? +d.page : null, document_id: d.doc }, btn); }
+function clearHeld() { held.clear(); document.querySelectorAll('.hold[aria-pressed=true]').forEach(b => b.setAttribute('aria-pressed', 'false')); renderTray(); }
+function renderTray() {
+  const el = $('#tray'); if (!el) return;
+  el.hidden = !held.size;
+  if (!held.size) { $('#entry').placeholder = placeholderFor(view); return; }
+  el.innerHTML = `<span>${held.size} passage${held.size === 1 ? '' : 's'} in hand — the answer starts from these</span>` +
+    [...held].map(([id, m]) => `<span class="chip" title="${esc(m.title)}${m.page ? ', p.' + m.page : ''}"><span>${esc(shortTitle(m.title))}${m.page ? ` p.${m.page}` : ''}</span><b onclick="holdChunk('${id}')" title="Let go">×</b></span>`).join('') +
+    `<button type="button" class="linkish clear" onclick="clearHeld()">let them all go</button>`;
+  if (view === 'ask') $('#entry').placeholder = 'Ask about the passages in hand';
+}
+// Hold a disagreement: the passage each claim came from, found inside its own volume.
+async function holdConflict(pair, docIds, btn) {
+  btn.disabled = true; btn.textContent = 'finding…';
+  try {
+    for (const p of pair) {
+      const r = await (await fetch(`/api/search?q=${encodeURIComponent(p.claim)}&limit=1${docIds.length ? '&documents=' + docIds.join(',') : ''}`)).json();
+      const h = r.hits[0]; if (h) held.set(h.chunk_id, { title: h.document_title, page: h.page, document_id: h.document_id });
+    }
+    renderTray();
+    btn.setAttribute('aria-pressed', 'true'); btn.textContent = 'held';
+    say('Both sides of the disagreement are in hand. Ask which is right for you.');
+  } catch { btn.textContent = 'hold both'; } finally { btn.disabled = false; }
+}
+
 /* ── find ─────────────────────────────────────────────────────────────── */
 let findTimer;
 async function runFind(q) {
@@ -1978,6 +2027,7 @@ async function runFind(q) {
         <span class="hit-t">${hl(esc(h.document_title), words)}</span>
         ${h.page ? `<span class="hit-pg">p.${h.page}</span>` : ''}
         <span class="hit-rk">dense ${h.dense_rank ?? '–'} · lexical ${h.lexical_rank ?? '–'}</span>
+        <button type="button" class="hold" aria-pressed="${held.has(h.chunk_id)}" data-id="${h.chunk_id}" data-title="${esc(h.document_title)}" data-page="${h.page ?? ''}" data-doc="${h.document_id}" onclick="event.stopPropagation(); holdFrom(this)" title="Hold this passage: the next answer starts from it">hold</button>
       </div>
       <div class="hit-path">${esc((h.section_path || '').split(' › ').slice(1).join(' › ') || '—')}</div>
       <div class="hit-x">${hl(esc(excerpt(plain(h.text), h.lift && plain(h.lift))), words, h.lift && plain(h.lift))}</div>
@@ -2036,6 +2086,7 @@ function renderThreads() {
         const a = terms(c.pair[0].claim), b = new Set(terms(c.pair[1].claim));
         const shared = a.filter(w => b.has(w));
         body = `<div class="pair">${c.pair.map(p => `<blockquote><cite>${esc(p.source || 'one source')}</cite>${hl(esc(p.claim), [...shared, ...fwords])}</blockquote>`).join('')}</div>
+          <button type="button" class="hold" onclick='event.stopPropagation(); holdConflict(${JSON.stringify(c.pair).replace(/'/g, "&#39;")}, ${dids}, this)' title="Hold both claims' passages: then ask which is right for you">hold both</button>
           <p class="why">${hl(esc(c.explanation), fwords)}</p>`;
       } else {
         body = `<p class="why">${hl(esc(c.explanation), fwords)}</p>`;

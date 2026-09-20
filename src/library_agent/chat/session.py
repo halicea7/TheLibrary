@@ -24,7 +24,7 @@ from library_agent.llm.liveness import Busy, gate, liveness
 from library_agent.llm.ollama import Ollama
 from library_agent.ops.incidents import record_exception
 from library_agent.retrieval.hybrid import SearchHit
-from library_agent.retrieval.pipeline import retrieve
+from library_agent.retrieval.pipeline import hits_for_chunks, retrieve
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ async def run_turn(
     seed: int | None = None,
     caller: str = "ui",
     effort: str | None = None,
+    pinned_chunk_ids: list[uuid.UUID] | None = None,
 ) -> AsyncIterator[dict]:
     """Yields SSE-shaped events: meta → sources → thinking* → token* → done.
 
@@ -149,11 +150,15 @@ async def run_turn(
             },
         }
 
-        if needs_retrieval:
+        pinned = list(pinned_chunk_ids or [])
+        if needs_retrieval or pinned:
             async with session_scope() as db:
-                seen: set = set()
+                # Passages the person held lead the context; retrieval fills the rest of
+                # the budget around them rather than replacing them.
+                held_hits = await hits_for_chunks(db, pinned) if pinned else []
+                seen: set = {h.chunk_id for h in held_hits}
                 merged: list[SearchHit] = []
-                for q in queries:
+                for q in queries if needs_retrieval else []:
                     for h in await retrieve(
                         db,
                         q,
@@ -170,10 +175,11 @@ async def run_turn(
                             merged.append(h)
                 # Across several searches, keep the strongest; within one, retrieve() already did.
                 merged.sort(key=lambda h: -h.score)
-                state.hits = merged[: lvl.passages]
+                room = max(lvl.passages - len(held_hits), 0)
+                state.hits = held_hits + merged[:room]
                 if document_ids:
                     state.hits = [h for h in state.hits if h.document_id in set(document_ids)]
-                state.sources = build_sources(state.hits)
+                state.sources = build_sources(state.hits, {h.chunk_id for h in held_hits})
                 docs = {
                     d.id: d
                     for d in (
@@ -205,6 +211,7 @@ async def run_turn(
                     "document_id": s.document_id,
                     "readings_only": s.readings_only,
                     "cartridge": s.cartridge,
+                    "held": s.held,
                 }
                 for s in state.sources
             ],

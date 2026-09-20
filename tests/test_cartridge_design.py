@@ -31,20 +31,29 @@ class TestDesign:
         assert clamp_design(None) == DEFAULT_DESIGN
         assert clamp_design({"material": "lava"})["material"] == DEFAULT_DESIGN["material"]
 
-
     @pytest.mark.parametrize("finish", ["paper", "gloss", "holo", "prism", "gold", "chrome"])
     def test_label_finish_survives_serialization(self, finish):
-        design = clamp_design({"material": "smoke", "labelFinish": finish, "labelFinishStrength": .37})
+        design = clamp_design(
+            {"material": "smoke", "labelFinish": finish, "labelFinishStrength": 0.37}
+        )
         assert clamp_design(json.loads(json.dumps(design))) == design
         assert design["labelFinish"] == finish
-        assert design["labelFinishStrength"] == .37
+        assert design["labelFinishStrength"] == 0.37
         assert design["material"] == "smoke"
 
     def test_label_finish_defaults_and_limits(self):
         assert clamp_design({})["labelFinish"] == "paper"
         assert clamp_design({"labelFinish": "unknown"})["labelFinish"] == "paper"
         assert clamp_design({"labelFinish": "HOLO"})["labelFinish"] == "holo"
-        for value, expected in [(-1, 0), (2, 1), ("0.4", .4), (None, .65), ("bad", .65), (float("nan"), .65), (float("inf"), .65)]:
+        for value, expected in [
+            (-1, 0),
+            (2, 1),
+            ("0.4", 0.4),
+            (None, 0.65),
+            ("bad", 0.65),
+            (float("nan"), 0.65),
+            (float("inf"), 0.65),
+        ]:
             assert clamp_design({"labelFinishStrength": value})["labelFinishStrength"] == expected
 
 

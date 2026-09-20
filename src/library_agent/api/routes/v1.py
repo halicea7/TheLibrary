@@ -44,6 +44,10 @@ class AskIn(BaseModel):
     )
     deadline_seconds: int | None = Field(default=None, ge=10, le=1800)
     effort: str | None = Field(default=None, description="quick | normal | deep")
+    passages: list[uuid.UUID] = Field(
+        default_factory=list,
+        description="chunk ids (from /search) to answer from first; retrieval fills the rest",
+    )
 
 
 class Citation(BaseModel):
@@ -54,6 +58,7 @@ class Citation(BaseModel):
     document_id: str
     cartridge: dict | None = None
     readings_only: bool = False
+    held: bool = False  # chosen by the caller rather than found by retrieval
 
 
 class AskOut(BaseModel):
@@ -156,6 +161,7 @@ async def ask(req: AskIn, request: Request) -> AskOut:
             seed=seed,
             caller=_caller(request),
             effort=req.effort,
+            pinned_chunk_ids=req.passages or None,
         ):
             kind, data = ev["event"], ev["data"]
             if kind == "meta":
@@ -188,6 +194,7 @@ async def ask(req: AskIn, request: Request) -> AskOut:
                 document_id=s["document_id"],
                 cartridge=s.get("cartridge"),
                 readings_only=bool(s.get("readings_only")),
+                held=bool(s.get("held")),
             )
             for s in sources
             if s["n"] in cited

@@ -29,6 +29,8 @@ class Source:
     # whether what we hold is the owner's reading rather than the text.
     cartridge: dict | None = None
     readings_only: bool = False
+    # Chosen by the person (held from Find or Threads) rather than found by retrieval.
+    held: bool = False
 
     def label(self) -> str:
         loc = f", p.{self.page}" if self.page else ""
@@ -37,7 +39,8 @@ class Source:
         return f"{self.document_title}{loc}"
 
 
-def build_sources(hits: list[SearchHit]) -> list[Source]:
+def build_sources(hits: list[SearchHit], held: set | None = None) -> list[Source]:
+    held = held or set()
     return [
         Source(
             n=i,
@@ -46,6 +49,7 @@ def build_sources(hits: list[SearchHit]) -> list[Source]:
             document_title=h.document_title,
             section_path=h.section_path,
             page=h.page,
+            held=h.chunk_id in held,
         )
         for i, h in enumerate(hits, start=1)
     ]

@@ -33,6 +33,8 @@ class ChatRequest(BaseModel):
     cartridge_ids: list[uuid.UUID] | None = None
     stance: str | None = None
     effort: str | None = None  # quick | normal | deep
+    # Passages held from Find or Threads: they lead the context, retrieval fills around.
+    pinned_chunk_ids: list[uuid.UUID] | None = None
 
 
 class ConversationOut(BaseModel):
@@ -111,6 +113,7 @@ async def chat(req: ChatRequest) -> EventSourceResponse:
             document_ids=req.document_ids,
             stance=req.stance,
             effort=req.effort,
+            pinned_chunk_ids=req.pinned_chunk_ids,
         ):
             payload = ev["data"]
             yield {

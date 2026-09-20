@@ -1030,3 +1030,19 @@ explain how each part works while doing it: the Ask step submits the question an
 visitor watches it think. Writes answer with a note that this is the demo. Asset paths
 went relative (`./vendor/`, `./cartridge3d.js`) so the same files serve from `/`
 locally and from `/TheLibrary/` on Pages. Nothing real is in it, by design.
+
+
+## Follow-on: passages in hand
+
+"Could findings from Find be thrown as context into Ask?" — and *lead* it, not replace
+it, for Find and Threads both. A `hold` toggle on each Find hit and *hold both* under a
+disagreement (the passage behind each claim, found by searching the claim inside its
+own volume; `/api/search` takes `documents=` for that, and an explicit document scope
+now wins over the router's top-up). Held chunk ids travel as `pinned_chunk_ids` on
+`/api/chat` and `passages` on `/api/v1/ask`; `hits_for_chunks` turns them into hits
+scored above anything fusion produces, they take the head of the list and retrieval
+fills the rest of the passage budget. `Source.held` rides the `sources` event and the
+note in the margin says *held*, so the answer shows which evidence was chosen and which
+found. A tray under the composer lists what is in hand across tabs and follow-ups. One
+bug on the way: titles with quotes broke an inline handler that inlined them; the
+button carries data attributes now.

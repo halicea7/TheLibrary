@@ -56,6 +56,7 @@ async def retrieve(
     limit: int | None = None,
     category_ids: list[uuid.UUID] | None = None,
     cartridge_ids: list[uuid.UUID] | None = None,
+    document_ids: list[uuid.UUID] | None = None,
 ) -> list[SearchHit]:
     cfg = settings()
     rc = config or RetrievalConfig()
@@ -88,7 +89,7 @@ async def retrieve(
         else cfg.weight_lexical,
     }
 
-    if routed_docs:
+    if routed_docs and not document_ids:
         # Retrieve wide inside the routed set, then top up from the whole corpus.
         routed_pool = max(1, int(pool * (1 - reserve)))
         global_pool = max(1, pool - routed_pool)
@@ -99,7 +100,11 @@ async def retrieve(
         seen = {h.chunk_id for h in primary}
         candidates = primary + [h for h in fallback if h.chunk_id not in seen]
     else:
-        candidates = await hybrid_search(db, query, limit=pool, pool=pool, **common)
+        # An explicit document scope (a caller asking for a passage from *this* volume)
+        # is exact, so the router's top-up from the whole corpus does not apply.
+        candidates = await hybrid_search(
+            db, query, limit=pool, pool=pool, document_ids=document_ids, **common
+        )
 
     if rc.use_reranker and candidates and rerank_mod.available():
         # Score only the head. The cross-encoder costs ~65ms per pair on MPS, so
@@ -147,3 +152,44 @@ LADDER = [
 CHAT_RETRIEVAL = RetrievalConfig(name="chat", use_reranker=True, rerank_depth=20)
 # What the raw search box should use: keyword queries are hurt by the cross-encoder.
 KEYWORD_RETRIEVAL = RetrievalConfig(name="keyword", use_reranker=False)
+
+
+async def hits_for_chunks(db, chunk_ids: list) -> list:
+    """Chosen passages as hits, in the order given -- what a person held from Find or
+    Threads. Scored above anything retrieval finds so they lead the context."""
+    from sqlalchemy import select
+
+    from library_agent.db.models import Chunk, Document, Section
+    from library_agent.retrieval.hybrid import SearchHit
+
+    if not chunk_ids:
+        return []
+    rows = (
+        await db.execute(
+            select(Chunk, Document.title, Section.path)
+            .join(Document, Document.id == Chunk.document_id)
+            .outerjoin(Section, Section.id == Chunk.section_id)
+            .where(Chunk.id.in_(chunk_ids))
+        )
+    ).all()
+    by_id = {c.id: (c, title, path) for c, title, path in rows}
+    out = []
+    for i, cid in enumerate(chunk_ids):
+        if cid not in by_id:
+            continue
+        c, title, path = by_id[cid]
+        out.append(
+            SearchHit(
+                chunk_id=c.id,
+                document_id=c.document_id,
+                document_title=title,
+                section_path=path or title,
+                page=c.page_start,
+                text=c.text,
+                score=10.0 - i * 0.001,
+                dense_rank=None,
+                lexical_rank=None,
+                context_prefix=c.context_prefix or "",
+            )
+        )
+    return out

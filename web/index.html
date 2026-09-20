@@ -240,7 +240,7 @@ body {
 
 /* ── jobs ─────────────────────────────────────────────────────────────── */
 .job { font:11px/1.5 var(--mono); color:var(--dim); padding:5px 0; }
-.job .bar { height:2px; background:var(--rule); margin-top:5px; overflow:hidden; }
+.job .bar { display:block; height:2px; background:var(--rule); margin-top:5px; overflow:hidden; border-radius:1px; }
 .job .bar i { display:block; height:100%; background:var(--verdigris); transition:width .4s ease; }
 .job.paused { color:var(--amber); }
 
@@ -1500,7 +1500,7 @@ async function loadJobs() {
     const pct = j.progress_total ? Math.round(100 * j.progress_current / j.progress_total) : 0;
     const paused = j.state === 'yielded';
     return `<div class="job ${paused ? 'paused' : ''}">
-      ${esc((j.document_title || '').slice(0,30))}<br>
+      ${j.document_title ? esc(j.document_title.slice(0,30)) + '<br>' : ''}
       ${paused ? 'paused — you are talking' : j.kind === 'library' ? `rebuilding threads · ${esc(j.yielded_reason || '')}${j.progress_total > 1 ? ` ${j.progress_current} of ${j.progress_total}` : ''}` : j.kind === 'reshelve' ? `shelving · ${j.progress_current} of ${j.progress_total}` : `${j.kind === 'tier2' ? 'annotating' : 'reading'} · section ${j.progress_current} of ${j.progress_total}`}
       <span class="bar"><i style="width:${pct}%"></i></span>
     </div>`;

@@ -980,37 +980,51 @@ const web = {
     const css = getComputedStyle(document.documentElement);
     const rubric = css.getPropertyValue('--rubric').trim(), verd = css.getPropertyValue('--verdigris').trim();
     const P = new Map(); for (const n of this.nodes) P.set(n, this.project(n));
-    const colour = (n, l, a) => n.c ? n.c : n.top && this.hueOf[n.top] != null ? `hsl(${this.hueOf[n.top]} ${dark ? 45 : 42}% ${l}% / ${a})` : `rgba(${ink},${a})`;
+    // By day the glow is stained glass: saturated, bright hues multiplied into the
+    // page, so where volumes overlap the colour deepens instead of greying.
+    // Most volumes are unshelved and have no hue of their own; at night their ink haze
+    // glows white-green additively, by day it would only grey the page, so they glow
+    // gold -- lamplight on papyrus -- and the shelved ones keep their shelf's hue.
+    // A cartridge's colour is used as given at night; by day its hue is kept and the
+    // glow is lifted to lamp brightness, since a dark olive at full strength is a stain.
+    const hueC = hex => { if (!this.hueCache) this.hueCache = {}; if (this.hueCache[hex]) return this.hueCache[hex]; const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255, mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; let h = 0; if (d) { h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h = Math.round(h * 60); if (h < 0) h += 360; } return (this.hueCache[hex] = h); };
+    const colour = (n, l, a) => n.c ? (dark ? (a === 0 && n.c.length === 7 ? n.c + '00' : n.c) : `hsl(${hueC(n.c)} 78% ${l}% / ${a})`) : n.top && this.hueOf[n.top] != null ? `hsl(${this.hueOf[n.top]} ${dark ? 45 : 80}% ${l}% / ${a})` : dark ? `rgba(${ink},${a})` : `hsl(40 95% ${l}% / ${a})`;
     // edges, faint, fading with depth
     c.lineWidth = .7;
     for (const e of this.edges) {
       const a = P.get(e.a), b = P.get(e.b), depth = 1 - (a.depth + b.depth) / 2;
       const lit = Math.min(e.a.lit, e.b.lit);
       // By day the chart is its lines: the haze is nearly gone, so the edges carry it.
-      const ek = dark ? (e.k === 'cite' ? .26 : e.k === 'thread' ? .18 : .08) : (e.k === 'cite' ? .3 : e.k === 'thread' ? .2 : .09);
+      const ek = dark ? (e.k === 'cite' ? .26 : e.k === 'thread' ? .18 : .08) : (e.k === 'cite' ? .32 : e.k === 'thread' ? .22 : .1);
       c.strokeStyle = lit > .05 ? rubric : `rgba(${ink},${ek * e.w * (.35 + .65 * depth)})`;
       c.globalAlpha = lit > .05 ? .2 + .6 * lit : 1;
       c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
     }
     c.globalAlpha = 1;
     // the haze: additive, so overlapping volumes brighten into a cloud
-    c.globalCompositeOperation = dark ? 'lighter' : 'multiply';
+    // Additive light at night. By day, multiply can only darken, so overlapping halos
+    // turn to mud; painting them over the page instead lets the colour build toward the
+    // hue itself -- a glow the way a lamp behind coloured glass glows in daylight.
+    c.globalCompositeOperation = dark ? 'lighter' : 'source-over';
     const order = [...this.nodes].sort((m, n) => P.get(n).depth - P.get(m).depth);
     for (const n of order) {
       const p = P.get(n), near = 1 - p.depth, R = (n.r * 9 + 18) * p.s;
       const grd = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
-      const hazeA = (dark ? .17 : .014) * (.4 + .6 * near);
-      if (n.lit > .02) { grd.addColorStop(0, rubric); c.globalAlpha = (dark ? .5 : .22) * n.lit; n.lit *= .992; }
-      else { grd.addColorStop(0, colour(n, dark ? 62 : 45, 1)); c.globalAlpha = hazeA; }
-      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      const hazeA = (dark ? .17 : .018) * (.4 + .6 * near);
+      // The outer stop is the same colour at zero alpha, not transparent black: the
+      // gradient interpolates straight through the colour space, and a fade toward
+      // black is invisible in additive light but reads as soot on a light page.
+      if (n.lit > .02) { grd.addColorStop(0, rubric); grd.addColorStop(1, dark || rubric.length !== 7 ? 'rgba(0,0,0,0)' : rubric + '00'); c.globalAlpha = (dark ? .5 : .3) * n.lit; n.lit *= .992; }
+      else if (dark) { grd.addColorStop(0, colour(n, 62, 1)); grd.addColorStop(1, 'rgba(0,0,0,0)'); c.globalAlpha = hazeA; }
+      else { grd.addColorStop(0, colour(n, 55, 1)); grd.addColorStop(1, colour(n, 55, 0)); c.globalAlpha = hazeA; }
       c.fillStyle = grd; c.beginPath(); c.arc(p.x, p.y, R, 0, Math.PI * 2); c.fill();
     }
     c.globalCompositeOperation = 'source-over';
     // the volumes themselves
     for (const n of order) {
       const p = P.get(n), near = 1 - p.depth;
-      c.globalAlpha = (n.tier === 0 ? (dark ? .3 : .32) : (dark ? .55 : .6)) * (.35 + .65 * near);
-      c.fillStyle = n.lit > .02 ? rubric : colour(n, dark ? 70 : 40, 1);
+      c.globalAlpha = (n.tier === 0 ? (dark ? .3 : .6) : (dark ? .55 : .95)) * (.35 + .65 * near);
+      c.fillStyle = n.lit > .02 ? rubric : (!dark && !n.c && !(n.top && this.hueOf[n.top] != null)) ? `rgba(${ink},1)` : colour(n, dark ? 70 : 40, 1);
       c.beginPath(); c.arc(p.x, p.y, Math.max(.6, n.r * p.s), 0, Math.PI * 2); c.fill();
       if (n.tier >= 2) { c.lineWidth = .7; c.strokeStyle = c.fillStyle; c.beginPath(); c.arc(p.x, p.y, n.r * p.s + 2, 0, Math.PI * 2); c.stroke(); }
     }

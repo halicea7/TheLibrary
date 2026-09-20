@@ -474,6 +474,19 @@ select, .toggle {
 .edge { font:11px/1.7 var(--mono); color:var(--dim); }
 .edge em { font-style:normal; color:var(--faint); padding:0 5px; }
 .edge b { color:var(--fg); font-weight:500; }
+/* ── the tracer: a point of gilt light travelling the outline of a control that wants
+   attention. Not a glowing box -- one bright arc on a conic gradient, masked to the
+   border, turning. Reduced motion: a still gilt ring. */
+@property --tracer-a { syntax:'<angle>'; inherits:false; initial-value:0deg; }
+.tracer { position:relative; }
+.tracer::after { content:''; position:absolute; inset:-4px -6px; border-radius:4px; padding:1.5px; pointer-events:none;
+  background:conic-gradient(from var(--tracer-a), transparent 0 62%, color-mix(in srgb, var(--gilt) 40%, transparent) 78%, var(--gilt-hi) 90%, var(--gilt) 95%, transparent 100%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude;
+  filter:drop-shadow(0 0 3px color-mix(in srgb, var(--gilt-hi) 70%, transparent));
+  animation:tracer 2.6s linear infinite; }
+@keyframes tracer { to { --tracer-a:360deg; } }
+@media (prefers-reduced-motion: reduce) { .tracer::after { animation:none; background:var(--gilt); opacity:.7; filter:none; } }
+
 /* ── the tour: a spotlight on one thing at a time, a card beside it, a soft lock ── */
 .tour-lock { position:fixed; inset:0; z-index:200; }
 .tour-spot { position:fixed; z-index:201; border-radius:6px; pointer-events:none;
@@ -1205,7 +1218,16 @@ function volHtml(d) {
     </div>`;
 }
 
+// Is a reshelve due? The button wears a tracer while it is, with the reason as its tip.
+async function shelfHealth() {
+  let h; try { h = await (await fetch('/api/shelf/health')).json(); } catch { return; }
+  const b = $('#reshelve'); if (!b) return;
+  b.classList.toggle('tracer', !!h.needed);
+  b.title = h.needed ? `A reshelve is due: ${h.reason}. Click to have the library redesign its shelves from everything it holds.`
+    : 'Have the library organise its shelf: top shelves, sub-shelves, one place per volume';
+}
 async function loadShelf() {
+  shelfHealth();
   const [docs, cats] = await Promise.all([
     (await fetch('/api/documents')).json(),
     (await fetch('/api/categories')).json(),
@@ -2577,7 +2599,7 @@ $('#effort').onchange = () => localStorage.setItem('effort', $('#effort').value)
 const TOUR = [
   { sel: '#drop', title: 'Start here: drop documents', text: 'PDF, Markdown, HTML, text — or a whole folder. A document is <b>searchable within seconds</b>; reading it comes next.' },
   { sel: '#shelf-acts', title: 'Have it read', text: '<b>read the N unread</b> writes a summary of every section, its claims and subjects — a couple of minutes a paper, in the background. <b>annotate</b> goes deeper and writes marginalia. Both queue everything in view and skip what is already in hand.', fallback: '#shelf' },
-  { sel: '#reshelve', title: 'Reshelve', text: 'Easy to miss and worth knowing: the shelf is two levels — top shelves and sub-shelves — designed by the model from what is actually here. When the collection changes character (a new field arrives), <b>reshelve</b> redesigns the top shelves from everything you hold. Choosing one shelf offers <b>re-shelve these N</b> for a shelf that collected the wrong things.' },
+  { sel: '#reshelve', title: 'Reshelve', text: 'Easy to miss and worth knowing: the shelf is two levels — top shelves and sub-shelves — designed by the model from what is actually here. When the collection outgrows them (a new field arrives), <b>reshelve</b> redesigns the top shelves from everything you hold — and this button wears a travelling gilt light when that is due. Choosing one shelf offers <b>re-shelve these N</b> for a shelf that collected the wrong things.' },
   { sel: '#rack3d', title: 'The rack', text: 'Cartridges are slices of a library that another library can plug in. Step through them; click one to <b>seat it</b> and everything — Ask, Find, the shelf — stays inside its room. <b>+</b> makes one from what is scoped; a cartridge made here has an <b>edit</b> on its plaque.', fallback: '#rack' },
   { sel: '#tab-ask', title: 'Ask', text: 'Talk to the collection. Every claim in an answer gets a note in the margin naming the volume and page; anything the model invents is stripped before you see it. Anything unmarked is its own reasoning.', view: 'ask' },
   { sel: '#effort', title: 'Effort', text: '<b>quick</b> is a lookup, <b>normal</b> is the default, <b>deep</b> breaks the question into several searches first — for comparisons and multi-part questions.' },

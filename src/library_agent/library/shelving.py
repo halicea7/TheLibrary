@@ -338,6 +338,90 @@ def _taxonomy_is_sane(out: dict[str, Any], max_top: int) -> bool:
     return True
 
 
+DESIGN_KEY = "taxonomy_design"
+# A reshelve is due when the read collection has grown by this much since the top
+# shelves were designed: a quarter, and at least twenty volumes.
+REDESIGN_FRACTION = 0.25
+REDESIGN_MIN = 20
+
+
+async def record_design(db: AsyncSession) -> None:
+    """Remember when the top shelves were designed and on how many read volumes."""
+    from datetime import UTC, datetime
+
+    from library_agent.db.models import LibraryMeta
+
+    n = (
+        await db.execute(select(func.count()).select_from(Document).where(Document.tier >= 1))
+    ).scalar() or 0
+    row = await db.get(LibraryMeta, DESIGN_KEY)
+    value = {"at": datetime.now(UTC).isoformat(), "read_volumes": n}
+    if row:
+        row.value = value
+    else:
+        db.add(LibraryMeta(key=DESIGN_KEY, value=value))
+    await db.flush()
+
+
+async def shelf_health(db: AsyncSession) -> dict[str, Any]:
+    """Is a reshelve due? Three signals: read volumes with no place; no top shelves at
+    all while there is something to shelve; and the collection having grown past the
+    shelves it was designed for. The reason is a sentence for the button's tooltip."""
+    from library_agent.db.models import Job, JobState, LibraryMeta
+
+    read = (
+        await db.execute(select(func.count()).select_from(Document).where(Document.tier >= 1))
+    ).scalar() or 0
+    unshelved = (
+        await db.execute(
+            select(func.count())
+            .select_from(Document)
+            .where(Document.tier >= 1, Document.shelf_id.is_(None))
+        )
+    ).scalar() or 0
+    tops = (
+        await db.execute(
+            select(func.count())
+            .select_from(Category)
+            .where(Category.parent_id.is_(None), Category.id.in_(select(Category.parent_id)))
+        )
+    ).scalar() or 0
+    in_hand = (
+        await db.execute(
+            select(func.count())
+            .select_from(Job)
+            .where(Job.kind == "reshelve", Job.state.in_([JobState.QUEUED, JobState.RUNNING]))
+        )
+    ).scalar() or 0
+    meta = await db.get(LibraryMeta, DESIGN_KEY)
+    designed_on = (meta.value or {}).get("read_volumes") if meta else None
+    grown = read - designed_on if designed_on is not None else None
+    out: dict[str, Any] = {
+        "read": read,
+        "unshelved": unshelved,
+        "top_shelves": tops,
+        "designed_on": designed_on,
+        "grown": grown,
+        "in_hand": bool(in_hand),
+        "needed": False,
+        "reason": "",
+    }
+    if in_hand or read == 0:
+        return out
+    if tops == 0:
+        out.update(needed=True, reason=f"{read} read volumes and no shelves yet")
+    elif unshelved >= max(3, read // 20):
+        out.update(needed=True, reason=f"{unshelved} read volumes have no place on the shelf")
+    elif grown is not None and grown >= max(REDESIGN_MIN, int(designed_on * REDESIGN_FRACTION)):
+        out.update(
+            needed=True,
+            reason=f"the shelves were designed for {designed_on} volumes; there are {read} now",
+        )
+    elif designed_on is None and read >= REDESIGN_MIN:
+        out.update(needed=True, reason="the shelves have not been designed on this collection")
+    return out
+
+
 async def build_taxonomy(db: AsyncSession, *, client: Ollama | None = None) -> Taxonomy:
     """One model call organises every subject in use into two levels, then it is applied."""
     subjects = await _subjects_in_use(db)
@@ -445,6 +529,7 @@ async def build_taxonomy(db: AsyncSession, *, client: Ollama | None = None) -> T
 
     # Clear the old structure; every canonical category is re-homed below.
     await db.execute(update(Category).values(parent_id=None))
+    await record_design(db)
     tx = Taxonomy()
     absorbed: set[uuid.UUID] = set()
     for shelf in (out.get("shelves") or [])[:MAX_TOP]:

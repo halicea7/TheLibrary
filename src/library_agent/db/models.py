@@ -468,6 +468,22 @@ class Message(Base):
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
 
+# --------------------------------------------------------------------------- meta
+
+
+class LibraryMeta(Base):
+    """A few facts about the library itself, by key: when the shelves were last designed
+    and on how many read volumes, so the UI can tell when a reshelve is due."""
+
+    __tablename__ = "library_meta"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 # --------------------------------------------------------------------------- jobs
 
 

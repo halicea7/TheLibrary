@@ -257,6 +257,14 @@ async def start_figures(
     return {"queued": len(ids)}
 
 
+@router.get("/shelf/health")
+async def shelf_health_route(db: SessionDep) -> dict:
+    """Whether a reshelve is due, and why -- the shelf button glows on it."""
+    from library_agent.library.shelving import shelf_health
+
+    return await shelf_health(db)
+
+
 @router.post("/shelf/reshelve")
 async def reshelve(
     db: SessionDep, rebuild: bool = True, category_id: uuid.UUID | None = None

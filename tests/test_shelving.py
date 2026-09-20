@@ -150,3 +150,39 @@ class TestPlacementEvidence:
         await db.flush()
         _, tags = await _summary_and_tags(db, doc)
         assert "Information Retrieval" not in tags and "Security Research" in tags
+
+
+class TestShelfHealth:
+    """When the button should glow: no shelves, unplaced volumes, or a grown collection."""
+
+    async def test_no_shelves_yet(self, db):
+        from library_agent.library.shelving import shelf_health
+
+        await make_document(db, title="A", body="alpha " * 40, tier=1)
+        h = await shelf_health(db)
+        # Never designed on this collection: either there are no shelves, or nothing
+        # says when they were designed.
+        assert h["needed"] and ("no shelves" in h["reason"] or "not been designed" in h["reason"])
+
+    async def test_grown_past_design(self, db):
+        from library_agent.library.shelving import record_design, shelf_health
+
+        top = await taxonomy.get_or_create(db, "Cybersecurity")
+        sub = await taxonomy.get_or_create(db, "Web Exploitation")
+        sub.parent_id = top.id
+        await db.flush()
+        docs = [
+            await make_document(db, title=f"D{i}", body=f"doc {i} " * 40, tier=1) for i in range(4)
+        ]
+        for d in docs:
+            d.shelf_id = sub.id
+        await db.flush()
+        await record_design(db)
+        base = (await shelf_health(db))["designed_on"]
+        assert not (await shelf_health(db))["needed"]
+        for i in range(max(20, base // 4) + 1):
+            d = await make_document(db, title=f"N{i}", body=f"new {i} " * 40, tier=1)
+            d.shelf_id = sub.id
+        await db.flush()
+        h = await shelf_health(db)
+        assert h["needed"] and "designed for" in h["reason"]

@@ -121,7 +121,9 @@ async def describe_figures(
             head = f"Figure {f.n}, p.{f.page}"
             if f.caption:
                 # The caption usually starts with its own "Figure 3:"; say it once.
-                cap = re.sub(r"^\s*(figure|fig\.?)\s*\d+\s*[:.\-–—]?\s*", "", f.caption, flags=re.IGNORECASE)
+                cap = re.sub(
+                    r"^\s*(figure|fig\.?)\s*\d+\s*[:.\-–—]?\s*", "", f.caption, flags=re.IGNORECASE
+                )
                 head += f": {cap}" if cap else ""
             texts.append((f, f"{head}\n\n{desc}"))
     finally:

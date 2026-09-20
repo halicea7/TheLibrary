@@ -928,3 +928,14 @@ over, so an empty library gets a shorter tour. Esc, arrows and Enter drive it; c
 the dimmed page advances rather than escaping, since that is what a first-timer does.
 First visit only (`tour.done` in localStorage); *show the tour* in Settings brings it
 back.
+
+**When a reshelve is due.** "It should detect when a reshelve is needed, and outline
+the button with a glowing tracer -- not a full glowing box, a tracer that travels."
+Detection needed one fact the library never kept: when the shelves were designed and
+on how many read volumes. A `library_meta` table holds it (`record_design` in
+`build_taxonomy`). `shelf_health` then says due when there are no top shelves, when
+read volumes sit unplaced, or when the read collection has grown by a quarter (and at
+least twenty) past the design; a reshelve already in hand silences it. The tracer is a
+conic gradient with one bright arc, masked to a hairline border with `mask-composite:
+exclude`, its start angle a registered `@property` so it can animate -- one point of
+gilt light going round the button every 2.6 s. Reduced motion gets a still ring.

@@ -702,7 +702,7 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
     <p class="label">Accession</p>
     <div class="accession" id="drop" tabindex="0" role="button" aria-label="Add a document">
       <b>Drop documents or folders</b>
-      <span>pdf · md · txt · rst — folders are walked · a cartridge .zip goes on the rack</span>
+      <span>pdf · md · html · txt · rst — folders are walked · a cartridge .zip goes on the rack</span>
       <input type="file" id="file" multiple accept=".pdf,.md,.markdown,.txt,.rst,.zip" hidden/>
     </div>
     <div class="notice" id="notice" role="status"></div>
@@ -1451,7 +1451,7 @@ function say(msg, bad) {
 }
 
 /* ── accession ────────────────────────────────────────────────────────── */
-const SUPPORTED = /\.(pdf|md|markdown|txt|text|rst|zip)$/i;
+const SUPPORTED = /\.(pdf|md|markdown|txt|text|rst|html?|zip)$/i;
 
 // A dropped folder arrives as a directory entry, not a list of files. Walk it.
 async function collect(items) {

@@ -51,7 +51,7 @@ class IngestResult:
 
 
 def _guess_kind(path: Path, pages: int) -> str:
-    if path.suffix.lower() in {".md", ".markdown", ".rst"}:
+    if path.suffix.lower() in {".md", ".markdown", ".rst", ".html", ".htm"}:
         return DocumentKind.DOC
     if path.suffix.lower() in {".txt", ".text"}:
         return DocumentKind.NOTE

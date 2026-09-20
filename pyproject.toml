@@ -29,6 +29,7 @@ dependencies = [
     "tiktoken>=0.8",
     "pillow>=12.3.0",
     "mcp>=2.2.0",
+    "markdownify>=1.2.3",
 ]
 
 [project.optional-dependencies]

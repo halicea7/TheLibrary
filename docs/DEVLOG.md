@@ -856,3 +856,18 @@ cap, placement evidence, quoted conflicts, figures from the same regions extract
 already finds) folded into *How it works*. The reference sections were kept as they
 were. Found on the way: the figure card in the night room was a white box with an
 invisible caption; it takes the panel colour now, with the render on its own white paper.
+
+
+## Follow-on: HTML on the shelf
+
+"My buddy wants a demo; I'm thinking of exporting their entire Confluence base -- HTML,
+PDF, CSV or XML?" HTML, and rather than a pandoc step (not installed here anyway), the
+importer takes `.html` itself. `ingest/html.py` finds the page body by a list of
+selectors -- Confluence's `#main-content`, MediaWiki's `#mw-content-text`, `article`,
+`main`, `[role=main]`, then `body` -- strips the chrome that lives inside it
+(breadcrumbs, page metadata, the attachments and comments blocks, footers, nav, scripts),
+converts with markdownify (ATX headings, fenced code with the language taken from
+Confluence's `brush:` parameter or a `language-` class, tables as tables), and puts the
+page title first as the H1, with the space name split off ("Space : Page"). From there it
+is a Markdown volume: `MARKDOWN_LIKE` in extract.py, kind `doc`, rendered as written in
+the reader. Tested on a Confluence-shaped page and through the upload route.

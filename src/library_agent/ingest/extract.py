@@ -365,12 +365,19 @@ _MD_HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*$", re.MULTILINE)
 def extract_text_file(path: Path) -> Extracted:
     """Markdown and plaintext. ATX headings become the TOC; for plaintext there is none
     and the section builder falls back to windowing."""
-    raw = path.read_text(encoding="utf-8", errors="replace")
+    is_md = path.suffix.lower() in MARKDOWN_LIKE
+    if path.suffix.lower() in HTML:
+        # A web page is read as the Markdown it converts to; see ingest/html.py.
+        from library_agent.ingest.html import extract_html
+
+        raw = extract_html(path)
+    else:
+        raw = path.read_text(encoding="utf-8", errors="replace")
     # Strip fenced code blocks from heading detection but keep them in the body.
-    text = normalize(raw) if path.suffix.lower() not in {".md", ".markdown"} else raw
+    text = raw if is_md else normalize(raw)
 
     toc: list[TocEntry] = []
-    if path.suffix.lower() in {".md", ".markdown"}:
+    if is_md:
         in_fence = False
         offset = 0
         for line in text.splitlines(keepends=True):
@@ -397,7 +404,9 @@ def extract_text_file(path: Path) -> Extracted:
     return Extracted(text=text, page_offsets=[(0, 1)], toc=toc, title=title, page_count=1)
 
 
-SUPPORTED = {".pdf", ".md", ".markdown", ".txt", ".text", ".rst"}
+HTML = {".html", ".htm"}
+MARKDOWN_LIKE = {".md", ".markdown", *HTML}
+SUPPORTED = {".pdf", ".md", ".markdown", ".txt", ".text", ".rst", *HTML}
 
 
 def extract(path: Path) -> Extracted:

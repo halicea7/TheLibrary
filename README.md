@@ -71,6 +71,10 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
 
 **Two rooms** — *appearance* in the masthead switches them. The night room is slate and verdigris; the day room is papyrus and ink, with gilt on the edges — the lintel under the masthead, the frieze rules beside each section label, the chosen tab — and the nebula drawn as a star chart in sepia rather than a cloud. The socket the cartridges drop into is a pedestal: a stepped base, a fluted drum, a Doric capital whose abacus carries the bronze mouth, a gilt fillet at the lip; limestone by day, basalt by night. The cartridge itself is the same object in both rooms — its design is sealed in the manifest, so it does not take the room's colour.
 
+<p align="center">
+  <img src="docs/day.jpg" alt="The day room. Threads on papyrus: conflicts quoted side by side with their shared words lit, the nebula drawn as a sepia star chart, the cartridge on its limestone pedestal." width="900"/>
+</p>
+
 **Conversations** — the desk bar names the current one, starts a new one, and lists earlier ones; opening one replays it with its margin notes, and asking again continues it.
 
 <p align="center">

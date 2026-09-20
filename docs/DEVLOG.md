@@ -836,3 +836,11 @@ touching it. First cut shadowed a local named `frame` and fell back to the 2D sp
 without a word beyond a console warning; worth a louder failure some day. The cartridge
 stays the object it was: its design is sealed, and a thing does not change colour when
 you carry it into another room.
+
+**Second pass.** "Nebula still looks kinda dark on light mode; can dark mode be darker,
+almost black rather than that blueish dark gray." Night room to `#0a0b0d`, neutral
+rather than blue, rules and text greys re-derived from it; basalt a shade darker to sit
+in it. Day chart: ink lightened to `92,72,48`, points at 40% lightness and 42%
+saturation so the shelves read as coloured inks, edge alphas roughly halved, haze to
+.014. It is a drawing now, not a stain. And with the `[Title]` prefix peeled, all 13
+conflicts carry their quoted pair.

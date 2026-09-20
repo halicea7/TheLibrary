@@ -16,9 +16,9 @@
    always means provenance, so you can trust it at a glance.
    ────────────────────────────────────────────────────────────────────────── */
 :root {
-  --bg:#10141b; --panel:#161b24; --sunk:#0c1016;
-  --rule:#232b37; --rule-soft:#1b222c;
-  --fg:#dde2ea; --dim:#868f9f; --faint:#5a6472;
+  --bg:#0a0b0d; --panel:#0f1013; --sunk:#050607;
+  --rule:#202226; --rule-soft:#17191c;
+  --fg:#dedcd6; --dim:#8b8a85; --faint:#5c5b57;
   --rubric:#cc5f46; --verdigris:#4f9186; --amber:#b8894f; --opinion:#a98ae0;
   --gilt:#b8964e; --gilt-hi:#e2c47a; --gilt-lo:#7d6330;
   --ink:'221,226,234';
@@ -49,9 +49,9 @@
   --ink:'42,33,24';
 }
 :root[data-theme=dark] {
-  --bg:#10141b; --panel:#161b24; --sunk:#0c1016;
-  --rule:#232b37; --rule-soft:#1b222c;
-  --fg:#dde2ea; --dim:#868f9f; --faint:#5a6472;
+  --bg:#0a0b0d; --panel:#0f1013; --sunk:#050607;
+  --rule:#202226; --rule-soft:#17191c;
+  --fg:#dedcd6; --dim:#8b8a85; --faint:#5c5b57;
   --rubric:#cc5f46; --verdigris:#4f9186; --amber:#b8894f; --opinion:#a98ae0;
   --gilt:#b8964e; --gilt-hi:#e2c47a; --gilt-lo:#7d6330;
   --ink:'221,226,234';
@@ -976,18 +976,18 @@ const web = {
     const dark = !document.documentElement.dataset.theme ? matchMedia('(prefers-color-scheme: dark)').matches : document.documentElement.dataset.theme === 'dark';
     // Ink: pale on slate at night; on papyrus by day, a sepia that multiplies into the
     // page like a star chart drawn on it rather than a grey cloud sitting on it.
-    const ink = dark ? '221,226,234' : '58,42,26';
+    const ink = dark ? '221,226,234' : '92,72,48';
     const css = getComputedStyle(document.documentElement);
     const rubric = css.getPropertyValue('--rubric').trim(), verd = css.getPropertyValue('--verdigris').trim();
     const P = new Map(); for (const n of this.nodes) P.set(n, this.project(n));
-    const colour = (n, l, a) => n.c ? n.c : n.top && this.hueOf[n.top] != null ? `hsl(${this.hueOf[n.top]} ${dark ? 45 : 30}% ${l}% / ${a})` : `rgba(${ink},${a})`;
+    const colour = (n, l, a) => n.c ? n.c : n.top && this.hueOf[n.top] != null ? `hsl(${this.hueOf[n.top]} ${dark ? 45 : 42}% ${l}% / ${a})` : `rgba(${ink},${a})`;
     // edges, faint, fading with depth
     c.lineWidth = .7;
     for (const e of this.edges) {
       const a = P.get(e.a), b = P.get(e.b), depth = 1 - (a.depth + b.depth) / 2;
       const lit = Math.min(e.a.lit, e.b.lit);
       // By day the chart is its lines: the haze is nearly gone, so the edges carry it.
-      const ek = dark ? (e.k === 'cite' ? .26 : e.k === 'thread' ? .18 : .08) : (e.k === 'cite' ? .5 : e.k === 'thread' ? .34 : .16);
+      const ek = dark ? (e.k === 'cite' ? .26 : e.k === 'thread' ? .18 : .08) : (e.k === 'cite' ? .3 : e.k === 'thread' ? .2 : .09);
       c.strokeStyle = lit > .05 ? rubric : `rgba(${ink},${ek * e.w * (.35 + .65 * depth)})`;
       c.globalAlpha = lit > .05 ? .2 + .6 * lit : 1;
       c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
@@ -999,9 +999,9 @@ const web = {
     for (const n of order) {
       const p = P.get(n), near = 1 - p.depth, R = (n.r * 9 + 18) * p.s;
       const grd = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
-      const hazeA = (dark ? .17 : .022) * (.4 + .6 * near);
+      const hazeA = (dark ? .17 : .014) * (.4 + .6 * near);
       if (n.lit > .02) { grd.addColorStop(0, rubric); c.globalAlpha = (dark ? .5 : .22) * n.lit; n.lit *= .992; }
-      else { grd.addColorStop(0, colour(n, dark ? 62 : 34, 1)); c.globalAlpha = hazeA; }
+      else { grd.addColorStop(0, colour(n, dark ? 62 : 45, 1)); c.globalAlpha = hazeA; }
       grd.addColorStop(1, 'rgba(0,0,0,0)');
       c.fillStyle = grd; c.beginPath(); c.arc(p.x, p.y, R, 0, Math.PI * 2); c.fill();
     }
@@ -1009,8 +1009,8 @@ const web = {
     // the volumes themselves
     for (const n of order) {
       const p = P.get(n), near = 1 - p.depth;
-      c.globalAlpha = (n.tier === 0 ? (dark ? .3 : .45) : (dark ? .55 : .8)) * (.35 + .65 * near);
-      c.fillStyle = n.lit > .02 ? rubric : colour(n, dark ? 70 : 28, 1);
+      c.globalAlpha = (n.tier === 0 ? (dark ? .3 : .32) : (dark ? .55 : .6)) * (.35 + .65 * near);
+      c.fillStyle = n.lit > .02 ? rubric : colour(n, dark ? 70 : 40, 1);
       c.beginPath(); c.arc(p.x, p.y, Math.max(.6, n.r * p.s), 0, Math.PI * 2); c.fill();
       if (n.tier >= 2) { c.lineWidth = .7; c.strokeStyle = c.fillStyle; c.beginPath(); c.arc(p.x, p.y, n.r * p.s + 2, 0, Math.PI * 2); c.stroke(); }
     }

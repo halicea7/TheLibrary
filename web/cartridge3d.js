@@ -380,7 +380,7 @@ export function mountRack(canvas, handlers = {}) {
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.1), new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false, opacity: .8 }));
   shadow.rotation.x = -Math.PI / 2; shadow.position.y = TOP + .06; socket.add(shadow);
   // stone follows the room
-  const dayStone = new THREE.Color(0xcfc3a6), nightStone = new THREE.Color(0x1c2027);
+  const dayStone = new THREE.Color(0xcfc3a6), nightStone = new THREE.Color(0x15171a);
   const restone = () => { const bg = panelBg(); const hsl = {}; bg.getHSL(hsl); stone.color.copy(hsl.l > .5 ? dayStone : nightStone); stone.roughness = hsl.l > .5 ? .9 : .82; };
   restone();
   // The room can change while the rack is idle: watch the theme and re-stone at once.

@@ -1077,3 +1077,22 @@ turn, disposed on close) above its particulars -- clearance, material and label 
 origin, when, embedding model -- and the acts: seat or lift, show on the rack, edit for
 one made here. Double-click seats. Esc or the dim closes. The old two-column list of
 names is gone.
+
+
+## Follow-on: genre
+
+"How does it handle discernment around import types? RTS is internal documentation and
+should be digested with that in mind; a box of emails is a different data type." It
+did not, beyond a `document_kind` guessed at orientation and read by nothing. Now
+`reading/genre.py`: eleven genres, each with a rule for what a *claim* is (a runbook's
+claims name the host they apply to; correspondence is `who -> whom (date): what was
+asserted`, never merged across senders), a phrasing for a theme's entry, and a rule for
+what a conflict is on top of the scope rule. `document.genre` is set at orientation
+unless the maker set it first -- a cartridge has a genre too (`PATCH`, or `import
+--genre`), applied to all its volumes -- and it ships in cartridges. The cluster
+summary keeps the dominant genre with its claims so the judge reads it without another
+join. Existing orientation cards were folded into the column by the migration (1,206
+documentation, 130 paper, 83 report). Volumes already read keep their readings until
+read again; threads pick the genre up at the next rebuild. Email ingestion -- headers as
+section metadata, quoted replies stripped, one message a section -- is the next piece
+and needs a real mailbox to test on.

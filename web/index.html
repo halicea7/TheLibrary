@@ -2294,6 +2294,7 @@ async function openVolume(id) {
       <div class="reader-m">
         <span>${state}</span>
         ${d.cartridge ? `<span><span class="dot" style="--c:${esc(d.cartridge.colour)}"></span>from ${esc(d.cartridge.name)}</span>` : ''}
+        ${d.genre ? `<span title="What kind of writing this is; it changes how the library reads it">${esc(d.genre)}</span>` : ''}
         ${d.page_count ? `<span>${d.page_count} pages</span>` : ''}
         <span>${d.sections.length} sections</span>
         ${figs.length ? `<span>${figs.length} figure${figs.length === 1 ? '' : 's'}</span>` : ''}
@@ -2575,6 +2576,13 @@ async function openEdit(id) {
   } else make.design.art = 'generated';
   $('#tab-make').hidden = false; setView('make');
 }
+async function setGenre(g) {
+  const id = make.editing; if (!id) return;
+  const r = await fetch(`/api/cartridges/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ genre: g }) });
+  if (!r.ok) { say((await r.json()).detail || 'Could not set it.', true); return; }
+  await loadRack(); renderMake();
+  say(g ? `${rackIndex[id]?.name} will be read as ${g}. Volumes already read keep their readings until they are read again; threads follow at the next rebuild.` : 'Each volume will be read as what it looks like.');
+}
 async function saveEdit() {
   const id = make.editing; if (!id) return;
   const body = { name: make.name.trim(), colour: make.colour, icon_svg: GLYPHS[make.glyph], design: make.design };
@@ -2630,6 +2638,9 @@ function renderMake(flip) {
       </div>
       <div class="locked">Changes the printed label independently of the shell. Drag the preview to rotate it and see the foil catch the light.</div>
     </div></div>
+    ${editing ? `<div class="row"><label>Genre</label><div><div class="mats">${['', 'documentation', 'runbook', 'policy', 'paper', 'report', 'notes', 'correspondence', 'transcript', 'legal'].map(v =>
+      `<button aria-pressed="${(editing.genre || '') === v}" onclick="setGenre('${v}')" title="${v ? 'Read every volume in it as ' + v : 'Let each volume be what it looks like'}">${v || 'as read'}</button>`).join('')}</div>
+      <div class="locked">What kind of writing the whole cartridge is. It changes what the library takes a claim to be, how threads are phrased, and what counts as a conflict.</div></div></div>` : ''}
     <div class="row"><label>Clearance</label><div><div class="mats">${CLEARANCES.map(([v, l, d]) =>
       `<button aria-pressed="${make.design.clearance === v}" title="${d}" onclick="make.design.clearance='${v}'; renderMake(true)">${l}</button>`).join('')}</div>
       <div class="locked">${esc(CLEARANCES.find(x => x[0] === make.design.clearance)?.[2] || '')}. Printed on the label; sealed with the design.</div></div></div>

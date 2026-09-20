@@ -338,6 +338,7 @@ _DOC_COLS = (
     "page_count",
     "doi",
     "tier",
+    "genre",
     "added_at",
 )
 _SEC_COLS = (
@@ -947,6 +948,7 @@ async def import_cartridge(
                 source_path=source_path,
                 original_filename=d.get("original_filename") or d["title"],
                 page_count=d.get("page_count"),
+                genre=d.get("genre"),
                 doi=d.get("doi"),
                 tier=int(d.get("tier") or 0),
                 status=DocumentStatus.READY,
@@ -1233,6 +1235,7 @@ async def list_cartridges(db: AsyncSession) -> list[dict]:
             "imported_at": c.imported_at.isoformat() if c.imported_at else None,
             "design": clamp_design(c.design),
             "has_art": bool(c.art_path and Path(c.art_path).exists()),
+            "genre": c.genre,
             # Made on this machine from a folder: its maker is here, so it may be edited.
             "editable": c.made_by == "import",
         }

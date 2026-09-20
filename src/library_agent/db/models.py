@@ -116,6 +116,9 @@ class Document(Base):
     source_path: Mapped[str] = mapped_column(Text)
     original_filename: Mapped[str] = mapped_column(Text)
     page_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    # What kind of writing this is (see reading/genre.py). Guessed at orientation,
+    # settable by a cartridge's maker; the readers change what a claim is by it.
+    genre: Mapped[str | None] = mapped_column(String(24), default=None)
     doi: Mapped[str | None] = mapped_column(Text, default=None, index=True)
 
     # Quality level, not pipeline stage: 0 = embedded only, 1 = structural, 2 = deep read.
@@ -301,6 +304,8 @@ class Cartridge(Base):
     manifest: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     content_hash: Mapped[str] = mapped_column(String(64))
     document_count: Mapped[int] = mapped_column(Integer, default=0)
+    # A genre the maker set for the whole cartridge; its volumes take it unless read otherwise.
+    genre: Mapped[str | None] = mapped_column(String(24), default=None)
     imported_at: Mapped[datetime] = _now()
     # The maker's design: material, dials, art. It travels in the manifest and is not
     # editable after insertion -- a cartridge looks the same on every rack.

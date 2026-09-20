@@ -98,6 +98,7 @@ class TestPrompts:
             previous="",
             section_path="p",
             text="body",
+            claims_guidance="concrete factual assertions, one per string.",
             category_guidance=prompts.category_guidance([]),
         )
         assert "body" in out and "{" not in out.replace("{", "", 0)

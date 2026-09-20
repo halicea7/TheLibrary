@@ -80,6 +80,7 @@ def _to_out(d: Document, sections: int, chunks: int) -> DocumentOut:
         near_dup_of=d.near_dup_of,
         added_at=d.added_at,
         readings_only=d.readings_only,
+        genre=d.genre,
     )
 
 
@@ -440,6 +441,7 @@ async def read_document(document_id: uuid.UUID, db: SessionDep) -> dict:
         "tier": doc.tier,
         "kind": doc.kind,
         "readings_only": doc.readings_only,
+        "genre": doc.genre,
         "cartridge": (await cartridge_provenance(db, [doc.id])).get(doc.id),
         "page_count": doc.page_count,
         "sections": out_sections,

@@ -14,10 +14,10 @@ from arq.connections import RedisSettings
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from library_agent.config import settings
-from library_agent.db.models import Cartridge, CartridgeDocument
+from library_agent.db.models import Cartridge, CartridgeDocument, Document
 from library_agent.db.session import SessionDep
 from library_agent.library import cartridge as cart
 from library_agent.library.cartridge_design import (
@@ -29,6 +29,8 @@ from library_agent.library.cartridge_design import (
     sanitize_art,
     store_art,
 )
+from library_agent.reading.genre import GENRES
+from library_agent.reading.genre import normalise as normalise_genre
 from library_agent.worker.tasks import schedule_library_rebuild
 
 router = APIRouter(prefix="/api/cartridges", tags=["cartridges"])
@@ -63,6 +65,9 @@ class DesignPatch(BaseModel):
     design: dict | None = None
     art: str | None = Field(default=None, max_length=ART_MAX_BYTES * 2)  # data URL
     clear_art: bool = False
+    # What kind of writing the whole cartridge is (reading/genre.py); applied to every
+    # volume in it, and to volumes it gains later. Empty string clears it.
+    genre: str | None = None
 
 
 async def _made_here(db, cartridge_id: uuid.UUID) -> Cartridge:
@@ -95,6 +100,15 @@ async def edit(cartridge_id: uuid.UUID, req: DesignPatch, db: SessionDep) -> dic
         row.icon_svg = cart.sanitize_svg(req.icon_svg) if req.icon_svg else None
     if req.design is not None:
         row.design = clamp_design(req.design)
+    if req.genre is not None:
+        g = normalise_genre(req.genre) if req.genre else None
+        if req.genre and not g:
+            raise HTTPException(422, f"genre must be one of {', '.join(GENRES)}")
+        row.genre = g
+        member = select(CartridgeDocument.document_id).where(
+            CartridgeDocument.cartridge_id == row.id
+        )
+        await db.execute(update(Document).where(Document.id.in_(member)).values(genre=g))
     if req.clear_art:
         row.art_path = None
         if row.design:

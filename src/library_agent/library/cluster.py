@@ -37,6 +37,7 @@ from library_agent.db.models import (
 )
 from library_agent.llm.embed import embed_texts
 from library_agent.llm.ollama import Ollama
+from library_agent.reading import genre as genre_mod
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ CLUSTER_SCHEMA["required"].append("significant")
 
 CLUSTER_PROMPT = """These claims come from different documents in one personal library.
 They were grouped together automatically because they are about the same thing.
-
+{genre_note}
 {members}
 
 Write the library's entry for this theme.
@@ -144,7 +145,9 @@ async def build_clusters(
             if lab >= 0:
                 groups.setdefault(int(lab), []).append(i)
 
-        titles = {d.id: d.title for d in (await db.execute(select(Document))).scalars()}
+        docs_all = list((await db.execute(select(Document))).scalars())
+        titles = {d.id: d.title for d in docs_all}
+        genres = {d.id: d.genre for d in docs_all}
 
         # Clusters are derived state -- rebuild wholesale rather than reconciling.
         await db.execute(
@@ -190,10 +193,15 @@ async def build_clusters(
                 members = "\n".join(
                     f"- [{titles.get(doc_ids[i], '?')[:40]}] {texts[i][:220]}" for i in idxs[:16]
                 )
+                # Phrase the entry for the kind of writing it is: a wiki of runbooks is
+                # not a body of findings.
+                dom = genre_mod.dominant([genres.get(doc_ids[i]) for i in idxs])
+                phrase = genre_mod.ENTRY_BY_GENRE.get(dom or "")
+                genre_note = f"Note: {phrase}.\n" if phrase else ""
                 try:
                     out = await c.structured(
                         cfg.reader_model,
-                        CLUSTER_PROMPT.format(members=members),
+                        CLUSTER_PROMPT.format(members=members, genre_note=genre_note),
                         CLUSTER_SCHEMA,
                         temperature=0.0,
                         instructions=CLUSTER_PROMPT,
@@ -209,7 +217,7 @@ async def build_clusters(
                     try:
                         again = await c.structured(
                             cfg.reader_model,
-                            CLUSTER_PROMPT.format(members=members),
+                            CLUSTER_PROMPT.format(members=members, genre_note=genre_note),
                             CLUSTER_SCHEMA,
                             temperature=0.0,
                             instructions=CLUSTER_PROMPT,
@@ -236,6 +244,7 @@ async def build_clusters(
                         # Parallel to claims: who said each, so a conflict can be quoted
                         # as "X says … / Y says …" rather than paraphrased.
                         "claim_sources": [titles.get(doc_ids[i], "?") for i in idxs[:16]],
+                        "genre": dom,
                     },
                     model=cfg.reader_model,
                     prompt_version=cfg.prompt_versions.get("cluster_summary", "v1"),

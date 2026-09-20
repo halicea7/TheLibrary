@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from library_agent.reading.genre import GENRES
+
 SYSTEM_LIBRARIAN = (
     "You are a careful research librarian building a searchable index of a personal "
     "library. You are concise, concrete, and you never invent facts that are not in the "
@@ -24,10 +26,7 @@ ORIENTATION_SCHEMA: dict[str, Any] = {
         "one_liner": {"type": "string"},
         "about": {"type": "string"},
         "key_terms": {"type": "array", "items": {"type": "string"}},
-        "document_kind": {
-            "type": "string",
-            "enum": ["paper", "book", "documentation", "notes", "report", "other"],
-        },
+        "document_kind": {"type": "string", "enum": list(GENRES)},
     },
     "required": ["one_liner", "about", "key_terms", "document_kind"],
 }
@@ -52,7 +51,12 @@ Return:
   every excerpt of this document, so make it situating, not promotional. No title repeat.
 - about: 2-3 sentences on the document's subject, approach, and contribution.
 - key_terms: 5-10 distinctive technical terms, method names, or proper nouns.
-- document_kind: which category of document this is."""
+- document_kind: what kind of writing this is. paper: a research paper. book. documentation:
+  reference or user documentation for a system or product. runbook: an operational page --
+  a procedure, a configuration, a how-to for one system. policy: rules and requirements.
+  notes: working notes. report: a report with findings for an organisation.
+  correspondence: email or letters. transcript: an interview, meeting or testimony.
+  legal: a filing, contract or ruling. other."""
 
 # ---------------------------------------------------------------- section pass
 
@@ -81,7 +85,7 @@ Summarise this section for a retrieval index.
 - summary: 2-4 sentences. What does this section actually say? Be specific — name the
   methods, numbers, and conclusions rather than describing that the section "discusses" them.
 - entities: distinctive names appearing here (methods, datasets, systems, people).
-- claims: concrete factual assertions this section makes, one per string.
+- claims: {claims_guidance}
 - categories: 1-3 topic labels for this section specifically.
 {category_guidance}"""
 

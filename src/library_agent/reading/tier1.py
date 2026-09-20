@@ -31,6 +31,7 @@ from library_agent.ingest.chunk import build_context_prefix
 from library_agent.library import taxonomy
 from library_agent.llm.embed import embed_texts
 from library_agent.llm.ollama import Ollama
+from library_agent.reading import genre as genre_mod
 from library_agent.reading import prompts
 
 log = logging.getLogger(__name__)
@@ -178,6 +179,11 @@ async def run_tier1(
             system=prompts.SYSTEM_LIBRARIAN,
         )
         one_liner = (orient.get("one_liner") or "").strip()
+        # The maker's word beats the model's guess: a cartridge marked "runbook" reads as
+        # runbooks even where a page looks like a report.
+        if not doc.genre:
+            doc.genre = genre_mod.normalise(orient.get("document_kind"))
+        genre = doc.genre or "other"
         await _upsert_artifact(
             db,
             kind=ArtifactKind.ORIENTATION,
@@ -238,6 +244,9 @@ async def run_tier1(
                         previous=f"Previous section covered: {previous}\n" if previous else "",
                         section_path=s.path or s.title or "(untitled)",
                         text=body[:SECTION_CHARS],
+                        claims_guidance=genre_mod.CLAIMS_BY_GENRE.get(
+                            genre, genre_mod.CLAIMS_BY_GENRE["other"]
+                        ),
                         category_guidance=guidance,
                     ),
                     prompts.SECTION_SCHEMA,

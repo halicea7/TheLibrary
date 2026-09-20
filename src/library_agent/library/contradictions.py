@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from library_agent.config import settings
 from library_agent.db.models import Artifact, ArtifactKind, Cluster, TargetKind
 from library_agent.llm.ollama import Ollama
+from library_agent.reading import genre as genre_mod
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ document is about -- the claim's scope.
 {claims}
 
 Decide whether these sources genuinely conflict.
-
+{genre_rule}
 A claim is about the thing its document is about. "The head node is login01" in a guide to
 one cluster and "the head node is cerberus" in a guide to another are two facts about two
 systems, not a disagreement. The same goes for different hosts, accounts, tenants, sites,
@@ -134,6 +135,7 @@ async def judge_cluster(
     titles: list[str],
     claim_sources: list | None = None,
     scopes: dict[str, str] | None = None,
+    genre: str | None = None,
 ) -> dict | None:
     """One cluster's verdict by majority. Returns None if no vote came back. `scopes`
     maps a document title to its orientation line, so the judge sees what each claim's
@@ -149,6 +151,8 @@ async def judge_cluster(
         return f"[{title[:40]} — {scope[:90]}] " if scope else f"[{title[:40]}] "
 
     body = "\n".join(f"- {tag(i)}{str(x)[:220]}" for i, x in enumerate(claims[:16]))
+    rule = genre_mod.CONFLICT_BY_GENRE.get(genre or "")
+    genre_rule = f"\n{rule}\n" if rule else ""
     body += "\n\nDocuments involved: " + ", ".join(titles)
     # Identical runs used to return 0, 1, 3, 4 and 7 findings at temperature 0.1: which
     # borderline pairs fire is a coin flip. So each cluster is judged up to three times
@@ -159,7 +163,7 @@ async def judge_cluster(
         try:
             out = await c.structured(
                 model,
-                PROMPT.format(label=label or "(unlabelled)", claims=body),
+                PROMPT.format(label=label or "(unlabelled)", claims=body, genre_rule=genre_rule),
                 SCHEMA,
                 temperature=0.0,
                 instructions=PROMPT,
@@ -220,6 +224,7 @@ async def find_contradictions(
             text("""
             select c.id, c.label, a.data->'claims' as claims,
                    a.data->'claim_sources' as claim_sources,
+                   a.data->>'genre' as genre,
                    array_agg(distinct d.title) as titles,
                    jsonb_object_agg(d.title, coalesce(o.data->>'one_liner', '')) as scopes
             from cluster c
@@ -253,7 +258,14 @@ async def find_contradictions(
             if len(claims) < 2:
                 continue
             out = await judge_cluster(
-                c, cfg.reader_model, row.label, claims, row.titles, row.claim_sources, row.scopes
+                c,
+                cfg.reader_model,
+                row.label,
+                claims,
+                row.titles,
+                row.claim_sources,
+                row.scopes,
+                row.genre,
             )
             if out is None:
                 continue

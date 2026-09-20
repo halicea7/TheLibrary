@@ -25,6 +25,7 @@ class DocumentOut(BaseModel):
     readings_only: bool = False
     cartridge: dict | None = None  # {id, name, colour} when it came in a cartridge
     shelf: dict | None = None  # {top, top_id, sub, sub_id}: the one place it sits
+    genre: str | None = None
 
 
 class SectionOut(BaseModel):

@@ -66,7 +66,7 @@ def find_files(roots: list[Path]) -> list[Path]:
     return out
 
 
-async def _cartridge_for(name: str, colour: str | None):
+async def _cartridge_for(name: str, colour: str | None, genre: str | None = None):
     """A cartridge made on this machine from a folder: it stands on the rack like an
     inserted one, and its volumes are introduced by it, so ejecting it takes them along."""
     import uuid
@@ -82,6 +82,9 @@ async def _cartridge_for(name: str, colour: str | None):
 
         row = (await db.execute(select(Cartridge).where(Cartridge.slug == slug))).scalars().first()
         if row:
+            if genre and not row.genre:
+                row.genre = genre
+                await db.flush()
             return row.id
         n = len(list((await db.execute(select(Cartridge.id))).scalars()))
         row = Cartridge(
@@ -98,6 +101,7 @@ async def _cartridge_for(name: str, colour: str | None):
             prompt_versions=dict(settings().prompt_versions),
             manifest={"origin": "import"},
             content_hash="local",
+            genre=genre,
         )
         db.add(row)
         await db.flush()
@@ -111,7 +115,13 @@ async def run(
     quiet: bool,
     cartridge: str | None = None,
     colour: str | None = None,
+    genre: str | None = None,
 ) -> int:
+    from library_agent.reading.genre import normalise as normalise_genre
+
+    if genre and not normalise_genre(genre):
+        raise SystemExit(f"unknown genre {genre!r}")
+    genre = normalise_genre(genre) if genre else None
     files = find_files(roots)
     if not files:
         print("nothing the library can read under", ", ".join(str(r) for r in roots))
@@ -121,7 +131,7 @@ async def run(
     added: list = []
     dupes = failed = 0
     started = time.time()
-    cart_id = await _cartridge_for(cartridge, colour) if cartridge else None
+    cart_id = await _cartridge_for(cartridge, colour, genre) if cartridge else None
 
     async def member(db, document_id, introduced: bool) -> None:
         if cart_id:
@@ -146,6 +156,13 @@ async def run(
             try:
                 async with session_scope() as db:
                     r = await ingest(db, path, original_filename=path.name, client=client)
+                    if genre:
+                        # The maker's word: read as this kind of writing, whatever it looks like.
+                        from library_agent.db.models import Document
+
+                        d = await db.get(Document, r.document_id)
+                        if d:
+                            d.genre = genre
                     if r.status == "ready":
                         await member(db, r.document_id, True)
                 added.append(r.document_id)
@@ -202,13 +219,25 @@ def main() -> None:
         "--cartridge", help="put the imported volumes on the rack as a cartridge of this name"
     )
     ap.add_argument("--colour", help="#rrggbb for that cartridge")
+    ap.add_argument(
+        "--genre",
+        help="what kind of writing this is (documentation, runbook, policy, correspondence, ...); "
+        "read accordingly and kept on every volume",
+    )
     a = ap.parse_args()
     missing = [p for p in a.paths if not p.exists()]
     if missing:
         raise SystemExit(f"not found: {', '.join(str(m) for m in missing)}")
     raise SystemExit(
         asyncio.run(
-            run(a.paths, read=a.read, quiet=a.quiet, cartridge=a.cartridge, colour=a.colour)
+            run(
+                a.paths,
+                read=a.read,
+                quiet=a.quiet,
+                cartridge=a.cartridge,
+                colour=a.colour,
+                genre=a.genre,
+            )
         )
     )
 

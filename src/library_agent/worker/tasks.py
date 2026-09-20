@@ -132,26 +132,36 @@ async def build_library_layer(ctx: dict, kind: str) -> dict[str, Any]:
         jid = job.id
     async with Ollama() as client:
         for n, k in enumerate(kinds):
-            await _set_job(jid, progress_current=n, yielded_reason=k)
+            await _set_job(jid, progress_current=0, progress_total=1, yielded_reason=k)
+
+            # Each pass counts its own work (documents, clusters); the row shows that
+            # count under the pass name, so a twenty-minute clusters pass moves.
+            async def progress(current: int, total: int) -> None:
+                await _set_job(jid, progress_current=current, progress_total=max(1, total))
+
             try:
                 async with session_scope() as db:
                     if k == "citations":
-                        r = await build_citation_graph(db)
+                        r = await build_citation_graph(db, progress=progress)
                         out["citations"] = {"matched": r.matched, "references": r.references_found}
                     elif k == "clusters":
-                        r = await build_clusters(db, client=client)
+                        r = await build_clusters(db, client=client, progress=progress)
                         out["clusters"] = {
                             "clusters": r.clusters,
                             "cross_document": r.cross_document,
                         }
                     elif k == "contradictions":
-                        out["contradictions"] = await find_contradictions(db, client=client)
+                        out["contradictions"] = await find_contradictions(
+                            db, client=client, progress=progress
+                        )
             except Exception as exc:
                 # One pass failing must not take the others with it.
                 await record_exception(exc, source="worker", context={"job": f"library:{k}"})
                 log.exception("library pass %s failed", k)
                 out[k] = {"error": str(exc)[:300]}
-    await _set_job(jid, state=JobState.DONE, progress_current=len(kinds), yielded_reason=None)
+    await _set_job(
+        jid, state=JobState.DONE, progress_current=1, progress_total=1, yielded_reason=None
+    )
     return out
 
 

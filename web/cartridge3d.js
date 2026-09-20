@@ -16,7 +16,7 @@
  * Vendored: three.js and its RGBELoader (MIT), one HDRI from Poly Haven (CC0).
  */
 import * as THREE from 'three';
-import { RGBELoader } from '/vendor/RGBELoader.js';
+import { RGBELoader } from './vendor/RGBELoader.js';
 
 const W = 2.4, H = 3.3, D = 0.5;
 const LEVELS = { catalogue: 1, readings: 2, full: 3 };
@@ -466,7 +466,7 @@ function makeCartridge() {
 let envPromise = null;
 function environment(renderer) {
   // The studio HDRI, once per page, prefiltered for every renderer that asks.
-  if (!envPromise) envPromise = new RGBELoader().loadAsync('/vendor/studio_small_09_1k.hdr');
+  if (!envPromise) envPromise = new RGBELoader().loadAsync('./vendor/studio_small_09_1k.hdr');
   return envPromise.then(hdr => {
     const pm = new THREE.PMREMGenerator(renderer);
     const env = pm.fromEquirectangular(hdr).texture; pm.dispose();

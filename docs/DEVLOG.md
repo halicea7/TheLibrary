@@ -1013,3 +1013,20 @@ with no cache headers, so even a regenerated one came back from the browser's ca
 under the same URL. Three small changes: a colour change on a generated label drops the
 stored render; `/art` answers `Cache-Control: no-cache`; the rack and the inspect card
 put the colour in the art URL so the label texture's cache key changes with it.
+
+
+## Follow-on: the hosted demo
+
+"Could it be based off our repo, so we don't update it manually every time the UI
+changes?" It is the repo: a Pages workflow uploads `web/` untouched. The one addition
+to the page is a two-line bootstrap at the top of `index.html`: on a `github.io` host,
+or with `?demo`, it document.writes `demo.js` before the page's own script. That file
+replaces `window.fetch` for `/api/...` with placeholder material of the right shape --
+seventeen made-up volumes on two top shelves, two cartridges, a nebula of a hundred and
+sixty points, findings for a few queries, two disagreements with quoted pairs, one
+answer that streams as the server would (thinking, sources, tokens, done) and one
+composed document -- and swaps the first-visit tour for eleven longer steps that
+explain how each part works while doing it: the Ask step submits the question and the
+visitor watches it think. Writes answer with a note that this is the demo. Asset paths
+went relative (`./vendor/`, `./cartridge3d.js`) so the same files serve from `/`
+locally and from `/TheLibrary/` on Pages. Nothing real is in it, by design.

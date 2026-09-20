@@ -14,7 +14,8 @@
 </p>
 
 <p align="center">
-  <em>Runs entirely on your own hardware. No cloud, no API keys, no telemetry.</em>
+  <em>Runs entirely on your own hardware. No cloud, no API keys, no telemetry.</em><br/>
+  <a href="https://halicea7.github.io/TheLibrary/"><b>See it work →</b></a> — the interface over placeholder material, with a guided walk through how each part works. Nothing runs there; it is the shape of the thing.
 </p>
 
 ---
@@ -50,6 +51,8 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
 ```
 
 Background work shows under **In hand** in the left column, with a bar — a reading, an annotation, a threads rebuild counting its clusters — and a **pause**: the piece in progress finishes (a section, a cluster), nothing new starts until you resume, the queue keeps its order. Chat is never paused; it already has priority over reading.
+
+The hosted demo at the top of this page is the same `web/` directory served from GitHub Pages: on a `github.io` host (or with `?demo` on a local instance) the page loads `web/demo.js` first, a stand-in for the server that answers every API call with placeholder material and replaces the first-visit tour with a longer one that explains how each part works while doing it on screen. Nothing to update: it is always the current UI.
 
 The first visit is walked: a **tour** lights one part of the room at a time — the drop zone, the read and annotate buttons, *reshelve*, the rack, each tab, effort, stance, the two rooms — with a card saying what it is for, everything else dimmed and held until you go on. Esc or *skip* ends it; *show the tour* in Settings brings it back.
 

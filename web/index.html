@@ -824,6 +824,12 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 </div>
 
 <script>
+  // Hosted demo: on GitHub Pages (or with ?demo) a stand-in for the server loads before
+  // the page's own script, answering every /api call with placeholder material. Nothing
+  // else about the page changes, so the demo is always the current UI.
+  if (/\.github\.io$/.test(location.hostname) || /[?&]demo\b/.test(location.search)) document.write('<script src="./demo.js"><\/script>');
+</script>
+<script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const STATE = ['listed','read','annotated'];
@@ -2715,11 +2721,11 @@ setInterval(loadJobs, 4000);
 incidentBadge();
 setInterval(() => { holdings(); incidentBadge(); }, 30000);
 </script>
-<script type="importmap">{ "imports": { "three": "/vendor/three.module.js" } }</script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
 <script type="module">
   // The cartridge as an object. Loaded as a module (it imports three.js); if WebGL is
   // unavailable the rest of the library does not care.
-  try { const m = await import('/cartridge3d.js'); window.Cartridge3D = m; loadRack(); } catch (e) { console.warn('3D cartridges unavailable', e); }
+  try { const m = await import('./cartridge3d.js'); window.Cartridge3D = m; loadRack(); } catch (e) { console.warn('3D cartridges unavailable', e); }
 </script>
 </body>
 </html>

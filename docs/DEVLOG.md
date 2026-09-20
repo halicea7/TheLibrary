@@ -871,3 +871,14 @@ Confluence's `brush:` parameter or a `language-` class, tables as tables), and p
 page title first as the H1, with the space name split off ("Space : Page"). From there it
 is a Markdown volume: `MARKDOWN_LIKE` in extract.py, kind `doc`, rendered as written in
 the reader. Tested on a Confluence-shaped page and through the upload route.
+
+**Editing a cartridge made here.** "I want to edit that cartridge in the UI, don't lock
+it -- add art and whatnot." The seal was for cartridges that *arrive*: their maker set
+them. A cartridge made on this machine from a folder (`made_by == "import"`) has its
+maker here, so it is `editable`: `PATCH /api/cartridges/{id}` takes name, colour, icon,
+design and art (or `clear_art`), a foreign cartridge answers 403. The rack plaque grows
+*edit*; the make panel opens filled from the cartridge with its volumes as the fixed
+selection, *save to the rack* patches it, and *make it* exports with `as_cartridge`, which
+keeps the id and moves the version on so the receiver upgrades in place. Along the way:
+the jobs listing now puts live jobs first, since a queue of 391 had hidden the one in
+hand behind the limit, and the UI counts the whole queue.

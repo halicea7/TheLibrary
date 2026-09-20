@@ -1369,6 +1369,7 @@ function rackUnder() {
   el.dataset.on = String(cartridges.has(id));
   el.innerHTML = `<span class="nm" onclick="toggleCartridge('${id}')" title="${cartridges.has(id) ? 'Click to lift it out' : 'Click to seat it and ask its shelf'}">${esc(c.name)}</span>
     <span class="cnt">${Object.keys(rackIndex).indexOf(id) + 1}/${n}</span>
+    ${c.editable ? `<button class="linkish" style="font-size:10.5px" onclick="openEdit('${id}')" title="Change its name, colour, material, clearance or art">edit</button>` : ''}
     <button class="linkish" style="font-size:10.5px" onclick="ejectCartridge('${id}', this)">eject</button>`;
   for (const a of document.querySelectorAll('.rack3d .arrow')) a.disabled = n < 2;
 }
@@ -1527,7 +1528,7 @@ $('#drop').addEventListener('drop', async e => {
 /* ── jobs ─────────────────────────────────────────────────────────────── */
 async function loadJobs() {
   let jobs = [];
-  try { jobs = await (await fetch('/api/jobs?limit=40')).json(); } catch { return; }
+  try { jobs = await (await fetch('/api/jobs?limit=600')).json(); } catch { return; }
   const live = jobs.filter(j => ['queued','running','yielded'].includes(j.state));
   $('#jobs-wrap').hidden = !live.length;
   if (!live.length) { if (loadJobs.had) { loadShelf(); holdings(); loadSubjects(); loadJobs.had = false; } return; }
@@ -2337,7 +2338,36 @@ const make = { name:'', colour:null, glyph:'book', level:'readings', timer:null,
   design: { material:'clear', tint:.55, opacity:.35, sparkle:.5, roughness:.25, art:'generated', clearance:'open' }, artUrl:null, artData:null, points:[], stage:null };
 const CLEARANCES = [['open','Open','travels freely'],['internal','Internal','for your own people'],['confidential','Confidential','handle with care'],['restricted','Restricted','a receiving library will not re-export its volumes']];
 const MATERIALS = [['solid','Solid'],['clear','Clear'],['smoke','Smoke'],['glitter','Glitter'],['metallic','Metallic']];
-function openMake() { $('#tab-make').hidden = false; setView('make'); }
+function openMake() { make.editing = null; $('#tab-make').hidden = false; setView('make'); }
+// A cartridge made on this machine is the maker's to change: the panel opens filled
+// from it, saves back to the rack, and exports it as itself (same id, next version).
+async function openEdit(id) {
+  const c = rackIndex[id]; if (!c || !c.editable) return;
+  make.editing = id; make.name = c.name; make.colour = c.colour; make.level = c.level || 'full';
+  make.design = { ...make.design, ...(c.design || {}) };
+  make.artData = null; make.artUrl = null;
+  if (c.has_art && make.design.art === 'upload') {
+    try {
+      const blob = await (await fetch(`/api/cartridges/${id}/art?t=${Date.now()}`)).blob();
+      make.artData = await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.readAsDataURL(blob); });
+      make.artUrl = make.artData;
+    } catch { make.design.art = 'generated'; }
+  } else make.design.art = 'generated';
+  $('#tab-make').hidden = false; setView('make');
+}
+async function saveEdit() {
+  const id = make.editing; if (!id) return;
+  const body = { name: make.name.trim(), colour: make.colour, icon_svg: GLYPHS[make.glyph], design: make.design };
+  if (make.design.art === 'upload' && make.artData && make.artData.startsWith('data:')) body.art = make.artData;
+  if (make.design.art !== 'upload') body.clear_art = true;
+  const btn = $('#mk-save'); btn.disabled = true; btn.textContent = 'saving…';
+  try {
+    const r = await fetch(`/api/cartridges/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) { say((await r.json()).detail || 'Could not save it.', true); return; }
+    await loadRack(); rackUnder();
+    say(`${make.name} is changed on the rack.`);
+  } finally { btn.disabled = false; btn.textContent = 'save to the rack'; }
+}
 function renderMake(flip) {
   const el = $('#view-make');
   if (!palette.length) palette = ['#2f6f8f','#7a5c2e','#4f7a3a','#8a3d5e','#3e6b6b','#9a6b1f','#5a4b8a','#6f6f6f'];
@@ -2345,9 +2375,12 @@ function renderMake(flip) {
   const scope = [];
   if (subjects.size) scope.push(`${subjects.size} subject${subjects.size > 1 ? 's' : ''}`);
   if (cartridges.size) scope.push([...cartridges].map(id => rackIndex[id]?.name).filter(Boolean).join(', '));
+  const editing = make.editing && rackIndex[make.editing];
   el.innerHTML = `<div class="make">
-    <h2>Make a cartridge</h2>
-    <p class="why">A cartridge is a slice of this library another one can put on its rack. The level sets what leaves: the volumes themselves, only what this library understood of them, or just the fact that they exist.</p>
+    <h2>${editing ? `Edit ${esc(editing.name)}` : 'Make a cartridge'}</h2>
+    <p class="why">${editing
+      ? 'This cartridge was made here, so it is yours to change. <b>Save to the rack</b> changes how it looks on this rack; <b>make it</b> exports it as itself — same cartridge, next version — carrying this design.'
+      : 'A cartridge is a slice of this library another one can put on its rack. The level sets what leaves: the volumes themselves, only what this library understood of them, or just the fact that they exist.'}</p>
     <div class="row"><label>Name</label><input type="text" id="mk-name" value="${esc(make.name)}" placeholder="Security's shelf" oninput="make.name=this.value; previewMake()"/></div>
     <div class="row"><label>Colour</label><div class="swatches">${palette.map(c =>
       `<button style="--c:${c}" aria-pressed="${c === make.colour}" title="${c}" onclick="make.colour='${c}'; renderMake()"></button>`).join('')}</div></div>
@@ -2377,8 +2410,10 @@ function renderMake(flip) {
         `<label><input type="radio" name="mk-level" value="${v}" ${v === make.level ? 'checked' : ''} onchange="make.level='${v}'; previewMake(); stageUpdate()"/><span>${l}<small>${d}</small></span></label>`).join('')}
     </div></div>
     <div class="row"><label>Contents</label><div style="font:13px/1.5 var(--serif); color:var(--dim)">${
+      editing ? `The ${editing.document_count ?? ''} volumes of ${esc(editing.name)}.` :
       scope.length ? `What is scoped now — ${esc(scope.join(' · '))}. Change the scope with the subject chips and the rack.` : 'Nothing is scoped, so the whole library goes in. Pick subjects or a cartridge to narrow it.'}</div></div>
     <div class="preview" id="mk-preview">…</div>
+    ${editing ? `<button class="go" id="mk-save" onclick="saveEdit()" ${make.name.trim() ? '' : 'disabled'}>save to the rack</button>` : ''}
     <button class="go" id="mk-go" onclick="exportCartridge()" ${make.name.trim() ? '' : 'disabled'}>make it</button>
   </div>`;
   previewMake();
@@ -2416,6 +2451,7 @@ function pickArt(file) {
   rd.readAsDataURL(file);
 }
 function makeSelection() {
+  if (make.editing) return { category_ids:[], cartridge_ids:[make.editing], document_ids:[], level:make.level };
   return { category_ids:[...subjects], cartridge_ids:[...cartridges], document_ids:[], level:make.level };
 }
 function previewMake() {
@@ -2441,7 +2477,8 @@ async function allDocumentIds() {
 async function exportCartridge() {
   const sel = makeSelection();
   if (!sel.category_ids.length && !sel.cartridge_ids.length) sel.document_ids = await allDocumentIds();
-  const body = { ...sel, name:make.name.trim(), colour:make.colour, icon_svg:GLYPHS[make.glyph], design:make.design, art: make.design.art === 'upload' ? make.artData : null };
+  const body = { ...sel, name:make.name.trim(), colour:make.colour, icon_svg:GLYPHS[make.glyph], design:make.design, art: make.design.art === 'upload' ? make.artData : null, as_cartridge: make.editing || null };
+  if (make.editing) await saveEdit();
   $('#mk-go').disabled = true; $('#mk-go').textContent = 'making…';
   try {
     const r = await fetch('/api/cartridges/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });

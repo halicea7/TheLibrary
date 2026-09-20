@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 import uuid
@@ -21,6 +22,7 @@ from library_agent.db.session import SessionDep
 from library_agent.library import cartridge as cart
 from library_agent.library.cartridge_design import (
     ART_MAX_BYTES,
+    clamp_design,
     constellation_points,
     decode_data_url,
     render_constellation,
@@ -46,6 +48,61 @@ class ExportRequest(Selection):
     made_by: str | None = Field(default=None, max_length=120)
     design: dict | None = None
     art: str | None = Field(default=None, max_length=ART_MAX_BYTES * 2)  # data URL, or absent
+    # Export a cartridge made on this machine *as itself*: same id, next version, so a
+    # receiver that already has it upgrades in place instead of gaining a twin.
+    as_cartridge: uuid.UUID | None = None
+
+
+class DesignPatch(BaseModel):
+    """What the maker may change on a cartridge made here. A cartridge that arrived
+    from elsewhere is sealed; its maker set it."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    colour: str | None = None
+    icon_svg: str | None = Field(default=None, max_length=20_000)
+    design: dict | None = None
+    art: str | None = Field(default=None, max_length=ART_MAX_BYTES * 2)  # data URL
+    clear_art: bool = False
+
+
+async def _made_here(db, cartridge_id: uuid.UUID) -> Cartridge:
+    row = (
+        await db.execute(select(Cartridge).where(Cartridge.id == cartridge_id))
+    ).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "no such cartridge")
+    if row.made_by != "import":
+        raise HTTPException(403, "this cartridge arrived from elsewhere; its design is sealed")
+    return row
+
+
+@router.patch("/{cartridge_id}")
+async def edit(cartridge_id: uuid.UUID, req: DesignPatch, db: SessionDep) -> dict:
+    """Change the look of a cartridge made on this machine: name, colour, material and
+    dials, clearance, art. The rack redraws; the next export carries it."""
+    row = await _made_here(db, cartridge_id)
+    if req.name:
+        row.name = req.name.strip()
+    if req.colour:
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", req.colour):
+            raise HTTPException(422, "colour must be #rrggbb")
+        row.colour = req.colour
+    if req.icon_svg is not None:
+        row.icon_svg = cart.sanitize_svg(req.icon_svg) if req.icon_svg else None
+    if req.design is not None:
+        row.design = clamp_design(req.design)
+    if req.clear_art:
+        row.art_path = None
+        if row.design:
+            row.design = {**row.design, "art": "generated"}
+    elif req.art:
+        try:
+            row.art_path = str(store_art(row.id, sanitize_art(decode_data_url(req.art))))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        row.design = {**(row.design or {}), "art": "upload"}
+    await db.commit()
+    return next(c for c in await cart.list_cartridges(db) if c["id"] == str(row.id))
 
 
 @router.get("")
@@ -90,6 +147,14 @@ async def export(req: ExportRequest, db: SessionDep) -> FileResponse:
             art_png = sanitize_art(decode_data_url(req.art))
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+    stable: dict = {}
+    if req.as_cartridge:
+        row = await _made_here(db, req.as_cartridge)
+        row.version += 1
+        await db.commit()
+        stable = {"cartridge_id": row.id, "version": row.version}
+        if art_png is None and row.art_path and Path(row.art_path).exists():
+            art_png = Path(row.art_path).read_bytes()
     try:
         path = await cart.build_cartridge(
             db,
@@ -101,6 +166,7 @@ async def export(req: ExportRequest, db: SessionDep) -> FileResponse:
             made_by=req.made_by,
             design=req.design,
             art_png=art_png,
+            **stable,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc

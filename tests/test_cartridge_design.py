@@ -161,3 +161,54 @@ class TestClearance:
         ).scalar_one()
         assert await resolve_selection(db, document_ids=[back.id]) == []
         assert await resolve_selection(db, cartridge_ids=[r.cartridge_id]) == []
+
+
+async def test_a_cartridge_made_here_is_editable_and_exports_as_itself(db, tmp_path, monkeypatch):
+    """The maker may change a cartridge made on this machine; exporting it keeps its id
+    and moves the version on, so a receiver upgrades in place."""
+    import uuid
+    from datetime import UTC, datetime
+
+    from library_agent import config
+    from library_agent.db.models import Cartridge, CartridgeDocument
+
+    monkeypatch.setattr(config.settings(), "storage_dir", tmp_path / "documents")
+    doc = await make_document(db, title="Runbook", body=BODY_A)
+    cid = uuid.uuid4()
+    db.add(
+        Cartridge(
+            id=cid,
+            name="Ops",
+            slug="ops",
+            version=1,
+            colour="#4f7a3a",
+            made_by="import",
+            made_at=datetime.now(UTC),
+            level="full",
+            embed_model=config.settings().embed_model,
+            manifest={"origin": "import"},
+            content_hash="0" * 64,
+            document_count=1,
+        )
+    )
+    db.add(CartridgeDocument(cartridge_id=cid, document_id=doc.id, introduced=True))
+    await db.flush()
+
+    from library_agent.library.cartridge import list_cartridges
+
+    listed = next(c for c in await list_cartridges(db) if c["id"] == str(cid))
+    assert listed["editable"] is True
+
+    path = await build_cartridge(
+        db,
+        document_ids=[doc.id],
+        level="full",
+        name="Ops",
+        colour="#4f7a3a",
+        cartridge_id=cid,
+        version=2,
+        design={"material": "glitter", "clearance": "internal"},
+    )
+    m = read_manifest(path)
+    assert m["id"] == str(cid) and m["version"] == 2
+    assert m["design"]["material"] == "glitter" and m["design"]["clearance"] == "internal"

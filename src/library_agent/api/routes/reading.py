@@ -8,10 +8,17 @@ from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from library_agent.config import settings
-from library_agent.db.models import CartridgeDocument, Category, Document, DocumentCategory, Job
+from library_agent.db.models import (
+    CartridgeDocument,
+    Category,
+    Document,
+    DocumentCategory,
+    Job,
+    JobState,
+)
 from library_agent.db.session import SessionDep
 from library_agent.library.shelving import expand_category_ids
 from library_agent.worker.tasks import enqueue_read, enqueue_reshelve
@@ -123,11 +130,18 @@ async def start_backfill(
 
 @router.get("/jobs", response_model=list[JobOut])
 async def list_jobs(db: SessionDep, limit: int = 25) -> list[JobOut]:
+    """Live jobs first -- running and yielded, then queued -- and then the recent rest,
+    so a queue of four hundred never hides the one in hand behind the limit."""
+    live_first = case(
+        (Job.state.in_([JobState.RUNNING, JobState.YIELDED]), 0),
+        (Job.state == JobState.QUEUED, 1),
+        else_=2,
+    )
     rows = (
         await db.execute(
             select(Job, Document.title)
             .outerjoin(Document, Document.id == Job.document_id)
-            .order_by(Job.created_at.desc())
+            .order_by(live_first, Job.created_at.desc())
             .limit(limit)
         )
     ).all()

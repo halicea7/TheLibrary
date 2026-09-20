@@ -1229,6 +1229,8 @@ async def list_cartridges(db: AsyncSession) -> list[dict]:
             "imported_at": c.imported_at.isoformat() if c.imported_at else None,
             "design": clamp_design(c.design),
             "has_art": bool(c.art_path and Path(c.art_path).exists()),
+            # Made on this machine from a folder: its maker is here, so it may be edited.
+            "editable": c.made_by == "import",
         }
         for c, n in rows
     ]

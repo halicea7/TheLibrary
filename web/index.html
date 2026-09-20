@@ -20,29 +20,41 @@
   --rule:#232b37; --rule-soft:#1b222c;
   --fg:#dde2ea; --dim:#868f9f; --faint:#5a6472;
   --rubric:#cc5f46; --verdigris:#4f9186; --amber:#b8894f; --opinion:#a98ae0;
+  --gilt:#b8964e; --gilt-hi:#e2c47a; --gilt-lo:#7d6330;
+  --ink:'221,226,234';
   --serif:'Iowan Old Style','Charter','Hoefler Text',Georgia,serif;
   --sans:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif;
   --mono:ui-monospace,'SF Mono',Menlo,monospace;
 }
+/* The day room: papyrus and ink, bronze gone green, gilt on the edges. The night room
+   below keeps its slate. The pigments keep their meanings in both -- rubric is still
+   "from the shelf", verdigris still "system", amber still "attention"; gilt is chrome
+   (rules, the lintel, the chosen tab) and never a signal. */
 @media (prefers-color-scheme: light) {
   :root {
-    --bg:#f4f5f7; --panel:#fff; --sunk:#eceef1;
-    --rule:#e0e4e9; --rule-soft:#ebeef1;
-    --fg:#171c24; --dim:#5d6672; --faint:#8b95a3;
-    --rubric:#a8402a; --verdigris:#2f6b61; --amber:#8a6320; --opinion:#6b48c0;
+    --bg:#ece4d3; --panel:#f3ecdd; --sunk:#e2d8c4;
+    --rule:#cdbfa3; --rule-soft:#ddd2bb;
+    --fg:#2a2118; --dim:#6a5943; --faint:#9a8a70;
+    --rubric:#a3432a; --verdigris:#3d7a69; --amber:#9a6b1f; --opinion:#3b5aa6;
+    --gilt:#a8843a; --gilt-hi:#d9b86a; --gilt-lo:#7a5c22;
+    --ink:'42,33,24';
   }
 }
 :root[data-theme=light] {
-  --bg:#f4f5f7; --panel:#fff; --sunk:#eceef1;
-  --rule:#e0e4e9; --rule-soft:#ebeef1;
-  --fg:#171c24; --dim:#5d6672; --faint:#8b95a3;
-  --rubric:#a8402a; --verdigris:#2f6b61; --amber:#8a6320; --opinion:#6b48c0;
+  --bg:#ece4d3; --panel:#f3ecdd; --sunk:#e2d8c4;
+  --rule:#cdbfa3; --rule-soft:#ddd2bb;
+  --fg:#2a2118; --dim:#6a5943; --faint:#9a8a70;
+  --rubric:#a3432a; --verdigris:#3d7a69; --amber:#9a6b1f; --opinion:#3b5aa6;
+  --gilt:#a8843a; --gilt-hi:#d9b86a; --gilt-lo:#7a5c22;
+  --ink:'42,33,24';
 }
 :root[data-theme=dark] {
   --bg:#10141b; --panel:#161b24; --sunk:#0c1016;
   --rule:#232b37; --rule-soft:#1b222c;
   --fg:#dde2ea; --dim:#868f9f; --faint:#5a6472;
   --rubric:#cc5f46; --verdigris:#4f9186; --amber:#b8894f; --opinion:#a98ae0;
+  --gilt:#b8964e; --gilt-hi:#e2c47a; --gilt-lo:#7d6330;
+  --ink:'221,226,234';
 }
 
 * { box-sizing:border-box; }
@@ -58,11 +70,14 @@ body {
 
 /* ── masthead ─────────────────────────────────────────────────────────── */
 .masthead {
-  display:flex; align-items:baseline; gap:18px; flex-wrap:wrap;
+  display:flex; align-items:baseline; gap:18px; flex-wrap:wrap; position:relative;
   padding:14px 22px; border-bottom:1px solid var(--rule); background:var(--panel);
 }
+/* The lintel: a gilt fillet along the bottom edge, with the room's rule beneath it. */
+.masthead::after { content:''; position:absolute; left:0; right:0; bottom:2px; height:1px;
+  background:linear-gradient(90deg, transparent, var(--gilt) 12%, var(--gilt-hi) 50%, var(--gilt) 88%, transparent); opacity:.85; }
 .wordmark {
-  font:600 15px/1 var(--serif); letter-spacing:.14em; text-transform:uppercase; margin:0;
+  font:600 15px/1 var(--serif); letter-spacing:.2em; text-transform:uppercase; margin:0;
 }
 .wordmark b { color:var(--fg); font-weight:700; }
 .holdings { font:11.5px/1 var(--mono); color:var(--faint); letter-spacing:.02em; }
@@ -91,9 +106,11 @@ body {
 
 /* ── small caps section labels ────────────────────────────────────────── */
 .label {
-  font:600 10.5px/1 var(--sans); letter-spacing:.11em; text-transform:uppercase;
-  color:var(--faint); margin:0 0 10px;
+  font:600 10.5px/1 var(--serif); letter-spacing:.18em; text-transform:uppercase;
+  color:var(--dim); margin:0 0 10px; display:flex; align-items:center; gap:10px;
 }
+/* The frieze: an inscription between a hairline that runs out to the edge. */
+.label::after { content:''; flex:1; height:1px; background:linear-gradient(90deg, var(--gilt) 0, var(--rule) 40%, transparent); opacity:.8; }
 .label.spaced { margin-top:22px; }
 
 /* ── accession: dropping a file ───────────────────────────────────────── */
@@ -241,7 +258,7 @@ body {
 /* ── jobs ─────────────────────────────────────────────────────────────── */
 .job { font:11px/1.5 var(--mono); color:var(--dim); padding:5px 0; }
 .job .bar { display:block; height:2px; background:var(--rule); margin-top:5px; overflow:hidden; border-radius:1px; }
-.job .bar i { display:block; height:100%; background:var(--verdigris); transition:width .4s ease; }
+.job .bar i { display:block; height:100%; background:linear-gradient(90deg, var(--gilt-lo), var(--gilt-hi)); transition:width .4s ease; }
 .job.paused { color:var(--amber); }
 
 /* ── views ────────────────────────────────────────────────────────────── */
@@ -255,7 +272,8 @@ body {
   border-bottom:2px solid transparent; margin-bottom:-1px;
 }
 .view-tab:hover { color:var(--fg); }
-.view-tab[aria-selected=true] { color:var(--fg); border-bottom-color:var(--verdigris); }
+.view-tab[aria-selected=true] { color:var(--fg); border-bottom-color:var(--gilt); }
+.view-tab { font-family:var(--serif); letter-spacing:.06em; font-size:13px; }
 .views .right { margin-left:auto; display:flex; align-items:center; gap:12px; padding-bottom:8px; }
 
 /* The stance control: a button that opens to its options, and wears violet when set. */
@@ -956,17 +974,21 @@ const web = {
   draw(now) {
     const c = this.ctx; c.clearRect(0, 0, this.w, this.h);
     const dark = !document.documentElement.dataset.theme ? matchMedia('(prefers-color-scheme: dark)').matches : document.documentElement.dataset.theme === 'dark';
-    const ink = dark ? '221,226,234' : '23,28,36';
+    // Ink: pale on slate at night; on papyrus by day, a sepia that multiplies into the
+    // page like a star chart drawn on it rather than a grey cloud sitting on it.
+    const ink = dark ? '221,226,234' : '58,42,26';
     const css = getComputedStyle(document.documentElement);
     const rubric = css.getPropertyValue('--rubric').trim(), verd = css.getPropertyValue('--verdigris').trim();
     const P = new Map(); for (const n of this.nodes) P.set(n, this.project(n));
-    const colour = (n, l, a) => n.c ? n.c : n.top && this.hueOf[n.top] != null ? `hsl(${this.hueOf[n.top]} 45% ${l}% / ${a})` : `rgba(${ink},${a})`;
+    const colour = (n, l, a) => n.c ? n.c : n.top && this.hueOf[n.top] != null ? `hsl(${this.hueOf[n.top]} ${dark ? 45 : 30}% ${l}% / ${a})` : `rgba(${ink},${a})`;
     // edges, faint, fading with depth
     c.lineWidth = .7;
     for (const e of this.edges) {
       const a = P.get(e.a), b = P.get(e.b), depth = 1 - (a.depth + b.depth) / 2;
       const lit = Math.min(e.a.lit, e.b.lit);
-      c.strokeStyle = lit > .05 ? rubric : `rgba(${ink},${(e.k === 'cite' ? .26 : e.k === 'thread' ? .18 : .08) * e.w * (.35 + .65 * depth)})`;
+      // By day the chart is its lines: the haze is nearly gone, so the edges carry it.
+      const ek = dark ? (e.k === 'cite' ? .26 : e.k === 'thread' ? .18 : .08) : (e.k === 'cite' ? .5 : e.k === 'thread' ? .34 : .16);
+      c.strokeStyle = lit > .05 ? rubric : `rgba(${ink},${ek * e.w * (.35 + .65 * depth)})`;
       c.globalAlpha = lit > .05 ? .2 + .6 * lit : 1;
       c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
     }
@@ -977,9 +999,9 @@ const web = {
     for (const n of order) {
       const p = P.get(n), near = 1 - p.depth, R = (n.r * 9 + 18) * p.s;
       const grd = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
-      const hazeA = (dark ? .17 : .09) * (.4 + .6 * near);
-      if (n.lit > .02) { grd.addColorStop(0, rubric); c.globalAlpha = .5 * n.lit; n.lit *= .992; }
-      else { grd.addColorStop(0, colour(n, dark ? 62 : 40, 1)); c.globalAlpha = hazeA; }
+      const hazeA = (dark ? .17 : .022) * (.4 + .6 * near);
+      if (n.lit > .02) { grd.addColorStop(0, rubric); c.globalAlpha = (dark ? .5 : .22) * n.lit; n.lit *= .992; }
+      else { grd.addColorStop(0, colour(n, dark ? 62 : 34, 1)); c.globalAlpha = hazeA; }
       grd.addColorStop(1, 'rgba(0,0,0,0)');
       c.fillStyle = grd; c.beginPath(); c.arc(p.x, p.y, R, 0, Math.PI * 2); c.fill();
     }
@@ -987,8 +1009,8 @@ const web = {
     // the volumes themselves
     for (const n of order) {
       const p = P.get(n), near = 1 - p.depth;
-      c.globalAlpha = (n.tier === 0 ? .3 : .55) * (.35 + .65 * near);
-      c.fillStyle = n.lit > .02 ? rubric : colour(n, dark ? 70 : 38, 1);
+      c.globalAlpha = (n.tier === 0 ? (dark ? .3 : .45) : (dark ? .55 : .8)) * (.35 + .65 * near);
+      c.fillStyle = n.lit > .02 ? rubric : colour(n, dark ? 70 : 28, 1);
       c.beginPath(); c.arc(p.x, p.y, Math.max(.6, n.r * p.s), 0, Math.PI * 2); c.fill();
       if (n.tier >= 2) { c.lineWidth = .7; c.strokeStyle = c.fillStyle; c.beginPath(); c.arc(p.x, p.y, n.r * p.s + 2, 0, Math.PI * 2); c.stroke(); }
     }
@@ -1982,9 +2004,9 @@ function renderThreads() {
   }
   h += `<p class="label spaced">&nbsp;</p><button class="linkish" onclick="rebuild()">rebuild threads</button>`;
   el.innerHTML = h;
-  // The cloud lights what the page is about and settles on it when the scope is narrow;
-  // with the whole shelf in view it stays wide, and each thread dives on hover/click.
-  web.light([...ids]);
+  // The cloud settles on what the page is about when the scope is narrow; with the
+  // whole shelf in view it stays wide. Lighting is per thread, on hover and click --
+  // lighting everything at once turned the whole chart rubric.
   if (subjects.size || cartridges.size || f) web.focus([...ids]); else web.focus(null);
 }
 async function rebuild() {

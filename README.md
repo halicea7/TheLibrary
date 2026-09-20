@@ -69,6 +69,8 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
 
 **Reading** — click a volume and it opens as a page: sections in order, the section summary as an italic lead, reflections in the margin beside their passage, and the **figures** of a PDF set into the section whose pages hold them, each with its caption from the page (click one to widen it). Figures are found from the original's drawings and images and rendered on first view, so nothing is extracted at ingest and nothing is added to the database; the renders are a cache that goes with the document. Images referenced from a Markdown volume are not fetched — they stay as their alt text, since the file was shelved, not the site it came from.
 
+**Two rooms** — *appearance* in the masthead switches them. The night room is slate and verdigris; the day room is papyrus and ink, with gilt on the edges — the lintel under the masthead, the frieze rules beside each section label, the chosen tab — and the nebula drawn as a star chart in sepia rather than a cloud. The socket the cartridges drop into is a pedestal: a stepped base, a fluted drum, a Doric capital whose abacus carries the bronze mouth, a gilt fillet at the lip; limestone by day, basalt by night. The cartridge itself is the same object in both rooms — its design is sealed in the manifest, so it does not take the room's colour.
+
 **Conversations** — the desk bar names the current one, starts a new one, and lists earlier ones; opening one replays it with its margin notes, and asking again continues it.
 
 <p align="center">

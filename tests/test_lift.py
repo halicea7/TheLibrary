@@ -27,3 +27,11 @@ def test_moved_content_is_not_a_disagreement():
     assert not _explanation_is_junk(
         "One source recommends against DNS brute-forcing, while another presents it as standard."
     )
+
+
+def test_bracketed_source_is_peeled_from_a_quoted_claim():
+    import re
+
+    q = "[MySQL Injection] The query uses 3 columns as demonstrated"
+    m = re.match(r"^\[([^\]]{1,80})\]\s*(.+)$", q)
+    assert m and m.group(1) == "MySQL Injection" and m.group(2).startswith("The query")

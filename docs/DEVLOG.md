@@ -803,3 +803,36 @@ A quoted claim is kept only if it is found among the claims the model was given;
 UI shows the pair side by side with their shared words lit. A conflict whose explanation
 is that pages say their content moved to different URLs is the mirrored wiki's stubs
 talking, and is now junk. Needs a threads rebuild to take effect.
+
+
+## Follow-on: the day room
+
+"Light mode looks abhorrent." It did: `#fff` panels, the nebula a grey smudge, the socket
+a black slab on white. Nothing in it was ours. The brief that followed -- Greco-Roman,
+gold, marble, columns, "alluding to the Library of Alexandria" -- resolved, after a talk,
+into *no marble texture, just the inspiration*.
+
+**The palette.** Papyrus, not paper: `#ece4d3` ground, ink `#2a2118`, rules the colour
+of a reed pen's edge. The pigments keep their meanings in both rooms -- rubric is still
+"from the shelf", verdigris still "system" (it is bronze gone green, which fits), amber
+still "attention" (ochre by day). One new token, `--gilt`, is chrome only: the lintel
+fillet under the masthead, the frieze hairline that runs out from every section label,
+the chosen tab, the progress bar. Gold on edges and letters, never as fill. The tabs and
+labels moved to the serif with inscription tracking.
+
+**The chart by day.** A nebula multiplies into white as grey. By day the haze is nearly
+off (alpha .022 against .17 at night), the edges carry the drawing at twice their weight,
+and the points are sepia ink at 28% lightness. It reads as a star chart engraved on the
+page rather than a cloud sitting on it. Lit volumes glow at a quarter of the night alpha,
+since multiply makes rubric black. And Threads no longer lights every volume on render --
+that turned the whole chart red -- lighting is per thread, on hover and click.
+
+**The pedestal.** Real geometry, not a texture: two stepped slabs, a drum with twenty
+flutes (a scalloped section extruded upward), an echinus lathe, an abacus slab, a bronze
+frame around the slot and a dark mouth beneath it, gilt fillets at the lip and the foot
+and a gilt band along the abacus face. Stone follows the room -- limestone by day, basalt
+by night -- re-stoned the moment the theme flips, since the rack is idle when nobody is
+touching it. First cut shadowed a local named `frame` and fell back to the 2D spines
+without a word beyond a console warning; worth a louder failure some day. The cartridge
+stays the object it was: its design is sealed, and a thing does not change colour when
+you carry it into another room.

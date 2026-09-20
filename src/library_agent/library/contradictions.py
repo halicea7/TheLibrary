@@ -70,8 +70,8 @@ Return, in this order:
   Otherwise one sentence on why the differences are compatible.
 - sources: document titles involved in the conflict (empty list if none).
 - claim_a, source_a, claim_b, source_b: if they conflict, the two claims that cannot both
-  hold, copied word for word from the list above, each with the document in its brackets.
-  Leave all four empty if there is no conflict.
+  hold -- the claim text copied word for word from the list above, without the bracketed
+  document name, which goes in source_a / source_b. Leave all four empty if no conflict.
 - disagreement: your verdict, following from the analysis above."""
 
 
@@ -167,6 +167,15 @@ async def judge_cluster(
         pool = " ".join(str(x) for x in claims).lower()
         for k in ("claim_a", "claim_b"):
             q = " ".join(str(out.get(k) or "").split())
+            # The model tends to copy the "[Title]" prefix along with the claim; peel it
+            # off and let it stand as the source when none was given.
+            m = re.match(r"^\[([^\]]{1,80})\]\s*(.+)$", q)
+            if m:
+                q = m.group(2)
+                out.setdefault(k.replace("claim", "source"), "")
+                if not out.get(k.replace("claim", "source")):
+                    out[k.replace("claim", "source")] = m.group(1)
+            out[k] = q
             if len(q) < 15 or q.lower()[:60] not in pool:
                 out["claim_a"] = out["claim_b"] = ""
                 break

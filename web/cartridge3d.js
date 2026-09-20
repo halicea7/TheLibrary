@@ -341,19 +341,53 @@ export function mountRack(canvas, handlers = {}) {
   const renderer = makeRenderer(canvas);
   const scene = new THREE.Scene();
   environment(renderer).then(env => { scene.environment = env; wake(); });
-  const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 60); camera.position.set(0, 1.5, 7.6); camera.lookAt(0, 0.7, 0);
+  const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 60); camera.position.set(0, 1.8, 6.8); camera.lookAt(0, 0.62, 0);
   lights(scene);
   const backplate = refractionPlate(renderer, new THREE.PlaneGeometry(12, 8)); backplate.material.color.copy(panelBg()); backplate.position.set(0, 2, -2.2); scene.add(backplate);
-  // the socket: a block with a chamfered slot, the cartridge's shadow falling on it
-  const socket = new THREE.Group(); scene.add(socket);
-  const block = new THREE.Mesh(new THREE.ExtrudeGeometry(roundedRect(2.7, 1.55, .12), { depth: .55, bevelEnabled: true, bevelThickness: .03, bevelSize: .03, bevelSegments: 3 }), new THREE.MeshStandardMaterial({ color: 0x11151c, roughness: .7, metalness: .2, normalMap: grainNormal(), normalScale: new THREE.Vector2(.1, .1) }));
-  block.rotation.x = -Math.PI / 2; block.position.y = -.58; block.receiveShadow = true; socket.add(block);
-  const slotMesh = new THREE.Mesh(new THREE.BoxGeometry(W * .5 + .12, .1, D * .5 + .12), new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1 }));
-  slotMesh.position.y = .0; socket.add(slotMesh);
+  // the socket: a pedestal -- stepped base, fluted drum, a Doric capital whose abacus
+  // carries the bronze mouth the cartridge drops into, a gilt fillet at the lip. Stone
+  // by the room: limestone by day, basalt by night.
+  const socket = new THREE.Group(); socket.scale.setScalar(.9); scene.add(socket);
+  const stone = new THREE.MeshStandardMaterial({ color: 0x1c2027, roughness: .82, metalness: .05, normalMap: grainNormal(), normalScale: new THREE.Vector2(.25, .25) });
+  const bronze = new THREE.MeshStandardMaterial({ color: 0x6b4a26, roughness: .38, metalness: .95 });
+  const gilt = new THREE.MeshStandardMaterial({ color: 0xc9a24e, roughness: .28, metalness: 1 });
+  const TOP = 0;                                   // the slot's mouth sits at y = 0
+  const add = (geo, mat, y, cast = true) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.castShadow = cast; m.receiveShadow = true; socket.add(m); return m; };
+  const slab = (w, h, d, r = .04) => { const g = new THREE.ExtrudeGeometry(roundedRect(w, d, r), { depth: h, bevelEnabled: true, bevelThickness: .015, bevelSize: .015, bevelSegments: 2 }); g.rotateX(-Math.PI / 2); g.translate(0, 0, 0); return g; };
+  // base: two steps
+  add(slab(3.1, .14, 1.9), stone, TOP - 1.02);
+  add(slab(2.75, .12, 1.65), stone, TOP - .88);
+  // drum: twenty flutes, a scalloped section extruded upward
+  const flutes = new THREE.Shape(); const R = .95, N = 20, DEPTH = .045;
+  for (let i = 0; i <= 240; i++) { const a = i / 240 * Math.PI * 2, r = R - DEPTH * (.5 + .5 * Math.cos(a * N)); const x = Math.cos(a) * r * 1.35, y = Math.sin(a) * r * .72; i ? flutes.lineTo(x, y) : flutes.moveTo(x, y); }
+  const drum = new THREE.ExtrudeGeometry(flutes, { depth: .5, bevelEnabled: false }); drum.rotateX(-Math.PI / 2);
+  add(drum, stone, TOP - .76);
+  // capital: an echinus (the flare) and the abacus slab
+  const echinus = new THREE.LatheGeometry([new THREE.Vector2(.9, 0), new THREE.Vector2(1.0, .05), new THREE.Vector2(1.12, .1), new THREE.Vector2(1.2, .14)], 48);
+  const ech = add(echinus, stone, TOP - .27); ech.scale.set(1.3, 1, .72);
+  add(slab(2.9, .13, 1.7, .03), stone, TOP - .13);
+  // the mouth: a bronze frame around the slot, the slot itself dark
+  const rim = new THREE.Shape(); const fw = W * .5 + .26, fd = D * .5 + .26; rim.moveTo(-fw / 2, -fd / 2); rim.lineTo(fw / 2, -fd / 2); rim.lineTo(fw / 2, fd / 2); rim.lineTo(-fw / 2, fd / 2); rim.closePath();
+  const hole = new THREE.Path(); const hw = W * .5 + .1, hd = D * .5 + .1; hole.moveTo(-hw / 2, -hd / 2); hole.lineTo(-hw / 2, hd / 2); hole.lineTo(hw / 2, hd / 2); hole.lineTo(hw / 2, -hd / 2); hole.closePath(); rim.holes.push(hole);
+  const mouth = new THREE.ExtrudeGeometry(rim, { depth: .05, bevelEnabled: true, bevelThickness: .012, bevelSize: .012, bevelSegments: 2 }); mouth.rotateX(-Math.PI / 2);
+  add(mouth, bronze, TOP - .005);
+  add(new THREE.BoxGeometry(hw, .3, hd), new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1 }), TOP - .15, false);
+  // the gilt fillet: a thin ring around the abacus edge, and one at the foot of the drum
+  const fillet = (w, d, y) => { const s = new THREE.Shape(); s.moveTo(-w / 2, -d / 2); s.lineTo(w / 2, -d / 2); s.lineTo(w / 2, d / 2); s.lineTo(-w / 2, d / 2); s.closePath(); const h = new THREE.Path(); h.moveTo(-w / 2 + .05, -d / 2 + .05); h.lineTo(-w / 2 + .05, d / 2 - .05); h.lineTo(w / 2 - .05, d / 2 - .05); h.lineTo(w / 2 - .05, -d / 2 + .05); h.closePath(); s.holes.push(h); const g = new THREE.ExtrudeGeometry(s, { depth: .025, bevelEnabled: false }); g.rotateX(-Math.PI / 2); add(g, gilt, y, false); };
+  fillet(2.9, 1.7, TOP - .005); fillet(2.75, 1.65, TOP - .76);
+  // a gilt band along the abacus face, the one line of gold you read from across the room
+  add(new THREE.BoxGeometry(2.92, .03, 1.72), gilt, TOP - .10, false);
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.1), new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false, opacity: .8 }));
-  shadow.rotation.x = -Math.PI / 2; shadow.position.y = .035; socket.add(shadow);
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = TOP + .06; socket.add(shadow);
+  // stone follows the room
+  const dayStone = new THREE.Color(0xcfc3a6), nightStone = new THREE.Color(0x1c2027);
+  const restone = () => { const bg = panelBg(); const hsl = {}; bg.getHSL(hsl); stone.color.copy(hsl.l > .5 ? dayStone : nightStone); stone.roughness = hsl.l > .5 ? .9 : .82; };
+  restone();
+  // The room can change while the rack is idle: watch the theme and re-stone at once.
+  new MutationObserver(() => { restone(); wake(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { restone(); wake(); });
 
-  const S = .5, RAISED = 1.55, SEATED = .62, SIDE = 3.6;
+  const S = .5, RAISED = 1.35, SEATED = .62, SIDE = 3.6;
   const items = new Map();
   let order = [], index = 0, hovered = null, frame = null, alive = true, t0 = performance.now();
   const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
@@ -375,7 +409,7 @@ export function mountRack(canvas, handlers = {}) {
   function loop(now) {
     frame = null; if (!alive) return;
     const dt = Math.min(.04, (now - t0) / 1000); t0 = now; size();
-    if ((now | 0) % 60 === 0) backplate.material.color.copy(panelBg());
+    if ((now | 0) % 60 === 0) { backplate.material.color.copy(panelBg()); restone(); }
     let moving = false;
     const cur = current();
     for (const [id, it] of items) {

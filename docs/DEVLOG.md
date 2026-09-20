@@ -1056,3 +1056,13 @@ fasteners in real openings with bezels and a cross recess, a recessed rear servi
 panel with engraved marks, and traces and parts on the board so a clear shell has
 something to show. Reviewed: nothing fetched, the design contract untouched, disposal
 covers the new geometry. It deploys to the hosted demo on push like any UI change.
+
+**Booting.** "When you insert the cartridge, the level pips should turn green one by
+one, as if loading." The rack now notices the first frame a seated cartridge is at
+rest in the socket (after the bounce) and calls `boot()`: the pips that belong to the
+level come on in order -- catalogue, readings, full -- 380 ms apart, each with a flash
+that decays to a steady verdigris, and the power light comes on last. Seated, the pips
+stay verdigris (in use); lifted, they return to the cartridge's colour. The loop stays
+awake for the sequence and hands back to the rest state when it ends. A cartridge that
+loads already seated boots once on arrival, which turned out to be a good way to open
+the page.

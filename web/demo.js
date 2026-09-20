@@ -52,9 +52,9 @@
 
   const cartridges = [
     { id: uid('k'), name: 'Ops Handbook', slug: 'ops-handbook', version: 2, colour: '#8a3d5e', icon_svg: null, made_by: 'import', made_at: '2026-09-10T09:00:00Z', level: 'full', embed_model: 'bge-m3', reader_model: 'demo', document_count: 8, imported_at: '2026-09-10T09:00:00Z', has_art: false, editable: true,
-      design: { material: 'glitter', tint: .6, opacity: .3, sparkle: .55, roughness: .2, labelFinish: 'holo', labelFinishStrength: .7, art: 'generated', clearance: 'internal' } },
+      design: { material: 'glitter', tint: .6, opacity: .3, sparkle: .55, roughness: .2, labelFinish: 'gold', labelFinishStrength: .35, art: 'generated', clearance: 'internal' } },
     { id: uid('k'), name: 'Reading Group', slug: 'reading-group', version: 1, colour: '#2f6f8f', icon_svg: null, made_by: null, made_at: '2026-09-12T09:00:00Z', level: 'readings', embed_model: 'bge-m3', reader_model: 'demo', document_count: 5, imported_at: '2026-09-12T09:00:00Z', has_art: false, editable: false,
-      design: { material: 'clear', tint: .5, opacity: .3, sparkle: .5, roughness: .2, labelFinish: 'paper', labelFinishStrength: .65, art: 'generated', clearance: 'open' } },
+      design: { material: 'clear', tint: .5, opacity: .3, sparkle: .5, roughness: .2, labelFinish: 'holo', labelFinishStrength: .4, art: 'generated', clearance: 'open' } },
   ];
   // the Systems volumes came in the Ops cartridge; the ML papers are local
   docs.filter(d => d.shelf?.top === 'Systems').forEach(d => { d.cartridge = { id: cartridges[0].id, name: cartridges[0].name, colour: cartridges[0].colour }; });
@@ -180,9 +180,20 @@
     if (p === '/api/categories') return json(cats);
     if (p === '/api/cartridges' && method === 'GET') return json({ cartridges, palette });
     if (p === '/api/cartridges/preview') return json({ documents: 8, sections: 41, chunks: 133, artifacts: 41, reflections: 12, categories: 3, citations: 2, vectors: 186, originals: 8, estimated_bytes: 2_400_000, titles: docs.slice(0, 8).map(d => d.title) });
-    if (p === '/api/cartridges/art/preview') { if (q.get('points')) return json({ points: nodes.slice(0, 60).map((_, i) => [Math.cos(i * 2.4) * (.2 + (i % 7) / 12), Math.sin(i * 2.4) * (.2 + (i % 5) / 10)]) }); return realFetch('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='); }
-    if ((m = p.match(/^\/api\/cartridges\/([^/]+)\/constellation$/))) return json({ points: nodes.slice(0, 80).map((_, i) => [Math.cos(i * 1.7) * (.15 + (i % 9) / 14), Math.sin(i * 1.7) * (.15 + (i % 6) / 11)]) });
-    if ((m = p.match(/^\/api\/cartridges\/([^/]+)\/art$/))) return realFetch('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=');
+    // Constellation points live in the unit square, like the server's PCA layout: a
+    // loose spiral with a denser middle. No stored art: the shell draws these itself.
+    const constellation = (n, seed) => Array.from({ length: n }, (_, i) => { const a = i * 2.399 + seed, r = .08 + .42 * Math.sqrt((i + 1) / n); return [.5 + Math.cos(a) * r, .5 + Math.sin(a) * r * .8]; });
+    // The label: the constellation drawn on a canvas, as the server draws it with Pillow.
+    const artPng = async (pts, colour) => {
+      const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
+      g.fillStyle = '#0b0d11'; g.fillRect(0, 0, 512, 512); g.fillStyle = colour;
+      for (const [x, y] of pts) { g.globalAlpha = .55 + Math.random() * .45; g.beginPath(); g.arc(40 + x * 432, 40 + y * 432, 2 + Math.random() * 2.5, 0, Math.PI * 2); g.fill(); }
+      const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+      return new Response(blob, { headers: { 'Content-Type': 'image/png' } });
+    };
+    if (p === '/api/cartridges/art/preview') { if (q.get('points')) return json({ points: constellation(60, .3) }); return artPng(constellation(60, .3), q.get('colour') || '#8a3d5e'); }
+    if ((m = p.match(/^\/api\/cartridges\/([^/]+)\/constellation$/))) return json({ points: constellation(80, 1.1) });
+    if ((m = p.match(/^\/api\/cartridges\/([^/]+)\/art$/))) { const k = cartridges.find(x => x.id === m[1]); return artPng(constellation(80, 1.1), k ? k.colour : '#8a3d5e'); }
     if (p === '/api/cartridges/export' || p === '/api/cartridges/import' || (p.startsWith('/api/cartridges/') && (method === 'DELETE' || method === 'PATCH'))) { note(); return json({ detail: DEMO.note }, 418); }
     if (p === '/api/library/web') return json({ nodes, edges });
     if (p === '/api/library/clusters') return json(clusters);

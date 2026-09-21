@@ -583,7 +583,9 @@ async def _design_one(db: AsyncSession, c: Any, coll: Collection, progress=None)
                 subjects=listing or "none",
                 collections=_collection_line(coll),
             ),
-            design_schema(max_top, min_top=1 if max_top == 1 else 2),
+            # One is allowed however big the collection: a handbook is one field, and
+            # asked for two the model named "Cybersecurity" twice.
+            design_schema(max_top, min_top=1),
             system=SYSTEM_LIBRARIAN,
             instructions=TAXONOMY_PROMPT,
             temperature=0.1 + 0.2 * attempt,

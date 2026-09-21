@@ -930,23 +930,32 @@ async def split_crowded(
                 continue
             n = len(docs)
             lo, hi = 3, max(4, min(8, -(-n // 20)))
-            out = await client.structured(
-                providers.model_for("threads"),
-                SPLIT_PROMPT.format(
-                    top=top,
-                    sub=sub,
-                    n=n,
-                    siblings=", ".join(s for s in subs if s != sub) or "none",
-                    titles="\n".join(f"- {d.title[:70]}" for d in docs[:120]),
-                    lo=lo,
-                    hi=hi,
-                ),
-                split_schema(lo, hi),
-                system=SYSTEM_LIBRARIAN,
-                instructions=SPLIT_PROMPT,
-                num_predict=2000,
-                think=True,
-            )
+            try:
+                out = await client.structured(
+                    providers.model_for("threads"),
+                    SPLIT_PROMPT.format(
+                        top=top,
+                        sub=sub,
+                        n=n,
+                        siblings=", ".join(s for s in subs if s != sub) or "none",
+                        titles="\n".join(f"- {d.title[:70]}" for d in docs[:120]),
+                        lo=lo,
+                        hi=hi,
+                    ),
+                    split_schema(lo, hi),
+                    system=SYSTEM_LIBRARIAN,
+                    instructions=SPLIT_PROMPT,
+                    num_predict=2000,
+                    # The prompt asks for its reasoning in `notes`; with thinking on as
+                    # well, a 400-title shelf ate the whole output budget three times
+                    # and took an hour's placements down with it.
+                    think=False,
+                )
+            except Exception:
+                # One shelf that will not split stays crowded; the rest of the reshelve
+                # stands.
+                log.warning("split of %s failed; it stays as it is", sub, exc_info=True)
+                continue
             names = [taxonomy.normalize_name(str(x)) for x in out.get("sub_shelves") or []]
             # A catch-all ("Web Attack Types", "Other Exploits") just recreates the lump.
             catchall = {"types", "other", "others", "general", "misc", "various", "miscellaneous"}
@@ -1108,11 +1117,15 @@ async def reshelve(
                 left.append(did)
             if progress:
                 await progress(i + 1, len(ids), "placing volumes")
+        # The placements are an hour's work: keep them before the evening-out begins,
+        # so a split that fails does not roll them back with it.
+        await db.commit()
         # Then even the shelf out: split the crowded (a split can leave one lump behind,
         # so twice), then dissolve the sparse.
         for _ in range(2):
             moved = await split_crowded(db, tx, client=c, progress=progress, gate=gate)
             res.split_moved += moved
+            await db.commit()
             if not moved:
                 break
         res.merged_moved = await merge_sparse(db, tx, client=c, gate=gate)

@@ -25,10 +25,11 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from library_agent.db.models import (
@@ -132,11 +133,18 @@ Rules:
   volumes gets more sub-shelves and a field with a handful gets two.
 - Two or three words each. Keep well-known acronyms as acronyms. Never name a sub-shelf
   after a single volume.
+- The library holds several collections (listed below). A collection about a different
+  field from the rest is its own field with its own top shelf, however the majority is
+  shelved: an organisation's internal documentation does not go under the headings of a
+  security handbook because the handbook is bigger.
 
 First, in `notes`, walk through the titles and say what clusters you actually see. Then
 name the shelves.
 
-The volumes ({n} of them):
+The collections:
+{collections}
+
+The volumes ({n} of them; a sample of the titles, drawn evenly from every collection):
 {titles}
 
 Tags previously applied to them, for reference only (inconsistent; do not copy them):
@@ -425,6 +433,55 @@ async def shelf_health(db: AsyncSession) -> dict[str, Any]:
     return out
 
 
+DESIGN_TITLES = 300
+
+
+async def _design_sample(db: AsyncSession) -> tuple[list[str], str, str]:
+    """The titles the designer reads, and a line on each collection.
+
+    The first three hundred titles in alphabetical order were all one cartridge's when
+    that cartridge was a thousand volumes, and the design never saw the other three
+    hundred and ninety: an internal wiki went under "System Exploitation". Every
+    collection -- each cartridge, and the volumes shelved directly -- gets a share of the
+    sample with a floor, taken evenly through its titles, and the prompt is told what the
+    collections are."""
+    rows = (
+        await db.execute(
+            text("""
+            select d.title, c.name as coll, c.genre as cgenre, d.genre
+            from document d
+            left join cartridge_document cd on cd.document_id = d.id
+            left join cartridge c on c.id = cd.cartridge_id
+            where d.tier >= 1
+            order by d.title
+            """)
+        )
+    ).all()
+    groups: dict[str, list] = {}
+    for r in rows:
+        groups.setdefault(r.coll or "", []).append(r)
+    all_titles = [r.title for r in rows]
+    total = len(rows)
+    floor = min(40, DESIGN_TITLES // max(1, len(groups)))
+    picked: list[str] = []
+    lines: list[str] = []
+    for coll, members in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        share = max(floor, round(DESIGN_TITLES * len(members) / max(1, total)))
+        share = min(share, len(members))
+        step = max(1, len(members) // share)
+        picked.extend(m.title for m in members[::step][:share])
+        # The cartridge's genre if it has one, else the commonest among its volumes.
+        cg = next((m.cgenre for m in members if m.cgenre), None)
+        counts = Counter(m.genre for m in members if m.genre)
+        genre = cg or (counts.most_common(1)[0][0] if counts else None)
+        what = f"{len(members)} volumes" + (
+            f", mostly {genre}" if genre and not cg else f", {genre}" if genre else ""
+        )
+        lines.append(f"- {coll} (a cartridge; {what})" if coll else f"- shelved directly ({what})")
+    titles = "\n".join(f"- {x[:70]}" for x in picked)
+    return all_titles, titles, "\n".join(lines)
+
+
 async def build_taxonomy(
     db: AsyncSession, *, client: Ollama | None = None, progress=None
 ) -> Taxonomy:
@@ -433,14 +490,7 @@ async def build_taxonomy(
     if not subjects:
         return Taxonomy()
     listing = ", ".join(f"{name} ({n})" for name, n, _ in subjects)
-    all_titles = list(
-        (
-            await db.execute(
-                select(Document.title).where(Document.tier >= 1).order_by(Document.title)
-            )
-        ).scalars()
-    )
-    titles = "\n".join(f"- {x[:70]}" for x in all_titles[:300])
+    all_titles, titles, collections = await _design_sample(db)
     # A small library gets a small shelf: 170 volumes want four bays, not eight.
     max_top = max(2, min(MAX_TOP, len(all_titles) // 40))
     per_sub = f"{max(3, len(all_titles) // 12)} to {max(8, len(all_titles) // 5)}"
@@ -461,6 +511,7 @@ async def build_taxonomy(
                     n=len(all_titles),
                     titles=titles,
                     subjects=listing,
+                    collections=collections,
                 ),
                 design_schema(max_top),
                 system=SYSTEM_LIBRARIAN,

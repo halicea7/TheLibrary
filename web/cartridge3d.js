@@ -248,6 +248,7 @@ function labelSurface(material) {
 
 /* ── one cartridge ────────────────────────────────────────────────────── */
 function makeCartridge() {
+  const refined=true;
   const concept = true; // Approved molded-shell construction and selective label finishes.
   const grips = concept ? GROOVES.map(g => ({...g, w:1.12, x:-.34})) : GROOVES;
   const extraScrews = [{x:-.94,y:-1.44,r:.065},{x:.94,y:-1.44,r:.065}];
@@ -326,7 +327,7 @@ function makeCartridge() {
   if (concept) {
     ['Full','Readings','Catalogue'].forEach((name,i) => {
       const text = detailText(name, .43, .095, '#e3eadf');
-      text.position.set(.53,PIPS[i].y,.254);text.userData.shellDetail=true;group.add(text);
+      text.position.set(.53,PIPS[i].y,.277);text.userData.shellDetail=true;group.add(text);
     });
     // Small molded shoulders around the connector and a recessed rear service panel.
     for (const x of [-1.04,1.04]) {
@@ -364,6 +365,61 @@ function makeCartridge() {
       const slot = new THREE.Mesh(new THREE.BoxGeometry(.077,.016,.003),darkMat);
       slot.rotation.z=angle;slot.position.set(p.x,p.y,.231);group.add(slot);
     }
+  }
+
+  const solidDetails=[], opticalDetails=[], adaptiveGrips=[];
+  if (refined) {
+    const graphite=new THREE.MeshStandardMaterial({color:0x172b30,roughness:.72,metalness:.12});
+    const rubber=new THREE.MeshStandardMaterial({color:0x20383b,roughness:.92});
+    const metal=new THREE.MeshStandardMaterial({color:0xa8b6af,roughness:.33,metalness:.8});
+    function plate(shape,mat,z,depth=.016) {
+      const m=new THREE.Mesh(new THREE.ExtrudeGeometry(shape,{depth,bevelEnabled:true,bevelSize:.008,bevelThickness:.006,bevelSegments:3,curveSegments:16}),mat);
+      m.position.z=z;group.add(m);return m;
+    }
+    // Continuous protective lip around the artwork; opening preserves the print.
+    const frame=roundedRect(LABEL.w+.15,LABEL.h+.15,.105,LABEL.x,LABEL.y);
+    frame.holes.push(roundedRect(LABEL.w+.018,LABEL.h+.018,.065,LABEL.x,LABEL.y));
+    solidDetails.push(plate(frame,graphite,.239,.022));
+    const fineFrame=roundedRect(LABEL.w+.065,LABEL.h+.065,.08,LABEL.x,LABEL.y);
+    fineFrame.holes.push(roundedRect(LABEL.w+.026,LABEL.h+.026,.065,LABEL.x,LABEL.y));
+    opticalDetails.push(plate(fineFrame,metal,.239,.008));
+    // A separate lower grip insert integrates the indicators into one assembly.
+    const fascia=roundedRect(1.98,.92,.09,0,-.93);
+    for(const p of PIPS)fascia.holes.push(roundedRect(p.s+.014,p.s+.014,.026,p.x,p.y));
+    solidDetails.push(plate(fascia,graphite,.249,.012));
+    for(let i=0;i<5;i++) {
+      const grip=plate(roundedRect(1.04,.062,.031,-.34,-1.25+i*.14),rubber,.273,.018);
+      adaptiveGrips.push({mesh:grip,solid:rubber});
+    }
+    // Protective side strips wrap toward the seam and provide a visible grip.
+    for(const side of [-1,1]) {
+      solidDetails.push(plate(roundedRect(.11,.88,.048,side*1.095,-.83),rubber,.239,.027));
+      for(let i=0;i<8;i++) {
+        const rib=new THREE.Mesh(new THREE.BoxGeometry(.044,.042,.32),rubber);
+        rib.position.set(side*1.196,-1.16+i*.09,.055);group.add(rib);adaptiveGrips.push({mesh:rib,solid:rubber});
+      }
+    }
+    // Small mechanical end stops and a brushed line finish the grip assembly.
+    for(const x of [-.89,.18]) {
+      const cap=plate(roundedRect(.035,.64,.017,x,-.96),metal,.272,.004);
+      solidDetails.push(cap);
+    }
+    // Narrow grip-top highlights provide depth without filling the transparent window.
+    for(let i=0;i<5;i++) {
+      const edge=new THREE.Mesh(new THREE.BoxGeometry(.92,.009,.006),metal);
+      edge.position.set(-.34,-1.224+i*.14,.293);group.add(edge);solidDetails.push(edge);
+    }
+    // Clear top identity, with small contrasting end marks.
+    const brand=detailText('THE LIBRARY',.96,.098,'#183239');brand.position.set(0,1.48,.258);group.add(brand);
+    for(const x of [-.59,.59])plate(roundedRect(.07,.036,.012,x,1.48),metal,.25,.005);
+    const arrow=new THREE.Shape();arrow.moveTo(-.065,-1.465);arrow.lineTo(.065,-1.465);arrow.lineTo(0,-1.545);arrow.closePath();
+    plate(arrow,metal,.25,.005);
+    for(const side of [-1,1]) {
+      const line=new THREE.Mesh(new THREE.BoxGeometry(.33,.017,.008),metal);
+      line.position.set(side*.32,-1.50,.255);group.add(line);
+    }
+    const bezel=new THREE.Mesh(new THREE.RingGeometry(LED.r+.002,LED.r+.025,32),metal);
+    bezel.position.set(LED.x,LED.y,.251);group.add(bezel);
   }
 
   const inner = new THREE.Group(); group.add(inner);
@@ -506,6 +562,7 @@ function makeCartridge() {
     constellation = new THREE.Points(geo, new THREE.PointsMaterial({ map: spriteTex(), color: col, size: .11, alphaTest: .2, depthWrite: false }));
     inner.add(constellation);
   }
+  let foilTexture=null;
   function applyLabel() {
     const d = state.design || {}, material = label.material;
     const finish = FINISHES.includes(d.labelFinish) ? d.labelFinish : 'paper';
@@ -525,9 +582,29 @@ function makeCartridge() {
       material.clearcoatRoughness = finish === 'gloss' ? .065 : .18;
     }
     if (oldCoat !== material.clearcoat) material.needsUpdate = true;
-    const key = `${state.artUrl}|${state.name}|${state.sub}|${state.colour}|${state.design.clearance}`;
+    const key = `${state.artUrl}|${state.name}|${state.sub}|${state.colour}|${state.design.clearance}|${state.design.foilMode}|${state.design.foilMask}`;
     if (key === artKey) return; artKey = key;
-    const done = img => { if (disposed) return; label.material.map?.dispose(); label.material.map = (concept ? conceptLabel : labelTexture)(img, state.name, state.sub, state.colour, state.design.clearance); label.material.needsUpdate = true; };
+    const done = async img => {
+      if(disposed || artKey!==key)return;
+      label.material.map?.dispose();label.material.map=(concept ? conceptLabel : labelTexture)(img,state.name,state.sub,state.colour,state.design.clearance);label.material.needsUpdate=true;
+      labelUniforms.maskMode.value=0;
+      const mode=d.foilMode||'artwork';
+      if(mode==='artwork')return;
+      let source=img, custom=false;
+      if(d.foilMask){
+        source=await new Promise(resolve=>{const m=new Image();m.onload=()=>resolve(m);m.onerror=()=>resolve(null);m.src=d.foilMask;});custom=true;
+      }
+      if(disposed||artKey!==key||!source)return;
+      const c=document.createElement('canvas');c.width=768;c.height=Math.round(768*LABEL.h/LABEL.w);const ctx=c.getContext('2d');
+      const scale=Math.max(c.width/source.width,c.height/source.height);
+      ctx.drawImage(source,(c.width-source.width*scale)/2,(c.height-source.height*scale)/2,source.width*scale,source.height*scale);
+      const data=ctx.getImageData(0,0,c.width,c.height);let hasAlpha=false;
+      for(let i=0;i<data.data.length;i+=4){const a=data.data[i+3];hasAlpha ||= a<250;const v=custom?Math.round((data.data[i]*.299+data.data[i+1]*.587+data.data[i+2]*.114)*a/255):a;data.data[i]=data.data[i+1]=data.data[i+2]=v;data.data[i+3]=255;}
+      // Opaque images without a subject mask retain the existing artwork treatment.
+      if(!custom&&!hasAlpha)return;
+      ctx.putImageData(data,0,0);foilTexture?.dispose();foilTexture=new THREE.CanvasTexture(c);
+      labelUniforms.subjectMask.value=foilTexture;labelUniforms.maskMode.value=mode==='reverse'?2:1;
+    };
     if (!state.artUrl) { done(null); return; }
     const img = new Image();
     img.onload = () => { if (artKey === key) done(img); };
@@ -540,6 +617,10 @@ function makeCartridge() {
     set(next) {
       state = { ...state, ...next };
       state.design = state.design || {};
+      const optical=['clear','frosted','smoke','glitter'].includes(state.design.material);
+      solidDetails.forEach(m=>m.visible=!optical);
+      opticalDetails.forEach(m=>m.visible=optical);
+      adaptiveGrips.forEach(({mesh,solid})=>{mesh.material=optical?bodyMat:solid;});
       if ('design' in next || 'colour' in next || 'level' in next || 'lit' in next) applyMaterial();
       if ('points' in next || 'colour' in next) applyConstellation();
       applyLabel();
@@ -555,7 +636,7 @@ function makeCartridge() {
     boot() { bootAt = performance.now(); lights(bootAt); },
     booting() { return bootAt > 0; },
     dispose() {
-      disposed = true; artKey = null;
+      disposed = true; artKey = null; foilTexture?.dispose();
       const geometries = new Set(), materials = new Set(), maps = new Set();
       group.traverse(o => {
         if (o.geometry) geometries.add(o.geometry);
@@ -871,9 +952,11 @@ function addBoardDetails(group) {
 
 // Selective foil: retain ink, metallize fine art lines and a narrow border.
 function refinedLabelSurface(material) {
- const u={socketFinish:{value:0},socketFinishStrength:{value:.65}};
+ const u={socketFinish:{value:0},socketFinishStrength:{value:.65},subjectMask:{value:null},maskMode:{value:0}};
  surfaceShader(material,'label-refined',u,`
  uniform float socketFinish, socketFinishStrength;
+ uniform sampler2D subjectMask;
+ uniform float maskMode;
  `,`
  vec2 uv = vSocketUv;
  float grain = socketHash(floor(uv * vec2(768.0, 676.0)));
@@ -889,6 +972,11 @@ function refinedLabelSurface(material) {
    float edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
    float border=smoothstep(.014,.019,edge)*(1.0-smoothstep(.024,.030,edge));
    float mask=max(lineMask*zone,border*zone)*socketFinishStrength;
+   if(maskMode>.5){
+     float subject=texture2D(subjectMask,uv).r;
+     float protectedZone=smoothstep(.30,.38,uv.y);
+     mask=(maskMode<1.5?subject:1.0-subject)*protectedZone*socketFinishStrength;
+   }
    float phase=angle*8.0+view.y*4.0+(1.0-facing)*3.0;
    vec3 foil=vec3(.8);
    float foilRoughness=.15;
@@ -912,7 +1000,7 @@ function refinedLabelSurface(material) {
      foil=vec3(.82,.87,.94);
      foilRoughness=.085;
    }
-   diffuseColor.rgb=mix(diffuseColor.rgb,foil,mask);
+   diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*mix(vec3(.8),foil*1.8,.6),mask);
    metalnessFactor=mix(metalnessFactor,1.0,mask);
    roughnessFactor=mix(roughnessFactor,foilRoughness,mask);
  }

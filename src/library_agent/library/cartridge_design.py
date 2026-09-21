@@ -45,6 +45,7 @@ DEFAULT_DESIGN: dict[str, Any] = {
     "roughness": 0.25,
     "labelFinish": "paper",
     "labelFinishStrength": 0.65,
+    "foilMode": "artwork",
     "art": "generated",  # generated | upload
     "clearance": "open",
 }
@@ -68,6 +69,23 @@ def clamp_design(raw: Any) -> dict[str, Any]:
                 d["labelFinishStrength"] = round(min(1.0, max(0.0, strength)), 3)
         except (TypeError, ValueError, OverflowError):
             pass
+        mode = raw.get("foilMode", "artwork")
+        d["foilMode"] = mode if mode in ("artwork", "subject", "reverse") else "artwork"
+        mask = raw.get("foilMask")
+        if isinstance(mask, str) and len(mask) <= 1_500_000:
+            try:
+                image = Image.open(io.BytesIO(decode_data_url(mask)))
+                if image.width * image.height <= 4_000_000:
+                    image.load()
+                    rgba = image.convert("RGBA")
+                    grey = Image.new("L", image.size, 0)
+                    grey.paste(rgba.convert("L"), mask=rgba.getchannel("A"))
+                    grey.thumbnail((512, 512))
+                    data = io.BytesIO()
+                    grey.save(data, "PNG", optimize=True)
+                    d["foilMask"] = "data:image/png;base64," + base64.b64encode(data.getvalue()).decode("ascii")
+            except Exception:
+                pass  # Invalid optional masks never survive the manifest boundary.
         d["art"] = "upload" if raw.get("art") == "upload" else "generated"
         c = str(raw.get("clearance") or d["clearance"]).lower()
         d["clearance"] = c if c in CLEARANCES else d["clearance"]

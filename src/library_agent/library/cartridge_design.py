@@ -83,9 +83,11 @@ def clamp_design(raw: Any) -> dict[str, Any]:
                     grey.thumbnail((512, 512))
                     data = io.BytesIO()
                     grey.save(data, "PNG", optimize=True)
-                    d["foilMask"] = "data:image/png;base64," + base64.b64encode(data.getvalue()).decode("ascii")
-            except Exception:
-                pass  # Invalid optional masks never survive the manifest boundary.
+                    d["foilMask"] = "data:image/png;base64," + base64.b64encode(
+                        data.getvalue()
+                    ).decode("ascii")
+            except Exception:  # noqa: BLE001, S110 - an unreadable mask is simply dropped
+                pass
         d["art"] = "upload" if raw.get("art") == "upload" else "generated"
         c = str(raw.get("clearance") or d["clearance"]).lower()
         d["clearance"] = c if c in CLEARANCES else d["clearance"]

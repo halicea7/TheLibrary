@@ -154,6 +154,8 @@ Tags to fold:
 """
 
 NEW = "(a new sub-shelf)"
+# Tags folded per call: ~25 tokens a line keeps a batch well inside the output budget.
+FOLD_BATCH = 120
 
 
 def place_schema(tx: Taxonomy, *, allow_new: bool = True) -> dict[str, Any]:
@@ -478,21 +480,25 @@ async def build_taxonomy(db: AsyncSession, *, client: Ollama | None = None) -> T
         subs = list(dict.fromkeys(subs))
         folded: dict[str, str] = {}
         if subs:
-            assign = await c.structured(
-                providers.model_for("threads"),
-                ASSIGN_PROMPT.format(
-                    shelf="\n".join(shelf_lines), tags="\n".join(f"- {n}" for n in names)
-                ),
-                assign_schema(names, subs),
-                system=SYSTEM_LIBRARIAN,
-                temperature=0.1,
-                num_predict=4000,  # one line per tag; the grammar is finite
-            )
-            log.info(
-                "fold: %d assignments for %d tags", len(assign.get("assignments") or []), len(names)
-            )
-            for a in assign.get("assignments") or []:
-                folded.setdefault(str(a.get("subject")), str(a.get("sub_shelf")))
+            # One line of output per tag, so a big shelf is folded in batches: a
+            # thousand tags in one call ran past the output budget and came back as
+            # half a JSON document.
+            for i in range(0, len(names), FOLD_BATCH):
+                batch = names[i : i + FOLD_BATCH]
+                assign = await c.structured(
+                    providers.model_for("threads"),
+                    ASSIGN_PROMPT.format(
+                        shelf="\n".join(shelf_lines), tags="\n".join(f"- {n}" for n in batch)
+                    ),
+                    assign_schema(batch, subs),
+                    system=SYSTEM_LIBRARIAN,
+                    temperature=0.1,
+                    num_predict=4000,  # one line per tag; the grammar is finite
+                )
+                got = assign.get("assignments") or []
+                log.info("fold: %d assignments for %d tags", len(got), len(batch))
+                for a in got:
+                    folded.setdefault(str(a.get("subject")), str(a.get("sub_shelf")))
         out = {
             "shelves": [
                 {

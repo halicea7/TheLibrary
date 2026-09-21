@@ -1324,8 +1324,8 @@ const web = {
   light(ids, hold = 1.2) { for (const id of ids) { const n = this.byId[id]; if (n) { n.lit = 1; n.hl = hold; } } this.wake(); },
   glance(ids) {
     const keep = new Set(ids);
-    for (const n of this.nodes) if (n.lit > .02 && !keep.has(n.id) && n.hl <= .3) n.hl = .08;
-    this.light(ids, .25);
+    for (const n of this.nodes) if (n.lit > .02 && !keep.has(n.id) && n.hl <= .6) n.hl = .2;
+    this.light(ids, .5);
   },
   // Seating a cartridge: its volumes stay bright and the camera settles on them; the
   // rest of the cloud recedes to a ghost, so the room reads as a region of the whole.

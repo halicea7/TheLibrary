@@ -619,7 +619,12 @@ async def place_document(
     tx: Taxonomy | None = None,
     allow_new: bool = True,
 ) -> Category | None:
-    """Put one volume on one sub-shelf. Returns it, or None when there is no shelf yet."""
+    """Put one volume on one sub-shelf. Returns it, or None when there is no shelf yet.
+
+    The model's answer is checked against the shelf, and an answer that names nothing on
+    it (a top shelf given as the sub-shelf, a new-shelf name that is not a name) is asked
+    again once, warmer. On a big shelf about one answer in twelve needed that; without
+    the second ask those volumes were left with no place and the tracer had to say so."""
     tx = tx or await load_taxonomy(db)
     if tx.empty():
         return None
@@ -628,22 +633,38 @@ async def place_document(
     own = client is None
     c = client or LLM()
     try:
-        out = await c.structured(
-            providers.model_for("threads"),
-            PLACE_PROMPT.format(
-                shelf=tx.render(),
-                title=doc.title,
-                summary=summary[:1500] or "(not yet read)",
-                tags=", ".join(tags) or "none",
-            ),
-            place_schema(tx, allow_new=allow_new),
-            system=SYSTEM_LIBRARIAN,
-            instructions=PLACE_PROMPT,
-        )
+        out: dict[str, Any] = {}
+        sub: Category | None = None
+        for temperature in (0.2, 0.5):
+            out = await c.structured(
+                providers.model_for("threads"),
+                PLACE_PROMPT.format(
+                    shelf=tx.render(),
+                    title=doc.title,
+                    summary=summary[:1500] or "(not yet read)",
+                    tags=", ".join(tags) or "none",
+                ),
+                place_schema(tx, allow_new=allow_new),
+                system=SYSTEM_LIBRARIAN,
+                instructions=PLACE_PROMPT,
+                temperature=temperature,
+            )
+            sub = await _resolve_place(db, tx, out)
+            if sub:
+                break
+            log.info("no shelf for %s at %.1f: %r", doc.title[:40], temperature, out)
     finally:
         if own:
             await c.aclose()
+    if not sub:
+        log.warning("no shelf for %s after two asks: %r", doc.title[:40], out)
+        return None
+    doc.shelf_id = sub.id
+    return await _finish_place(db, doc, sub)
 
+
+async def _resolve_place(db: AsyncSession, tx: Taxonomy, out: dict[str, Any]) -> Category | None:
+    """The sub-shelf an answer names, or None when it names nothing on the shelf."""
     top_name = str(out.get("top_shelf") or "")
     choice = str(out.get("sub_shelf") or "")
     top = top_name if top_name in tx.tops else None
@@ -658,10 +679,10 @@ async def place_document(
                 sub.parent_id = tx.ids[top]
                 tx.tops[top].append(sub.name)
                 tx.ids[sub.name] = sub.id
-    if not sub:
-        log.info("no shelf for %s: %r", doc.title[:40], out)
-        return None
-    doc.shelf_id = sub.id
+    return sub
+
+
+async def _finish_place(db: AsyncSession, doc: Document, sub: Category) -> Category:
     # The shelf is also a tag, so filtering by it finds the volume.
     have = set(
         (
@@ -894,6 +915,7 @@ async def reshelve(
             homed = select(Category.id).where(Category.parent_id.is_not(None))
             q = q.where(Document.shelf_id.is_(None) | Document.shelf_id.not_in(homed))
         ids = list((await db.execute(q.order_by(Document.added_at))).scalars())
+        left: list[uuid.UUID] = []
         for i, did in enumerate(ids):
             if gate:
                 await gate()
@@ -904,8 +926,10 @@ async def reshelve(
             except Exception:
                 log.warning("placing %s failed", did, exc_info=True)
                 placed = None
-            res.placed += 1 if placed else 0
-            res.unplaced += 0 if placed else 1
+            if placed:
+                res.placed += 1
+            else:
+                left.append(did)
             if progress:
                 await progress(i + 1, len(ids), "placing volumes")
         # Then even the shelf out: split the crowded (a split can leave one lump behind,
@@ -916,6 +940,20 @@ async def reshelve(
             if not moved:
                 break
         res.merged_moved = await merge_sparse(db, tx, client=c, gate=gate)
+        # The shelf is different now; whatever found no place gets one more look at it.
+        # What is still homeless after that is the tracer's to report.
+        for i, did in enumerate(left):
+            if gate:
+                await gate()
+            if progress:
+                await progress(i, len(left), "placing the rest")
+            try:
+                placed = await place_document(db, did, client=c, tx=tx)
+            except Exception:
+                log.warning("placing %s failed", did, exc_info=True)
+                placed = None
+            res.placed += 1 if placed else 0
+            res.unplaced += 0 if placed else 1
         res.sub_shelves = sum(len(s) for s in tx.tops.values())
         return res
     finally:

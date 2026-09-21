@@ -186,3 +186,57 @@ class TestShelfHealth:
         await db.flush()
         h = await shelf_health(db)
         assert h["needed"] and "designed for" in h["reason"]
+
+
+class TestSecondAsk:
+    """An answer that names nothing on the shelf is asked again, warmer, once."""
+
+    async def test_bad_first_answer_is_asked_again(self, db):
+        from library_agent.library.shelving import Taxonomy, place_document
+
+        top = Category(name="Test Bay")
+        db.add(top)
+        await db.flush()
+        sub = Category(name="Test Run", parent_id=top.id)
+        db.add(sub)
+        await db.flush()
+        doc = Document(
+            content_hash="b" * 64,
+            title="T2",
+            source_path="",
+            original_filename="t2.md",
+            status=DocumentStatus.READY,
+            tier=1,
+        )
+        db.add(doc)
+        await db.flush()
+        tx = Taxonomy(tops={"Test Bay": ["Test Run"]}, ids={"Test Bay": top.id, "Test Run": sub.id})
+
+        class Flaky:
+            def __init__(self):
+                self.temps: list[float] = []
+
+            async def structured(self, model, prompt, schema, **kw):
+                self.temps.append(kw.get("temperature"))
+                # first: the top shelf given as the sub-shelf; second: a real answer
+                if len(self.temps) == 1:
+                    return {"top_shelf": "Test Bay", "sub_shelf": "Test Bay"}
+                return {"top_shelf": "Test Bay", "sub_shelf": "Test Run"}
+
+            async def aclose(self):
+                pass
+
+        c = Flaky()
+        got = await place_document(db, doc.id, client=c, tx=tx)
+        assert got is not None and got.id == sub.id
+        assert c.temps == [0.2, 0.5]
+
+        class Hopeless(Flaky):
+            async def structured(self, model, prompt, schema, **kw):
+                self.temps.append(kw.get("temperature"))
+                return {"top_shelf": "Nowhere", "sub_shelf": "Nowhere"}
+
+        h = Hopeless()
+        doc.shelf_id = None
+        assert await place_document(db, doc.id, client=h, tx=tx) is None
+        assert len(h.temps) == 2

@@ -160,9 +160,6 @@ async def build_library_layer(
     started since it was asked for, it is covered and does nothing. A 391-page import
     once queued seven rebuilds this way, one per debounce window, each blocking the
     reads behind it."""
-    from library_agent.library.citations import build_citation_graph
-    from library_agent.library.cluster import build_clusters
-    from library_agent.library.contradictions import find_contradictions
 
     redis = ctx.get("redis")
     if requested_at is not None and redis is not None:
@@ -194,6 +191,26 @@ async def build_library_layer(
         db.add(job)
         await db.flush()
         jid = job.id
+    try:
+        await _library_passes(jid, kinds, out)
+    except asyncio.CancelledError:
+        # Killed from outside (a worker restart, a timeout): say so on the row rather
+        # than leave a second "running" rebuild beside the retry.
+        await _set_job(jid, state=JobState.ERROR, error="cut off", yielded_reason=None)
+        raise
+    await _set_job(
+        jid, state=JobState.DONE, progress_current=1, progress_total=1, yielded_reason=None
+    )
+    if redis is not None:
+        await redis.set(REBUILD_DONE_KEY, str(time.time()))
+    return out
+
+
+async def _library_passes(jid: uuid.UUID, kinds: list[str], out: dict[str, Any]) -> None:
+    from library_agent.library.citations import build_citation_graph
+    from library_agent.library.cluster import build_clusters
+    from library_agent.library.contradictions import find_contradictions
+
     async with LLM() as client:
         for n, k in enumerate(kinds):
             await _set_job(jid, progress_current=0, progress_total=1, yielded_reason=k)
@@ -225,12 +242,6 @@ async def build_library_layer(
                 await record_exception(exc, source="worker", context={"job": f"library:{k}"})
                 log.exception("library pass %s failed", k)
                 out[k] = {"error": str(exc)[:300]}
-    await _set_job(
-        jid, state=JobState.DONE, progress_current=1, progress_total=1, yielded_reason=None
-    )
-    if redis is not None:
-        await redis.set(REBUILD_DONE_KEY, str(time.time()))
-    return out
 
 
 async def reshelve_library(

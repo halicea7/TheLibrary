@@ -1116,3 +1116,21 @@ haze as a 64-px disc rendered once per colour and scaled into place; and the idl
 at 30 fps rather than 60 once the simulation has settled. Measured in the tab with the
 simulation still running: tick 13.7 ms, draw 2.3 ms, 56 fps on 1,611 volumes and
 10,778 edges. It looks the same.
+
+**The nebula on the GPU.** "Smoother, without losing the visual fidelity" -- and "I want
+it to look the same way." The picture is unchanged and is now drawn by WebGL
+(`web/nebula-gl.js`, three.js already being here for the cartridges): the page still
+projects every volume and works out each one's colour and alpha with the formulas it
+always used, and writes them into typed arrays; the module draws them in three passes --
+threads as line geometry in the same twelve alpha steps the 2D drawing stroked (a
+stencil keeps crossings within a step from darkening each other, as one stroked path
+did), haze as a cloud of soft points, volumes as a cloud of hard points -- and the 2D
+canvas above it keeps only the annotated rings, the finding under the eye, and the
+retrieval scan. Matching it took pixel readings rather than eyeballing: the canvas
+gradient interpolated colour and alpha separately, so its night disc fell off as the
+square and its day disc linearly, and the 2D `lighter` accumulated coverage linearly;
+the shader does both. Pixels at the core now agree to within anti-aliasing. And the
+simulation no longer restarts on a whim: settled positions are kept in the browser and
+the cloud opens where it was left; newcomers get a half-strength settle, a rebuilt thread
+set a nudge, and a full shake only when most of the cloud is new. Without WebGL the 2D
+drawing stands as it was.

@@ -135,6 +135,11 @@ async def cartridge3d() -> FileResponse:
     return FileResponse(WEB_DIR / "cartridge3d.js", media_type="text/javascript")
 
 
+@app.get("/nebula-gl.js", include_in_schema=False)
+async def nebula_gl() -> FileResponse:
+    return FileResponse(WEB_DIR / "nebula-gl.js", media_type="text/javascript")
+
+
 @app.get("/demo.js", include_in_schema=False)
 async def demo_js() -> FileResponse:
     """The stand-in server for the hosted demo; `?demo` on a local instance shows it."""

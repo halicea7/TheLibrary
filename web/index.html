@@ -1170,7 +1170,7 @@ const web = {
       const p = P.get(n), near = 1 - p.depth, R = (n.r * 9 + 18) * p.s;
       const hazeA = (dark ? .17 : .018) * (.4 + .6 * near);
       let col, alpha;
-      if (n.lit > .02) { col = rubric; alpha = (dark ? .5 : .3) * n.lit; n.lit *= .992; }
+      if (n.lit > .02) { col = rubric; alpha = (dark ? .5 : .3) * n.lit; n.lit *= Math.pow(.5, (this.dt || .016) / (n.hl || 1.2)); }
       else { col = colour(n, dark ? 62 : 55, 1); alpha = hazeA * fade(n); }
       if (alpha < .004) continue;
       c.globalAlpha = Math.min(1, alpha);
@@ -1237,7 +1237,7 @@ const web = {
       const p = P.get(n), near = 1 - p.depth, R = (n.r * 9 + 18) * p.s;
       const hazeA = (dark ? .17 : .018) * (.4 + .6 * near);
       let hc, ha;
-      if (n.lit > .02) { hc = rub; ha = (dark ? .5 : .3) * n.lit; n.lit *= .992; }
+      if (n.lit > .02) { hc = rub; ha = (dark ? .5 : .3) * n.lit; n.lit *= Math.pow(.5, (this.dt || .016) / (n.hl || 1.2)); }
       else { hc = this.rgbOf(colour(n, dark ? 62 : 55, 1)); ha = hazeA * fade(n); }
       A.hazePos[i * 3] = p.x; A.hazePos[i * 3 + 1] = p.y; A.hazePos[i * 3 + 2] = 0; A.hazeSize[i] = R * 2 * dpr;
       A.hazeRgba[i * 4] = hc[0]; A.hazeRgba[i * 4 + 1] = hc[1]; A.hazeRgba[i * 4 + 2] = hc[2]; A.hazeRgba[i * 4 + 3] = Math.min(1, ha);
@@ -1302,7 +1302,7 @@ const web = {
   loop(now) {
     this.frame = null;
     this.size();
-    const dt = this.last ? Math.min(.1, (now - this.last) / 1000) : 0; this.last = now;
+    const dt = this.last ? Math.min(.1, (now - this.last) / 1000) : 0; this.last = now; this.dt = dt || .016;
     if (!this.reduced && this.canvas.dataset.on === 'true') this.theta += dt * (2 * Math.PI / 110);  // one turn in ~two minutes
     // The spin: an impulse that decays, so a dive arrives with a swing and settles.
     this.theta += this.spinV * dt; this.spinV *= Math.pow(.05, dt);
@@ -1318,7 +1318,15 @@ const web = {
     else this.last = 0;
   },
   wake() { if (this.idle) { clearTimeout(this.idle); this.idle = null; } if (!this.frame) this.frame = requestAnimationFrame(t => this.loop(t)); },
-  light(ids) { for (const id of ids) { const n = this.byId[id]; if (n) n.lit = 1; } this.wake(); },
+  // Lighting volumes: `hold` is the half-life of the light in seconds. A retrieval's
+  // sources linger; a hover in the thread list is a glance, and moving to the next row
+  // snuffs the last one rather than letting the glances pile up.
+  light(ids, hold = 1.2) { for (const id of ids) { const n = this.byId[id]; if (n) { n.lit = 1; n.hl = hold; } } this.wake(); },
+  glance(ids) {
+    const keep = new Set(ids);
+    for (const n of this.nodes) if (n.lit > .02 && !keep.has(n.id) && n.hl <= .3) n.hl = .08;
+    this.light(ids, .25);
+  },
   // Seating a cartridge: its volumes stay bright and the camera settles on them; the
   // rest of the cloud recedes to a ghost, so the room reads as a region of the whole.
   room: null, dim: 0,
@@ -2308,7 +2316,7 @@ async function loadThreads() {
   el.innerHTML = `<div class="tfilter"><input id="tfilter" placeholder="a word in a thread…" value="${esc(threadsFilter)}" oninput="threadsFilter=this.value; renderThreads()"><span id="tcount"></span></div><div id="threads-body"></div>`;
   renderThreads();
 }
-function threadLight(ids) { web.light(ids); }
+function threadLight(ids) { web.glance(ids); }
 function threadDive(ids) { web.focus(ids); web.light(ids); }
 function renderThreads() {
   const el = $('#threads-body');

@@ -47,11 +47,17 @@ def fake_server(*, json_schema_ok: bool = True, reasoning: bool = True) -> FastA
 
             async def gen():
                 if reasoning:
-                    yield "data: " + json.dumps(
-                        {"choices": [{"delta": {"reasoning_content": "thinking... "}}]}
-                    ) + "\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {"choices": [{"delta": {"reasoning_content": "thinking... "}}]}
+                        )
+                        + "\n\n"
+                    )
                 for piece in ("Hello", ", ", "world"):
-                    yield "data: " + json.dumps({"choices": [{"delta": {"content": piece}}]}) + "\n\n"
+                    yield (
+                        "data: " + json.dumps({"choices": [{"delta": {"content": piece}}]}) + "\n\n"
+                    )
                 yield "data: [DONE]\n\n"
 
             return StreamingResponse(gen(), media_type="text/event-stream")
@@ -144,7 +150,9 @@ async def test_openai_client_generate_stream_structured(pfile, served):
         text = await c.generate("acme:big-model", "say ready")
         assert text == "ready"
         assert app.state.calls[-1]["model"] == "big-model"
-        pieces = [p async for p in c.chat_stream("acme:big-model", [{"role": "user", "content": "hi"}])]
+        pieces = [
+            p async for p in c.chat_stream("acme:big-model", [{"role": "user", "content": "hi"}])
+        ]
         assert ("thinking", "thinking... ") in pieces
         assert "".join(t for k, t in pieces if k == "content") == "Hello, world"
         out = await c.structured(
@@ -202,7 +210,11 @@ async def test_settings_routes(pfile, served, monkeypatch):
     ) as c:
         r = await c.put(
             "/api/settings/providers/acme",
-            json={"name": "Acme", "base_url": "http://acme.test/v1/", "api_key": "sk-test-0000-test"},
+            json={
+                "name": "Acme",
+                "base_url": "http://acme.test/v1/",
+                "api_key": "sk-test-0000-test",
+            },
         )
         assert r.status_code == 200 and r.json()["base_url"] == "http://acme.test/v1"
         assert "api_key" not in r.json()

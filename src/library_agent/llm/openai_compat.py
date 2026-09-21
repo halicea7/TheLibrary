@@ -18,7 +18,7 @@ from typing import Any, Self
 
 import httpx
 
-from library_agent.llm.ollama import OllamaError, parse_structured
+from library_agent.llm.ollama import OllamaError, clean, parse_structured
 from library_agent.llm.providers import Provider
 
 # Per provider: does it accept response_format=json_schema? Learned from the first 4xx.
@@ -67,7 +67,7 @@ class OpenAICompat:
         content = msg.get("content")
         if isinstance(content, list):  # some servers return content parts
             content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
-        return content or ""
+        return clean(content or "")
 
     async def generate(
         self,
@@ -220,9 +220,9 @@ class OpenAICompat:
                 for choice in chunk.get("choices") or []:
                     delta = choice.get("delta") or {}
                     if piece := (delta.get("reasoning_content") or delta.get("reasoning")):
-                        yield "thinking", piece
+                        yield "thinking", clean(piece)
                     if piece := delta.get("content"):
-                        yield "content", piece
+                        yield "content", clean(piece)
 
     async def describe_image(
         self,

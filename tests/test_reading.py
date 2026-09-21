@@ -230,3 +230,14 @@ class TestStances:
         assert neutral in contrarian  # the base policy is kept, not replaced
         assert STANCES["contrarian"]["prompt"] in contrarian
         assert build_messages("q", [], [], [], stance="nope")[0]["content"] == neutral
+
+
+def test_model_output_is_scrubbed_of_nul_bytes():
+    from library_agent.llm.ollama import clean, parse_structured
+
+    assert clean("fine") == "fine"
+    assert clean("a\x00b\x00") == "ab"
+    parsed, why = parse_structured(
+        '{"summary": "x\\u0000y", "tags": ["a\\u0000"]}', {"required": ["summary"]}
+    )
+    assert why is None and parsed == {"summary": "xy", "tags": ["a"]}

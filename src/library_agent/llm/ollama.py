@@ -52,6 +52,24 @@ def size_context(prompt_chars: int, *, reserve_tokens: int = 3072, floor: int = 
     return ctx
 
 
+def clean(text: str) -> str:
+    """Model output as Postgres will take it. A NUL byte in a summary -- seen twice from
+    qwen3 on HackTricks pages -- fails the whole write with a DataError, and a rebuild
+    that has run for an hour dies on it."""
+    return text.replace("\x00", "") if "\x00" in text else text
+
+
+def _scrub(value: Any) -> Any:
+    """`clean`, through a parsed reply: a NUL can arrive as the escape \\u0000 too."""
+    if isinstance(value, str):
+        return clean(value)
+    if isinstance(value, list):
+        return [_scrub(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _scrub(v) for k, v in value.items()}
+    return value
+
+
 def parse_structured(
     raw: str, schema: dict[str, Any], instructions: str | None = None
 ) -> tuple[dict[str, Any] | None, str | None]:
@@ -71,6 +89,7 @@ def parse_structured(
                 parsed = None
     if not isinstance(parsed, dict):
         return None, "json"
+    parsed = _scrub(parsed)
     required = list(schema.get("required") or parsed.keys())
     if any(is_placeholder(parsed.get(k)) for k in required):
         return None, "placeholder"
@@ -144,7 +163,7 @@ class Ollama:
             payload["options"]["num_predict"] = num_predict
         r = await self._client.post("/api/generate", json=payload, timeout=timeout)
         r.raise_for_status()
-        return r.json().get("response", "")
+        return clean(r.json().get("response", ""))
 
     async def structured(
         self,
@@ -245,7 +264,7 @@ class Ollama:
         }
         r = await self._client.post("/api/chat", json=payload, timeout=timeout)
         r.raise_for_status()
-        return (r.json().get("message") or {}).get("content", "")
+        return clean((r.json().get("message") or {}).get("content", ""))
 
     async def chat_stream(
         self,
@@ -287,9 +306,9 @@ class Ollama:
                 chunk = json.loads(line)
                 msg = chunk.get("message", {})
                 if piece := msg.get("thinking"):
-                    yield "thinking", piece
+                    yield "thinking", clean(piece)
                 if piece := msg.get("content"):
-                    yield "content", piece
+                    yield "content", clean(piece)
                 if chunk.get("done"):
                     return
 
@@ -319,7 +338,7 @@ class Ollama:
             timeout=timeout,
         )
         r.raise_for_status()
-        return r.json().get("response") or ""
+        return clean(r.json().get("response") or "")
 
     async def supports_thinking(self, model: str) -> bool:
         if model not in _THINKING:

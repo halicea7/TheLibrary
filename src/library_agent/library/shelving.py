@@ -448,7 +448,7 @@ async def _design_sample(db: AsyncSession) -> tuple[list[str], str, str]:
     rows = (
         await db.execute(
             text("""
-            select d.title, c.name as coll, c.genre as cgenre, d.genre
+            select d.title, c.name as coll, c.genre as cgenre, c.description as about, d.genre
             from document d
             left join cartridge_document cd on cd.document_id = d.id
             left join cartridge c on c.id = cd.cartridge_id

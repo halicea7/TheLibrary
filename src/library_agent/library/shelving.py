@@ -343,9 +343,18 @@ def _taxonomy_is_sane(out: dict[str, Any], max_top: int) -> bool:
             shared = {w for w in a.split() if len(w) > 4} & {w for w in b.split() if len(w) > 4}
             if i != j and shared:
                 return False
+    seen: set[str] = set()
     for s in out.get("shelves") or []:
         if len(s.get("sub_shelves") or []) < 2:
             return False
+        for k in s.get("sub_shelves") or []:
+            name = taxonomy.normalize_name(str(k)).lower()
+            # A sub-shelf named like a top shelf, or like a sub-shelf on another top,
+            # is a name the placer can point at and the shelf cannot resolve: half of
+            # one run's placements named "Network Services", which was both.
+            if name in low or name in seen:
+                return False
+            seen.add(name)
     return True
 
 
@@ -602,6 +611,10 @@ async def build_taxonomy(
     await record_design(db)
     tx = Taxonomy()
     absorbed: set[uuid.UUID] = set()
+    top_names = {
+        taxonomy.normalize_name(str(s.get("name") or ""))
+        for s in (out.get("shelves") or [])[:MAX_TOP]
+    }
     for shelf in (out.get("shelves") or [])[:MAX_TOP]:
         top = await taxonomy.get_or_create(db, str(shelf.get("name") or ""))
         if not top:
@@ -610,7 +623,13 @@ async def build_taxonomy(
         tx.tops[top.name] = []
         tx.ids[top.name] = top.id
         for sub in (shelf.get("sub_shelves") or [])[:MAX_SUB]:
-            child = await taxonomy.get_or_create(db, str(sub.get("name") or ""))
+            name = taxonomy.normalize_name(str(sub.get("name") or ""))
+            if name in top_names or name in tx.ids:
+                # Belt and braces after the sanity check: a name that is also a top
+                # shelf, or already a sub-shelf elsewhere, is not a place.
+                log.info("sub-shelf %r dropped: it names a top shelf or another sub-shelf", name)
+                continue
+            child = await taxonomy.get_or_create(db, name)
             if not child or child.id == top.id:
                 continue
             child.parent_id = top.id

@@ -425,7 +425,9 @@ async def shelf_health(db: AsyncSession) -> dict[str, Any]:
     return out
 
 
-async def build_taxonomy(db: AsyncSession, *, client: Ollama | None = None) -> Taxonomy:
+async def build_taxonomy(
+    db: AsyncSession, *, client: Ollama | None = None, progress=None
+) -> Taxonomy:
     """One model call organises every subject in use into two levels, then it is applied."""
     subjects = await _subjects_in_use(db)
     if not subjects:
@@ -448,6 +450,8 @@ async def build_taxonomy(db: AsyncSession, *, client: Ollama | None = None) -> T
     try:
         design: dict[str, Any] = {}
         for attempt in range(3):
+            if progress:
+                await progress(0, 1, "designing the shelves")
             design = await c.structured(
                 providers.model_for("threads"),
                 TAXONOMY_PROMPT.format(
@@ -485,6 +489,8 @@ async def build_taxonomy(db: AsyncSession, *, client: Ollama | None = None) -> T
             # half a JSON document.
             for i in range(0, len(names), FOLD_BATCH):
                 batch = names[i : i + FOLD_BATCH]
+                if progress:
+                    await progress(i, len(names), "folding the old subjects in")
                 assign = await c.structured(
                     providers.model_for("threads"),
                     ASSIGN_PROMPT.format(
@@ -787,7 +793,7 @@ async def split_crowded(
                 except Exception:
                     log.warning("re-placing %s failed", d.id, exc_info=True)
                 if progress:
-                    await progress(i + 1, n)
+                    await progress(i + 1, n, "splitting crowded shelves")
             # Anything still unplaced keeps a home: the first new sub-shelf.
             fallback = tx.ids[names[0]]
             await db.execute(
@@ -875,7 +881,7 @@ async def reshelve(
     try:
         tx = await load_taxonomy(db)
         if rebuild or tx.empty():
-            tx = await build_taxonomy(db, client=c)
+            tx = await build_taxonomy(db, client=c, progress=progress)
         res.top_shelves = len(tx.tops)
         res.sub_shelves = sum(len(s) for s in tx.tops.values())
         if tx.empty():
@@ -891,6 +897,8 @@ async def reshelve(
         for i, did in enumerate(ids):
             if gate:
                 await gate()
+            if progress and i == 0:
+                await progress(0, len(ids), "placing volumes")
             try:
                 placed = await place_document(db, did, client=c, tx=tx)
             except Exception:
@@ -899,7 +907,7 @@ async def reshelve(
             res.placed += 1 if placed else 0
             res.unplaced += 0 if placed else 1
             if progress:
-                await progress(i + 1, len(ids))
+                await progress(i + 1, len(ids), "placing volumes")
         # Then even the shelf out: split the crowded (a split can leave one lump behind,
         # so twice), then dissolve the sparse.
         for _ in range(2):

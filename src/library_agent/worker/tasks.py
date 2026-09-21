@@ -262,8 +262,10 @@ async def reshelve_library(
     jid = uuid.UUID(job_id)
     await _set_job(jid, state=JobState.RUNNING)
 
-    async def progress(current: int, total: int) -> None:
-        await _set_job(jid, progress_current=current, progress_total=total)
+    async def progress(current: int, total: int, phase: str | None = None) -> None:
+        await _set_job(
+            jid, progress_current=current, progress_total=total, yielded_reason=phase or None
+        )
 
     try:
         async with LLM() as client, session_scope() as db:

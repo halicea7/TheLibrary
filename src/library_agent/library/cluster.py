@@ -176,12 +176,15 @@ def _member_key(idxs: list[int], artifact_ids: list[uuid.UUID], texts: list[str]
 def _cluster(vectors: np.ndarray, min_cluster_size: int, method: str = "leaf") -> np.ndarray:
     from sklearn.cluster import HDBSCAN
 
+    # This runs on the machine the worker is on, not the GPU box: sixty thousand points
+    # in a thousand dimensions is a quarter of an hour on one core, so use them all.
     model = HDBSCAN(
         min_cluster_size=max(2, min_cluster_size),
         min_samples=1,
         metric="euclidean",  # vectors are L2-normalised above
         copy=True,
         cluster_selection_method=method,
+        n_jobs=-1,
     )
     return model.fit_predict(vectors)
 

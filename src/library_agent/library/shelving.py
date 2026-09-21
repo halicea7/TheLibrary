@@ -525,6 +525,7 @@ async def build_taxonomy(
                 think=True,
             )
             if _taxonomy_is_sane(design, max_top):
+                log.info("taxonomy attempt %d accepted: %s", attempt, _top_names(design))
                 break
             log.info("taxonomy attempt %d rejected: %s", attempt, _top_names(design))
         design["shelves"] = (design.get("shelves") or [])[:max_top]

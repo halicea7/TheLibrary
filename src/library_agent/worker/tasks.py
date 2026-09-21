@@ -217,8 +217,17 @@ async def _library_passes(jid: uuid.UUID, kinds: list[str], out: dict[str, Any])
 
             # Each pass counts its own work (documents, clusters); the row shows that
             # count under the pass name, so a twenty-minute clusters pass moves.
-            async def progress(current: int, total: int) -> None:
-                await _set_job(jid, progress_current=current, progress_total=max(1, total))
+            async def progress(
+                current: int, total: int, phase: str | None = None, k: str = k
+            ) -> None:
+                # A pass may name what it is on ("embedding claims") so a long warm-up
+                # with nothing to count does not read as a stall.
+                await _set_job(
+                    jid,
+                    progress_current=current,
+                    progress_total=max(1, total),
+                    yielded_reason=f"{k} · {phase}" if phase else k,
+                )
 
             try:
                 async with session_scope() as db:

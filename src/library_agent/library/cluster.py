@@ -80,7 +80,7 @@ class ClusterResult:
 
 
 async def _load_sections(
-    db: AsyncSession, client: Ollama
+    db: AsyncSession, client: Ollama, progress=None
 ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[str], np.ndarray]:
     """Individual claims extracted at Tier 1, each embedded on its own.
 
@@ -103,7 +103,14 @@ async def _load_sections(
         return [], [], [], np.zeros((0, 0))
 
     texts = [r.text for r in rows]
-    vecs = np.array(await embed_texts(texts, client), dtype=np.float32)
+    # Every claim, embedded afresh each rebuild: sixty thousand of them on a large shelf,
+    # so the count is shown as it goes.
+    step, parts = 1024, []
+    for i in range(0, len(texts), step):
+        if progress:
+            await progress(i, len(texts), f"embedding {len(texts):,} claims")
+        parts.extend(await embed_texts(texts[i : i + step], client))
+    vecs = np.array(parts, dtype=np.float32)
     # Normalise so euclidean distance is monotonic in cosine distance.
     norms = np.linalg.norm(vecs, axis=1, keepdims=True)
     vecs = vecs / np.clip(norms, 1e-9, None)
@@ -137,10 +144,12 @@ async def build_clusters(
     own = client is None
     c = client or LLM()
     try:
-        artifact_ids, doc_ids, texts, vectors = await _load_sections(db, c)
+        artifact_ids, doc_ids, texts, vectors = await _load_sections(db, c, progress)
         if len(artifact_ids) < 6:
             raise ValueError(f"only {len(artifact_ids)} section summaries; run Tier 1 first")
 
+        if progress:
+            await progress(0, 1, f"grouping {len(texts):,} claims")
         labels = _cluster(vectors, min_cluster_size, method)
         groups: dict[int, list[int]] = {}
         for i, lab in enumerate(labels):

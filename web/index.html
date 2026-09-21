@@ -973,15 +973,24 @@ const web = {
     const N = this.nodes;
     const g = {};
     for (const n of N) { if (!n.sub) continue; const s = (g[n.sub] ||= { x: 0, y: 0, z: 0, n: 0 }); s.x += n.x; s.y += n.y; s.z += n.z; s.n++; }
+    // Repulsion reaches 220 units, so only volumes in the same or a neighbouring cell of
+    // a 220-unit grid can feel each other. Every pair was 1.3 million tests a frame at
+    // 1,600 volumes; this is a few tens of thousands.
+    const CELL = 220, cells = new Map(), key = (x, y, z) => `${x},${y},${z}`;
+    for (const n of N) { const cx = Math.floor(n.x / CELL), cy = Math.floor(n.y / CELL), cz = Math.floor(n.z / CELL); n._c = [cx, cy, cz]; const kk = key(cx, cy, cz); let b = cells.get(kk); if (!b) cells.set(kk, b = []); b.push(n); }
     for (let i = 0; i < N.length; i++) {
-      const a = N[i];
-      for (let j = i + 1; j < N.length; j++) {
-        const b = N[j]; let dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
-        const d2 = Math.max(400, dx * dx + dy * dy + dz * dz);
-        if (d2 > 48000) continue;
-        const k = a.sub && a.sub === b.sub ? 220 : 420;   // same shelf sits closer
-        const f = k / d2; dx *= f; dy *= f; dz *= f;
-        a.vx -= dx; a.vy -= dy; a.vz -= dz; b.vx += dx; b.vy += dy; b.vz += dz;
+      const a = N[i], [cx, cy, cz] = a._c;
+      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+        const bucket = cells.get(key(cx + ox, cy + oy, cz + oz)); if (!bucket) continue;
+        for (const b of bucket) {
+          if (b === a || b.id < a.id) continue;  // each pair once
+          let dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+          const d2 = Math.max(400, dx * dx + dy * dy + dz * dz);
+          if (d2 > 48000) continue;
+          const k = a.sub && a.sub === b.sub ? 220 : 420;   // same shelf sits closer
+          const f = k / d2; dx *= f; dy *= f; dz *= f;
+          a.vx -= dx; a.vy -= dy; a.vz -= dz; b.vx += dx; b.vy += dy; b.vz += dz;
+        }
       }
       a.vx -= a.x * .02; a.vy -= a.y * .02; a.vz -= a.z * .02;
       const s = a.sub && g[a.sub];
@@ -1094,15 +1103,23 @@ const web = {
     const colour = (n, l, a) => n.c ? (dark ? (a === 0 && n.c.length === 7 ? n.c + '00' : n.c) : `hsl(${hueC(n.c)} 78% ${l}% / ${a})`) : n.top && this.hueOf[n.top] != null ? `hsl(${this.hueOf[n.top]} ${dark ? 45 : 80}% ${l}% / ${a})` : dark ? `rgba(${ink},${a})` : `hsl(40 95% ${l}% / ${a})`;
     // edges, faint, fading with depth
     c.lineWidth = .7;
+    // Ten thousand edges as ten thousand strokes was half the frame. Sort them into a
+    // dozen alpha steps and stroke each step as one path; lit edges get their own.
+    const STEPS = 12, paths = Array.from({ length: STEPS }, () => new Path2D()), litPath = new Path2D(); let anyLit = false;
     for (const e of this.edges) {
       const a = P.get(e.a), b = P.get(e.b), depth = 1 - (a.depth + b.depth) / 2;
       const lit = Math.min(e.a.lit, e.b.lit);
+      if (lit > .05) { litPath.moveTo(a.x, a.y); litPath.lineTo(b.x, b.y); anyLit = true; continue; }
       // By day the chart is its lines: the haze is nearly gone, so the edges carry it.
       const ek = dark ? (e.k === 'cite' ? .26 : e.k === 'thread' ? .18 : .08) : (e.k === 'cite' ? .32 : e.k === 'thread' ? .22 : .1);
-      c.strokeStyle = lit > .05 ? rubric : `rgba(${ink},${ek * e.w * (.35 + .65 * depth)})`;
-      c.globalAlpha = Math.min(1, (lit > .05 ? .2 + .6 * lit : 1) * Math.min(fade(e.a), fade(e.b)));
-      c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
+      const alpha = ek * e.w * (.35 + .65 * depth) * Math.min(fade(e.a), fade(e.b));
+      if (alpha < .006) continue;
+      const s = Math.min(STEPS - 1, Math.floor(alpha * STEPS * 2.4));
+      paths[s].moveTo(a.x, a.y); paths[s].lineTo(b.x, b.y);
     }
+    c.globalAlpha = 1;
+    for (let s = 0; s < STEPS; s++) { c.strokeStyle = `rgba(${ink},${((s + .5) / (STEPS * 2.4)).toFixed(3)})`; c.stroke(paths[s]); }
+    if (anyLit) { c.strokeStyle = rubric; c.globalAlpha = .6; c.stroke(litPath); }
     c.globalAlpha = 1;
     // the haze: additive, so overlapping volumes brighten into a cloud
     // Additive light at night. By day, multiply can only darken, so overlapping halos
@@ -1110,17 +1127,29 @@ const web = {
     // hue itself -- a glow the way a lamp behind coloured glass glows in daylight.
     c.globalCompositeOperation = dark ? 'lighter' : 'source-over';
     const order = [...this.nodes].sort((m, n) => P.get(n).depth - P.get(m).depth);
+    // The haze disc, drawn once per colour and scaled into place: a fresh gradient per
+    // node per frame was the other half. The outer stop is the colour at zero alpha,
+    // not transparent black -- a fade toward black is invisible in additive light but
+    // reads as soot on a light page.
+    this.discs ||= new Map();
+    const disc = (col) => {
+      let d = this.discs.get(col); if (d) return d;
+      d = document.createElement('canvas'); d.width = d.height = 64; const g = d.getContext('2d');
+      const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, col);
+      const clear = col.startsWith('hsl') ? col.replace(/\/ 1\)$/, '/ 0)') : col.length === 7 && col[0] === '#' ? col + '00' : 'rgba(0,0,0,0)';
+      gr.addColorStop(1, dark ? 'rgba(0,0,0,0)' : clear);
+      g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+      if (this.discs.size > 96) this.discs.clear(); this.discs.set(col, d); return d;
+    };
     for (const n of order) {
       const p = P.get(n), near = 1 - p.depth, R = (n.r * 9 + 18) * p.s;
-      const grd = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
       const hazeA = (dark ? .17 : .018) * (.4 + .6 * near);
-      // The outer stop is the same colour at zero alpha, not transparent black: the
-      // gradient interpolates straight through the colour space, and a fade toward
-      // black is invisible in additive light but reads as soot on a light page.
-      if (n.lit > .02) { grd.addColorStop(0, rubric); grd.addColorStop(1, dark || rubric.length !== 7 ? 'rgba(0,0,0,0)' : rubric + '00'); c.globalAlpha = (dark ? .5 : .3) * n.lit; n.lit *= .992; }
-      else if (dark) { grd.addColorStop(0, colour(n, 62, 1)); grd.addColorStop(1, 'rgba(0,0,0,0)'); c.globalAlpha = hazeA * fade(n); }
-      else { grd.addColorStop(0, colour(n, 55, 1)); grd.addColorStop(1, colour(n, 55, 0)); c.globalAlpha = hazeA * fade(n); }
-      c.fillStyle = grd; c.beginPath(); c.arc(p.x, p.y, R, 0, Math.PI * 2); c.fill();
+      let col, alpha;
+      if (n.lit > .02) { col = rubric; alpha = (dark ? .5 : .3) * n.lit; n.lit *= .992; }
+      else { col = colour(n, dark ? 62 : 55, 1); alpha = hazeA * fade(n); }
+      if (alpha < .004) continue;
+      c.globalAlpha = Math.min(1, alpha);
+      c.drawImage(disc(col), p.x - R, p.y - R, R * 2, R * 2);
     }
     c.globalCompositeOperation = 'source-over';
     // the volumes themselves
@@ -1180,10 +1209,11 @@ const web = {
     this.draw(now);
     const on = this.canvas.dataset.on === 'true';
     const moving = Math.abs(this.cam.zoom - this.camTo.zoom) > .002 || Math.hypot(this.cam.x - this.camTo.x, this.cam.y - this.camTo.y, this.cam.z - this.camTo.z) > .5 || Math.abs(this.spinV) > .01;
-    if (on || this.alpha > .003 || moving) this.frame = requestAnimationFrame(t => this.loop(t));
+    if (this.alpha > .003 || moving) this.frame = requestAnimationFrame(t => this.loop(t));
+    else if (on) { this.idle = setTimeout(() => { this.idle = null; this.wake(); }, 34); }  // the slow turn needs half the frames
     else this.last = 0;
   },
-  wake() { if (!this.frame) this.frame = requestAnimationFrame(t => this.loop(t)); },
+  wake() { if (this.idle) { clearTimeout(this.idle); this.idle = null; } if (!this.frame) this.frame = requestAnimationFrame(t => this.loop(t)); },
   light(ids) { for (const id of ids) { const n = this.byId[id]; if (n) n.lit = 1; } this.wake(); },
   // Seating a cartridge: its volumes stay bright and the camera settles on them; the
   // rest of the cloud recedes to a ghost, so the room reads as a region of the whole.

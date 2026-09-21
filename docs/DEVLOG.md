@@ -1106,3 +1106,13 @@ centroid. Lifting the cartridge eases it back. A cartridge seated when the page 
 is the room from the first frame. On RTS the effect is a plum lattice of 391 volumes
 standing in front of the HackTricks core as a ghost -- which is also the first honest
 picture of how the two collections interleave.
+
+**The nebula at 1,600.** "It's so laggy, why?" Two loops written for 176 volumes: the
+force tick compared every pair (1.3 million tests a frame), and the draw made a fresh
+radial gradient per node and a separate stroke per edge, sixty times a second. Now:
+repulsion through a 220-unit grid (only neighbouring cells can feel each other); edges
+sorted into twelve alpha steps and stroked as twelve paths, lit edges as one more; the
+haze as a 64-px disc rendered once per colour and scaled into place; and the idle turn
+at 30 fps rather than 60 once the simulation has settled. Measured in the tab with the
+simulation still running: tick 13.7 ms, draw 2.3 ms, 56 fps on 1,611 volumes and
+10,778 edges. It looks the same.

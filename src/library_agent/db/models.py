@@ -306,6 +306,9 @@ class Cartridge(Base):
     document_count: Mapped[int] = mapped_column(Integer, default=0)
     # A genre the maker set for the whole cartridge; its volumes take it unless read otherwise.
     genre: Mapped[str | None] = mapped_column(String(24), default=None)
+    # What the collection is, in the maker's words: the librarian reads it when designing
+    # the shelf and when placing one of its volumes. Ships in the manifest.
+    description: Mapped[str | None] = mapped_column(Text, default=None)
     imported_at: Mapped[datetime] = _now()
     # The maker's design: material, dials, art. It travels in the manifest and is not
     # editable after insertion -- a cartridge looks the same on every rack.

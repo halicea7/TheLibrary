@@ -48,6 +48,7 @@ class ExportRequest(Selection):
     colour: str | None = None
     icon_svg: str | None = Field(default=None, max_length=20_000)
     made_by: str | None = Field(default=None, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
     design: dict | None = None
     art: str | None = Field(default=None, max_length=ART_MAX_BYTES * 2)  # data URL, or absent
     # Export a cartridge made on this machine *as itself*: same id, next version, so a
@@ -68,6 +69,8 @@ class DesignPatch(BaseModel):
     # What kind of writing the whole cartridge is (reading/genre.py); applied to every
     # volume in it, and to volumes it gains later. Empty string clears it.
     genre: str | None = None
+    # What the collection is, for the librarian. Empty string clears it.
+    description: str | None = Field(default=None, max_length=2000)
 
 
 async def _made_here(db, cartridge_id: uuid.UUID) -> Cartridge:
@@ -100,6 +103,8 @@ async def edit(cartridge_id: uuid.UUID, req: DesignPatch, db: SessionDep) -> dic
         row.icon_svg = cart.sanitize_svg(req.icon_svg) if req.icon_svg else None
     if req.design is not None:
         row.design = clamp_design(req.design)
+    if req.description is not None:
+        row.description = req.description.strip() or None
     if req.genre is not None:
         g = normalise_genre(req.genre) if req.genre else None
         if req.genre and not g:
@@ -166,9 +171,12 @@ async def export(req: ExportRequest, db: SessionDep) -> FileResponse:
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
     stable: dict = {}
+    description = req.description
     if req.as_cartridge:
         row = await _made_here(db, req.as_cartridge)
         row.version += 1
+        if description is None:
+            description = row.description
         await db.commit()
         stable = {"cartridge_id": row.id, "version": row.version}
         if art_png is None and row.art_path and Path(row.art_path).exists():
@@ -182,6 +190,7 @@ async def export(req: ExportRequest, db: SessionDep) -> FileResponse:
             colour=req.colour,
             icon_svg=req.icon_svg,
             made_by=req.made_by,
+            description=description,
             design=req.design,
             art_png=art_png,
             **stable,

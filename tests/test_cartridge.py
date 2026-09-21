@@ -119,15 +119,22 @@ class TestRoundTrips:
         a = await make_document(db, title="Alpha", body=BODY_A)
         b = await make_document(db, title="Beta", body=BODY_B)
         zip_path = await build_cartridge(
-            db, document_ids=[a.id, b.id], level="full", name="Test Shelf", out_dir=tmp_path
+            db,
+            document_ids=[a.id, b.id],
+            level="full",
+            name="Test Shelf",
+            out_dir=tmp_path,
+            description="  The team's own notes on cartridges.  ",
         )
         m = read_manifest(zip_path)
         assert m["level"] == "full" and m["counts"]["documents"] == 2
         assert m["counts"]["chunks"] == 4 and m["counts"]["reflections"] == 4
+        assert m["description"] == "The team's own notes on cartridges."
 
         # Both already on the shelf → memberships only, plus the cartridge's own notes.
         r = await import_cartridge(db, zip_path)
         assert (r.documents_joined, r.documents_introduced) == (2, 0)
+        assert (await db.get(Cartridge, r.cartridge_id)).description == m["description"]
         assert r.artifacts > 0 and r.vectors_embedded == 0
         members = list(
             (

@@ -758,6 +758,8 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .make .row > label:first-child { font:600 10.5px/2.2 var(--sans); letter-spacing:.06em; text-transform:uppercase; color:var(--dim); }
 .make input[type=text] { width:100%; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; color:var(--fg); font:14px/1.4 var(--serif); padding:7px 10px; }
 .make input[type=text]:focus { border-color:var(--verdigris); outline:none; }
+.make textarea { width:100%; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; color:var(--fg); font:13.5px/1.45 var(--serif); padding:7px 10px; resize:vertical; }
+.make textarea:focus { border-color:var(--verdigris); outline:none; }
 .swatches { display:flex; gap:6px; flex-wrap:wrap; padding-top:4px; }
 .swatches button { width:22px; height:22px; border-radius:3px; border:2px solid transparent; cursor:pointer; background:var(--c); }
 .swatches button[aria-pressed=true] { border-color:var(--fg); }
@@ -2821,7 +2823,7 @@ const GLYPHS = {
   gear:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>',
   leaf:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 19C5 9 11 4 20 4c0 9-5 15-15 15z"/><path d="M5 19l8-8"/></svg>',
 };
-const make = { name:'', colour:null, glyph:'book', level:'readings', timer:null,
+const make = { name:'', colour:null, glyph:'book', level:'readings', timer:null, description:'',
   design: { material:'clear', tint:.55, opacity:.35, sparkle:.5, roughness:.25, labelFinish:'paper', labelFinishStrength:.65, art:'generated', clearance:'open' }, artUrl:null, artData:null, points:[], stage:null };
 const CLEARANCES = [['open','Open','travels freely'],['internal','Internal','for your own people'],['confidential','Confidential','handle with care'],['restricted','Restricted','a receiving library will not re-export its volumes']];
 const MATERIALS = [['solid','Solid'],['clear','Clear'],['frosted','Frosted'],['smoke','Smoke'],['glitter','Glitter'],['metallic','Metallic']];
@@ -2832,12 +2834,12 @@ function chooseLabelFinish(value) {
   $('#mk-foil').hidden = ['paper', 'gloss'].includes(value);
   stageUpdate();
 }
-function openMake() { make.editing = null; $('#tab-make').hidden = false; setView('make'); }
+function openMake() { make.editing = null; make.description = ''; $('#tab-make').hidden = false; setView('make'); }
 // A cartridge made on this machine is the maker's to change: the panel opens filled
 // from it, saves back to the rack, and exports it as itself (same id, next version).
 async function openEdit(id) {
   const c = rackIndex[id]; if (!c || !c.editable) return;
-  make.editing = id; make.name = c.name; make.colour = c.colour; make.level = c.level || 'full';
+  make.editing = id; make.name = c.name; make.colour = c.colour; make.level = c.level || 'full'; make.description = c.description || '';
   make.design = { ...make.design, labelFinish:'paper', labelFinishStrength:.65, ...(c.design || {}) };
   make.artData = null; make.artUrl = null;
   if (c.has_art && make.design.art === 'upload') {
@@ -2848,6 +2850,12 @@ async function openEdit(id) {
     } catch { make.design.art = 'generated'; }
   } else make.design.art = 'generated';
   $('#tab-make').hidden = false; setView('make');
+}
+async function saveDescription() {
+  const id = make.editing; if (!id) return;
+  const r = await fetch(`/api/cartridges/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: make.description }) });
+  if (!r.ok) { say((await r.json()).detail || 'Could not save it.', true); return; }
+  await loadRack(); say(make.description.trim() ? 'The librarian will read that when it shelves.' : 'Description cleared.');
 }
 async function setGenre(g) {
   const id = make.editing; if (!id) return;
@@ -2891,6 +2899,9 @@ function renderMake(flip) {
       ? 'This cartridge was made here, so it is yours to change. <b>Save to the rack</b> changes how it looks on this rack; <b>make it</b> exports it as itself — same cartridge, next version — carrying this design.'
       : 'A cartridge is a slice of this library another one can put on its rack. The level sets what leaves: the volumes themselves, only what this library understood of them, or just the fact that they exist.'}</p>
     <div class="row"><label>Name</label><input type="text" id="mk-name" value="${esc(make.name)}" placeholder="Security's shelf" oninput="make.name=this.value; previewMake()"/></div>
+    <div class="row"><label>What it is</label><div>
+      <textarea id="mk-desc" rows="2" maxlength="2000" placeholder="The IT team's internal wiki: how our systems are run, who to ask, what to do when they break." oninput="make.description=this.value" onchange="${editing ? 'saveDescription()' : ''}">${esc(make.description || '')}</textarea>
+      <div class="locked">In your words. The librarian reads it when it designs the shelf and when it places one of these volumes, so an internal wiki is not filed under the headings of a bigger collection. Ships with the cartridge.</div></div></div>
     <div class="row"><label>Colour</label><div class="swatches">${palette.map(c =>
       `<button style="--c:${c}" aria-pressed="${c === make.colour}" title="${c}" onclick="make.colour='${c}'; renderMake()"></button>`).join('')}
       <label class="wheel" style="--c:${esc(make.colour)}" aria-pressed="${!palette.includes(make.colour)}" title="Any colour — ${esc(make.colour)}"><input type="color" value="${esc(make.colour)}" oninput="make.colour=this.value; this.parentElement.style.setProperty('--c', this.value); this.parentElement.title='Any colour — ' + this.value; stageUpdate(); previewMake()" onchange="renderMake()"/></label></div></div>
@@ -3024,7 +3035,7 @@ async function allDocumentIds() {
 async function exportCartridge() {
   const sel = makeSelection();
   if (!sel.category_ids.length && !sel.cartridge_ids.length) sel.document_ids = await allDocumentIds();
-  const body = { ...sel, name:make.name.trim(), colour:make.colour, icon_svg:GLYPHS[make.glyph], design:make.design, art: make.design.art === 'upload' ? make.artData : null, as_cartridge: make.editing || null };
+  const body = { ...sel, name:make.name.trim(), colour:make.colour, icon_svg:GLYPHS[make.glyph], design:make.design, description: make.description || null, art: make.design.art === 'upload' ? make.artData : null, as_cartridge: make.editing || null };
   if (make.editing && !(await saveEdit())) return;
   $('#mk-go').disabled = true; $('#mk-go').textContent = 'making…';
   try {

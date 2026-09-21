@@ -190,7 +190,7 @@ Shelf (Top shelf › sub-shelves):
 Volume: {title}
 Summary: {summary}
 Subjects it was tagged with: {tags}
-
+{collection}
 In `why`, one sentence on what the volume is actually about and which sub-shelf that
 points to. Then give the sub-shelf and its top shelf. Only if no sub-shelf reasonably fits,
 choose "(a new sub-shelf)", name it in new_sub_shelf_name (concrete, two or three words,
@@ -477,7 +477,12 @@ async def _design_sample(db: AsyncSession) -> tuple[list[str], str, str]:
         what = f"{len(members)} volumes" + (
             f", mostly {genre}" if genre and not cg else f", {genre}" if genre else ""
         )
-        lines.append(f"- {coll} (a cartridge; {what})" if coll else f"- shelved directly ({what})")
+        about = next((m.about for m in members if m.about), None)
+        line = f"- {coll} (a cartridge; {what})" if coll else f"- shelved directly ({what})"
+        if about:
+            # The maker's own account of the collection outranks any guess from titles.
+            line += f": {' '.join(about.split())[:600]}"
+        lines.append(line)
     titles = "\n".join(f"- {x[:70]}" for x in picked)
     return all_titles, titles, "\n".join(lines)
 
@@ -627,6 +632,27 @@ async def build_taxonomy(
     return tx
 
 
+async def _collection_note(db: AsyncSession, doc: Document) -> str:
+    """The cartridge a volume belongs to, with its maker's description when there is
+    one: a page of an internal wiki reads like anything else until you know that."""
+    rows = (
+        await db.execute(
+            text("""
+            select c.name, c.description from cartridge c
+            join cartridge_document cd on cd.cartridge_id = c.id
+            where cd.document_id = :d order by c.name
+            """),
+            {"d": doc.id},
+        )
+    ).all()
+    if not rows:
+        return ""
+    parts = [
+        f"{name}" + (f" — {' '.join(about.split())[:400]}" if about else "") for name, about in rows
+    ]
+    return "From the collection: " + "; ".join(parts) + "\n"
+
+
 async def _summary_and_tags(db: AsyncSession, doc: Document) -> tuple[str, list[str]]:
     summary = (
         await db.execute(
@@ -681,6 +707,7 @@ async def place_document(
         return None
     doc = (await db.execute(select(Document).where(Document.id == document_id))).scalar_one()
     summary, tags = await _summary_and_tags(db, doc)
+    collection = await _collection_note(db, doc)
     own = client is None
     c = client or LLM()
     try:
@@ -694,6 +721,7 @@ async def place_document(
                     title=doc.title,
                     summary=summary[:1500] or "(not yet read)",
                     tags=", ".join(tags) or "none",
+                    collection=collection,
                 ),
                 place_schema(tx, allow_new=allow_new),
                 system=SYSTEM_LIBRARIAN,

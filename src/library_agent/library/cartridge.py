@@ -612,6 +612,7 @@ async def build_cartridge(
     colour: str | None = None,
     icon_svg: str | None = None,
     made_by: str | None = None,
+    description: str | None = None,
     cartridge_id: uuid.UUID | None = None,
     version: int = 1,
     out_dir: Path | None = None,
@@ -654,6 +655,7 @@ async def build_cartridge(
         "version": version,
         "colour": colour or PALETTE[0],
         "made_by": made_by,
+        "description": (description or "").strip()[:2000] or None,
         "made_at": datetime.now(UTC).isoformat(),
         "level": str(CartridgeLevel(level)),
         "embed_model": cfg.embed_model,
@@ -840,6 +842,7 @@ async def import_cartridge(
         row.colour = manifest.get("colour") or PALETTE[0]
         row.icon_svg = icon
         row.made_by = manifest.get("made_by")
+        row.description = (manifest.get("description") or "").strip()[:2000] or None
         row.made_at = (
             datetime.fromisoformat(manifest["made_at"]) if manifest.get("made_at") else None
         )
@@ -1237,6 +1240,7 @@ async def list_cartridges(db: AsyncSession) -> list[dict]:
             "design": clamp_design(c.design),
             "has_art": bool(c.art_path and Path(c.art_path).exists()),
             "genre": c.genre,
+            "description": c.description,
             # Made on this machine from a folder: its maker is here, so it may be edited.
             "editable": c.made_by == "import",
         }

@@ -741,6 +741,8 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .mats button[aria-pressed=true] { color:var(--fg); border-color:var(--fg); }
 .artpick { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font:12px/1.5 var(--sans); color:var(--dim); }
 .artpick img { width:52px; height:52px; object-fit:cover; border-radius:3px; border:1px solid var(--rule); }
+.foil-on { margin-top:8px; } .maskpick { margin-top:8px; } .maskpick img { background:#000; }
+#mk-foil .locked { margin:4px 0 6px; }
 #inspect { position:absolute; right:24px; top:60px; width:400px; height:520px; z-index:4; pointer-events:none; opacity:0; transition:opacity .25s ease; }
 #inspect[data-on=true] { opacity:1; }
 #inspect canvas { width:100%; height:440px; display:block; }
@@ -2827,7 +2829,7 @@ const LABEL_FINISHES = [['paper','Paper'],['gloss','Gloss'],['holo','Holographic
 function chooseLabelFinish(value) {
   make.design.labelFinish = value;
   document.querySelectorAll('[data-label-finish]').forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.labelFinish === value)));
-  $('#mk-foil-strength').hidden = ['paper', 'gloss'].includes(value);
+  $('#mk-foil').hidden = ['paper', 'gloss'].includes(value);
   stageUpdate();
 }
 function openMake() { make.editing = null; $('#tab-make').hidden = false; setView('make'); }
@@ -2865,10 +2867,10 @@ async function saveEdit() {
     if (!r.ok) { say((await r.json()).detail || 'Could not save it.', true); return; }
     const saved = await r.json();
     await loadRack(); rackUnder();
-    if ((make.design.labelFinish || 'paper') !== (saved.design?.labelFinish || 'paper') ||
+    if ((make.design.foilMode||'artwork') !== (saved.design?.foilMode||'artwork') || Boolean(make.design.foilMask) !== Boolean(saved.design?.foilMask) || (make.design.labelFinish || 'paper') !== (saved.design?.labelFinish || 'paper') ||
         (make.design.labelFinish !== 'paper' && make.design.labelFinishStrength !== undefined &&
          Math.abs(make.design.labelFinishStrength - (saved.design?.labelFinishStrength ?? .65)) > .001)) {
-      say('The other changes were saved, but this running server does not yet retain label finishes. Restart the app when its current work is finished, then save this design again.', true);
+      say('The other changes were saved, but this running server does not yet retain these foil settings. Restart the app when its current work is finished, then save this design again.', true);
       return;
     }
     say(`${make.name} is changed on the rack.`);
@@ -2904,8 +2906,19 @@ function renderMake(flip) {
     <div class="row"><label>Label finish</label><div>
       <div class="mats" role="group" aria-label="Label finish">${LABEL_FINISHES.map(([v, l]) =>
         `<button type="button" data-label-finish="${v}" aria-pressed="${(make.design.labelFinish || 'paper') === v}" onclick="chooseLabelFinish('${v}')">${l}</button>`).join('')}</div>
-      <div class="dials" id="mk-foil-strength" ${['paper','gloss'].includes(make.design.labelFinish || 'paper') ? 'hidden' : ''}>
-        <label class="dial"><span>Foil strength</span><input aria-label="Foil strength" type="range" min="0" max="1" step=".01" value="${make.design.labelFinishStrength ?? .65}" oninput="make.design.labelFinishStrength=+this.value; this.nextElementSibling.value=Math.round(this.value*100); stageUpdate()"/><output>${Math.round((make.design.labelFinishStrength ?? .65)*100)}</output></label>
+      <div id="mk-foil" ${['paper','gloss'].includes(make.design.labelFinish || 'paper') ? 'hidden' : ''}>
+        <div class="dials">
+          <label class="dial"><span>Foil strength</span><input aria-label="Foil strength" type="range" min="0" max="1" step=".01" value="${make.design.labelFinishStrength ?? .65}" oninput="make.design.labelFinishStrength=+this.value; this.nextElementSibling.value=Math.round(this.value*100); stageUpdate()"/><output>${Math.round((make.design.labelFinishStrength ?? .65)*100)}</output></label>
+        </div>
+        <div class="mats foil-on" role="group" aria-label="Where the foil goes">${[['artwork', 'on the highlights', 'The foil follows the bright parts of the art'], ['subject', 'on the subject', 'The foil covers the subject and leaves the ground plain'], ['reverse', 'on the ground', 'The foil covers the ground and leaves the subject plain']].map(([v, l, d]) =>
+          `<button type="button" aria-pressed="${(make.design.foilMode || 'artwork') === v}" title="${d}" onclick="make.design.foilMode='${v}'; renderMake()">${l}</button>`).join('')}</div>
+        ${(make.design.foilMode || 'artwork') !== 'artwork' ? `<div class="artpick maskpick">
+          ${make.design.foilMask ? `<img src="${make.design.foilMask}" alt=""/><span>your mask</span>` : `<span>${make.design.art === 'upload' ? 'the subject is where the art is not transparent' : 'the constellation is its own subject'}</span>`}
+          <button class="linkish" onclick="$('#mk-mask').click()">${make.design.foilMask ? 'another mask' : 'upload a mask'}</button>
+          ${make.design.foilMask ? `<button class="linkish" onclick="delete make.design.foilMask; renderMake()">use the art itself</button>` : ''}
+          <input type="file" id="mk-mask" accept="image/*" hidden onchange="pickFoilMask(this.files[0])"/>
+        </div>
+        <div class="locked">A mask is an image the size of the art: white where the subject is, black where it is not. Art with a transparent background needs none.</div>` : ''}
       </div>
       <div class="locked">Changes the printed label independently of the shell. Drag the preview to rotate it and see the foil catch the light.</div>
     </div></div>
@@ -2962,6 +2975,21 @@ async function stageShow() {
 function stageUpdate(flip) {
   if (!make.stage) return;
   make.stage.set({ design: { ...make.design }, colour: make.colour, name: make.name.trim() || 'Cartridge', level: make.level, sub: `${make.level} · ${(make.points || []).length} volumes`, points: make.points, artUrl: make.artUrl, lit: true, flip: !!flip });
+}
+// A mask arrives as any image and leaves as a small greyscale PNG: white is the
+// subject, black is not, letterboxed in black where it does not fill the frame.
+function pickFoilMask(file) {
+  if (!file) return;
+  const url = URL.createObjectURL(file), img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const c = document.createElement('canvas'), k = Math.min(1, 512 / Math.max(img.width, img.height));
+    c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+    const g = c.getContext('2d'); g.fillStyle = 'black'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+    make.design.foilMask = c.toDataURL('image/png'); renderMake();
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); say('Could not read that image as a mask.', true); };
+  img.src = url;
 }
 function pickArt(file) {
   if (!file) return;

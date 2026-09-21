@@ -369,6 +369,16 @@ async def _startup(ctx: dict) -> None:
     from library_agent.ops.incidents import install_handler
 
     install_handler("worker")
+    # The library's own log lines, in the worker log beside arq's: what a pass decided
+    # and why a placement was refused were invisible without this.
+    lib = logging.getLogger("library_agent")
+    if not any(isinstance(h, logging.StreamHandler) for h in lib.handlers):
+        h = logging.StreamHandler()
+        h.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%H:%M:%S")
+        )
+        lib.addHandler(h)
+        lib.setLevel(logging.INFO)
 
 
 class WorkerSettings:

@@ -12,22 +12,29 @@ cross-document -- an order of magnitude better, and the themes are real ("bigger
 better" across four papers, shared optimiser hyperparameters across three).
 
 It is cheap either way: clustering embeddings costs nothing and only the one summary call
-per cluster touches the GPU."""
+per cluster touches the GPU. And a rebuild is incremental: claim vectors are kept by the
+claim's text, and a group that comes out of the clustering with exactly the claims a
+cluster on file has keeps that cluster -- its summary, its embedding, its conflict
+verdict -- so a rebuild after one new volume costs what that volume changed, not the
+whole shelf again."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
 
 import numpy as np
 from sqlalchemy import delete, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from library_agent.config import settings
 from library_agent.db.models import (
     Artifact,
     ArtifactKind,
+    ClaimVector,
     Cluster,
     ClusterMember,
     Document,
@@ -103,18 +110,67 @@ async def _load_sections(
         return [], [], [], np.zeros((0, 0))
 
     texts = [r.text for r in rows]
-    # Every claim, embedded afresh each rebuild: sixty thousand of them on a large shelf,
-    # so the count is shown as it goes.
-    step, parts = 1024, []
-    for i in range(0, len(texts), step):
-        if progress:
-            await progress(i, len(texts), f"embedding {len(texts):,} claims")
-        parts.extend(await embed_texts(texts[i : i + step], client))
-    vecs = np.array(parts, dtype=np.float32)
+    vecs = await _claim_vectors(db, client, texts, progress)
     # Normalise so euclidean distance is monotonic in cosine distance.
     norms = np.linalg.norm(vecs, axis=1, keepdims=True)
     vecs = vecs / np.clip(norms, 1e-9, None)
     return [r.artifact_id for r in rows], [r.document_id for r in rows], texts, vecs
+
+
+def _hash(text_: str) -> str:
+    return hashlib.sha256(text_.encode()).hexdigest()[:32]
+
+
+async def _claim_vectors(
+    db: AsyncSession, client: Ollama, texts: list[str], progress=None
+) -> np.ndarray:
+    """Every claim's vector, from the cache where it has one. Sixty thousand claims were
+    embedded afresh on every rebuild; only the ones not seen before are now."""
+    model = settings().embed_model
+    hashes = [_hash(x) for x in texts]
+    uniq = list(dict.fromkeys(hashes))
+    have: dict[str, np.ndarray] = {}
+    for i in range(0, len(uniq), 5000):
+        rows = (
+            await db.execute(
+                select(ClaimVector.hash, ClaimVector.vec).where(
+                    ClaimVector.hash.in_(uniq[i : i + 5000]), ClaimVector.model == model
+                )
+            )
+        ).all()
+        for h, v in rows:
+            have[h] = np.asarray(v.to_list() if hasattr(v, "to_list") else v, dtype=np.float32)
+    missing: dict[str, str] = {}
+    for h, x in zip(hashes, texts, strict=True):
+        if h not in have and h not in missing:
+            missing[h] = x
+    todo = list(missing.items())
+    step = 1024
+    for i in range(0, len(todo), step):
+        if progress:
+            await progress(i, len(todo), f"embedding {len(todo):,} new claims")
+        batch = todo[i : i + step]
+        vecs = await embed_texts([x for _, x in batch], client)
+        for (h, _), v in zip(batch, vecs, strict=True):
+            have[h] = np.asarray(v, dtype=np.float32)
+        await db.execute(
+            pg_insert(ClaimVector)
+            .values(
+                [
+                    {"hash": h, "model": model, "vec": v}
+                    for (h, _), v in zip(batch, vecs, strict=True)
+                ]
+            )
+            .on_conflict_do_nothing()
+        )
+    # Claims that are gone (a volume re-read, or removed) take their vectors with them.
+    await db.execute(text("delete from claim_vector where not (hash = any(:keep))"), {"keep": uniq})
+    return np.stack([have[h] for h in hashes])
+
+
+def _member_key(idxs: list[int], artifact_ids: list[uuid.UUID], texts: list[str]) -> str:
+    """Which claims, from which sections: the same set again is the same cluster."""
+    return _hash("\n".join(sorted(f"{artifact_ids[i]}\t{texts[i]}" for i in idxs)))
 
 
 def _cluster(vectors: np.ndarray, min_cluster_size: int, method: str = "leaf") -> np.ndarray:
@@ -160,27 +216,74 @@ async def build_clusters(
         titles = {d.id: d.title for d in docs_all}
         genres = {d.id: d.genre for d in docs_all}
 
-        # Clusters are derived state -- rebuild wholesale rather than reconciling.
+        # Clusters are derived state, but most of them come out of a rebuild exactly as
+        # they went in: a group with the same claims as a cluster on file keeps that
+        # cluster -- summary, embedding, conflict verdict -- and only the rest are made.
+        model, version = (
+            providers.model_for("threads"),
+            cfg.prompt_versions.get("cluster_summary", "v1"),
+        )
+        on_file = {
+            c.member_key: c
+            for c in (
+                await db.execute(select(Cluster).where(Cluster.member_key.is_not(None)))
+            ).scalars()
+        }
+        summarised = {
+            a.target_id: a
+            for a in (
+                await db.execute(
+                    select(Artifact).where(Artifact.kind == ArtifactKind.CLUSTER_SUMMARY)
+                )
+            ).scalars()
+        }
+        kept: set[uuid.UUID] = set()
+        fresh: list[tuple[str, list[int]]] = []
+        for _lab, idxs in sorted(groups.items()):
+            key = _member_key(idxs, artifact_ids, texts)
+            prev = on_file.get(key)
+            art = summarised.get(prev.id) if prev else None
+            # Kept when it was summarised (a label with no artifact is an insignificant
+            # grouping, also a finished state) by the current model and prompt.
+            current = (
+                prev is not None
+                and prev.label is not None
+                and prev.id not in kept
+                and (art is None or (art.model == model and art.prompt_version == version))
+            )
+            if current:
+                kept.add(prev.id)
+            else:
+                fresh.append((key, idxs))
+        dead = select(Cluster.id).where(Cluster.id.not_in(kept)) if kept else select(Cluster.id)
+        dead_art = select(Artifact.id).where(
+            Artifact.target_kind == TargetKind.CLUSTER, Artifact.target_id.in_(dead)
+        )
         await db.execute(
             delete(Embedding).where(
-                Embedding.owner_kind == OwnerKind.ARTIFACT,
-                Embedding.owner_id.in_(
-                    select(Artifact.id).where(Artifact.kind == ArtifactKind.CLUSTER_SUMMARY)
-                ),
+                Embedding.owner_kind == OwnerKind.ARTIFACT, Embedding.owner_id.in_(dead_art)
             )
         )
-        await db.execute(delete(Artifact).where(Artifact.kind == ArtifactKind.CLUSTER_SUMMARY))
-        await db.execute(delete(Cluster))
+        await db.execute(
+            delete(Artifact).where(
+                Artifact.target_kind == TargetKind.CLUSTER, Artifact.target_id.in_(dead)
+            )
+        )
+        await db.execute(delete(Cluster).where(Cluster.id.in_(dead)))
         await db.flush()
+        log.info("clusters: %d kept, %d to summarise", len(kept), len(fresh))
+        phase = f"{len(fresh):,} new themes, {len(kept):,} kept" if kept else None
 
         cross_doc = 0
         to_embed: list[tuple[uuid.UUID, str]] = []
 
-        for n, (_lab, idxs) in enumerate(sorted(groups.items())):
+        for n, (key, idxs) in enumerate(fresh):
             if gate:
                 await gate()
             docs_in = {doc_ids[i] for i in idxs}
-            cluster = Cluster(method="hdbscan", size=len(idxs), document_count=len(docs_in))
+            cluster = Cluster(
+                method="hdbscan", size=len(idxs), document_count=len(docs_in), member_key=key
+            )
             db.add(cluster)
             await db.flush()
             seen_artifacts: set[uuid.UUID] = set()
@@ -265,7 +368,7 @@ async def build_clusters(
                 await db.flush()
                 to_embed.append((art.id, f"{cluster.label}\n\n{art.text}"))
             if progress:
-                await progress(n + 1, len(groups))
+                await progress(n + 1, len(fresh), phase)
 
         if to_embed:
             vecs = await embed_texts([t for _, t in to_embed], c)

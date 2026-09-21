@@ -1156,3 +1156,21 @@ Ollama, so a chat pointed at a provider is not refused because Ollama lacks that
 Tested against an in-process fake server (key, json_schema fallback, streaming with
 reasoning, the routes) and live against Ollama's own `/v1` as a provider, which is also a
 fair way to try the feature without a key.
+
+**Threads rebuild incrementally.** The night's arithmetic: a rebuild re-embedded all
+59,372 claims, re-summarised all 5,821 clusters and re-judged all 3,385 multi-document
+ones, every time -- four hours, past the worker's job timeout, and it looped. Now each
+cluster carries a fingerprint of exactly which claims it holds (`cluster.member_key`);
+HDBSCAN still runs over everything (it is the cheap part), but a group that comes out with
+the fingerprint of a cluster on file keeps that cluster -- summary artifact, embedding,
+conflict verdict -- and only the rest are summarised. Claim vectors live in `claim_vector`
+by the hash of the claim's text, apart from the retrieval index they have no business in,
+so only unseen claims are embedded. Conflicts are judged only where the fingerprint, the
+model or the prompt changed (`cluster.judged_key`), and the authoritative reset applies
+to those alone. The first rebuild under this code is a full one (nothing has a fingerprint
+yet); the one after a single new volume should cost minutes. Tested on a scratch database
+made from the models (`tests/conftest.py::scratch_db`), since a test that rewrites whole
+tables cannot share the real one. Also this morning: the SSH tunnel dropped at 05:49 and
+took the RTS re-read and the reshelve with it; `ops/logs/resume.sh` waits for Ollama and
+finishes the chain. And a NUL byte in a model-written summary was the DataError that had
+been killing hour-old cluster passes -- every backend scrubs its output now.

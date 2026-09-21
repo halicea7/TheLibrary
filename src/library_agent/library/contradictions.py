@@ -8,6 +8,7 @@ itself in any interesting way -- so the cost is one call per multi-source theme.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 
@@ -224,7 +225,8 @@ async def find_contradictions(
     rows = (
         await db.execute(
             text("""
-            select c.id, c.label, a.data->'claims' as claims,
+            select c.id, c.label, c.member_key, c.judged_key, c.has_contradiction,
+                   a.data->'claims' as claims,
                    a.data->'claim_sources' as claim_sources,
                    a.data->>'genre' as genre,
                    array_agg(distinct d.title) as titles,
@@ -235,29 +237,46 @@ async def find_contradictions(
             join document d on d.id = m.document_id
             left join artifact o on o.target_id = d.id and o.kind = :ok
             where c.document_count > 1
-            group by c.id, c.label, a.data
+            group by c.id, c.label, c.member_key, c.judged_key, c.has_contradiction, a.data
             """),
             {"ck": ArtifactKind.CLUSTER_SUMMARY.value, "ok": ArtifactKind.ORIENTATION.value},
         )
     ).all()
 
-    # A pass is authoritative. Without this a verdict flipped to false on re-run left
-    # the previous true standing -- an instruction-echo "contradiction" survived two
-    # fixes that way.
-    await db.execute(update(Cluster).values(has_contradiction=False))
-    await db.execute(
-        text("delete from artifact where kind = :k"), {"k": ArtifactKind.CONTRADICTION.value}
-    )
+    # A verdict stands while the cluster it was reached on does: the same claims, judged
+    # by the same model under the same prompt. Only the rest are judged, and for those
+    # the pass is authoritative -- without the reset a verdict flipped to false on re-run
+    # left the previous true standing, and an instruction-echo "contradiction" survived
+    # two fixes that way.
+    model = providers.model_for("threads")
+    version = cfg.prompt_versions.get("contradiction", "v1")
+
+    def stamp(row) -> str:
+        return hashlib.sha256(f"{row.member_key}:{model}:{version}".encode()).hexdigest()[:32]
+
+    todo = [r for r in rows if r.member_key is None or r.judged_key != stamp(r)]
+    kept = len(rows) - len(todo)
+    if todo:
+        ids = [r.id for r in todo]
+        await db.execute(update(Cluster).where(Cluster.id.in_(ids)).values(has_contradiction=False))
+        await db.execute(
+            text("delete from artifact where kind = :k and target_id = any(:ids)"),
+            {"k": ArtifactKind.CONTRADICTION.value, "ids": ids},
+        )
+    phase = f"{len(todo):,} changed themes, {kept:,} kept" if kept else None
 
     own = client is None
     c = client or LLM()
-    found = 0
+    found = sum(1 for r in rows if r.id not in {x.id for x in todo} and r.has_contradiction)
     try:
-        for n, row in enumerate(rows):
+        for n, row in enumerate(todo):
             if gate:
                 await gate()
             claims = row.claims or []
             if len(claims) < 2:
+                await db.execute(
+                    update(Cluster).where(Cluster.id == row.id).values(judged_key=stamp(row))
+                )
                 continue
             out = await judge_cluster(
                 c,
@@ -270,7 +289,10 @@ async def find_contradictions(
                 row.genre,
             )
             if out is None:
-                continue
+                continue  # the judge failed; left unstamped, so the next pass returns to it
+            await db.execute(
+                update(Cluster).where(Cluster.id == row.id).values(judged_key=stamp(row))
+            )
             if out.get("disagreement"):
                 found += 1
                 await db.execute(
@@ -302,12 +324,12 @@ async def find_contradictions(
                         )
                     )
             if progress:
-                await progress(n + 1, len(rows))
+                await progress(n + 1, len(todo), phase)
         await db.flush()
     finally:
         if own:
             await c.aclose()
-    return {"clusters_checked": len(rows), "contradictions": found}
+    return {"clusters_checked": len(todo), "kept": kept, "contradictions": found}
 
 
 async def list_contradictions(db: AsyncSession) -> list[dict]:

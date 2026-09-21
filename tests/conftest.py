@@ -44,6 +44,48 @@ async def db():
             await tx.rollback()
 
 
+@pytest.fixture
+async def scratch_db():
+    """A session on a database of its own, made from the models and dropped afterwards.
+    For work that reads or rewrites whole tables -- the threads rebuild -- which on the
+    shared database would see the real library and lock it."""
+    import re
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+    from library_agent.db.models import Base
+
+    url = settings().database_url
+    if not url.startswith("postgresql"):
+        pytest.skip("no postgres")
+    name = "library_agent_scratch_" + uuid.uuid4().hex[:8]
+    admin_url = re.sub(r"/[^/]*$", "/postgres", url)
+    admin = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
+    try:
+        async with admin.connect() as conn:
+            await conn.execute(text(f'create database "{name}"'))
+    except Exception:  # noqa: BLE001
+        await admin.dispose()
+        pytest.skip("cannot create a scratch database")
+    eng = create_async_engine(re.sub(r"/[^/]*$", f"/{name}", url))
+    try:
+        async with eng.begin() as conn:
+            await conn.execute(text("create extension if not exists vector"))
+            await conn.run_sync(Base.metadata.create_all)
+        async with eng.connect() as conn:
+            s = AsyncSession(bind=conn, expire_on_commit=False)
+            try:
+                yield s
+            finally:
+                await s.close()
+    finally:
+        await eng.dispose()
+        async with admin.connect() as conn:
+            await conn.execute(text(f'drop database "{name}" with (force)'))
+        await admin.dispose()
+
+
 BODY_A = "Alpha is a test document about cartridges. " * 8
 BODY_B = "Beta is a second document that disagrees with alpha. " * 8
 

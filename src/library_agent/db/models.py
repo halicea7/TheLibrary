@@ -398,6 +398,24 @@ class Cluster(Base):
     size: Mapped[int] = mapped_column(Integer, default=0)
     document_count: Mapped[int] = mapped_column(Integer, default=0)
     has_contradiction: Mapped[bool] = mapped_column(default=False)
+    # A fingerprint of exactly which claims are in it. A rebuild that sees the same
+    # fingerprint keeps the cluster -- summary, embedding and verdict -- rather than
+    # writing them again; `judged_key` says which fingerprint (and prompt, and model)
+    # the conflict verdict was reached on.
+    member_key: Mapped[str | None] = mapped_column(String(32), default=None, index=True)
+    judged_key: Mapped[str | None] = mapped_column(String(64), default=None)
+    created_at: Mapped[datetime] = _now()
+
+
+class ClaimVector(Base):
+    """A claim's embedding, by the hash of its text, so a rebuild embeds only claims it
+    has not seen. Not in the retrieval index: claims are clustered, never searched."""
+
+    __tablename__ = "claim_vector"
+
+    hash: Mapped[str] = mapped_column(String(32), primary_key=True)
+    model: Mapped[str] = mapped_column(String(64))
+    vec: Mapped[Any] = mapped_column(HALFVEC(settings().embed_dim))
     created_at: Mapped[datetime] = _now()
 
 

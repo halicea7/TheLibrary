@@ -1174,3 +1174,19 @@ tables cannot share the real one. Also this morning: the SSH tunnel dropped at 0
 took the RTS re-read and the reshelve with it; `ops/logs/resume.sh` waits for Ollama and
 finishes the chain. And a NUL byte in a model-written summary was the DataError that had
 been killing hour-old cluster passes -- every backend scrubs its output now.
+
+**The incremental rebuild, measured.** Same shelf, twice in one day. The full pass at
+10:06: 3 h 32 m, 5,863 clusters summarised, ~3,400 conflicts judged, on the order of
+13,000 model calls. The pass at 16:09, after a reshelve had moved volumes about but
+changed no claim: 16 minutes, 5 clusters summarised, 1 conflict judged, 116 conflicts
+intact. The five are the noise floor -- claim vectors are cached as half-precision, so a
+handful of borderline points landed one cluster over from the morning's fresh
+embeddings; every run reads the cache now, so that is settled. Of the sixteen minutes,
+fifteen and a half were HDBSCAN, which runs on the worker's machine and was using one of
+its fourteen cores; `n_jobs=-1` for the next one. Two other things the day surfaced,
+both about size: the reshelve folded 1,030 subject tags in one model call and got back
+half a JSON document (batched at 120 now), and one placement answer in twelve named
+nothing on the shelf and the volume was left homeless with only the tracer to say so
+(the placer asks once more, warmer; a reshelve gives the rest one last look after the
+splits and merges). The library's first year of code assumed a few hundred volumes;
+1,600 is where those assumptions came due.

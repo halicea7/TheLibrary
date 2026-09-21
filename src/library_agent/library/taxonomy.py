@@ -21,6 +21,27 @@ def normalize_name(name: str) -> str:
     return " ".join(w if (w.isupper() and 2 <= len(w) <= 5) else w.title() for w in words)
 
 
+async def designate(db: AsyncSession, name: str) -> Category | None:
+    """A name from a shelf design, taken literally. `get_or_create` follows a folded
+    name to its survivor -- right for a tag, wrong for a design: "Security" once
+    folded into "Network Services" came back as a top shelf called Network Services,
+    beside a sub-shelf of the same name. Here the name is revived if it was folded,
+    made if it is new, and never redirected."""
+    clean = normalize_name(name)
+    if len(clean) < 3 or len(clean) > 60:
+        return None
+    existing = (
+        await db.execute(select(Category).where(Category.name == clean))
+    ).scalar_one_or_none()
+    if existing:
+        existing.canonical = True
+        return existing
+    row = Category(name=clean, canonical=True)
+    db.add(row)
+    await db.flush()
+    return row
+
+
 async def canonical_names(db: AsyncSession) -> list[str]:
     return list(
         (await db.execute(select(Category.name).where(Category.canonical.is_(True)))).scalars()

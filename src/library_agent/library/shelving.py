@@ -54,7 +54,7 @@ MAX_TOP = 8
 MAX_SUB = 7
 
 
-def design_schema(max_top: int) -> dict[str, Any]:
+def design_schema(max_top: int, min_top: int = 2) -> dict[str, Any]:
     """Names only, every array capped. An open-ended array let grammar-constrained
     sampling run away (14k characters, never terminated); this grammar is finite."""
     return {
@@ -65,7 +65,7 @@ def design_schema(max_top: int) -> dict[str, Any]:
             "notes": {"type": "string", "maxLength": 1500},
             "shelves": {
                 "type": "array",
-                "minItems": 2,
+                "minItems": min(min_top, max_top),
                 "maxItems": max_top,
                 "items": {
                     "type": "object",
@@ -133,18 +133,17 @@ Rules:
   volumes gets more sub-shelves and a field with a handful gets two.
 - Two or three words each. Keep well-known acronyms as acronyms. Never name a sub-shelf
   after a single volume.
-- The library holds several collections (listed below). A collection about a different
-  field from the rest is its own field with its own top shelf, however the majority is
-  shelved: an organisation's internal documentation does not go under the headings of a
-  security handbook because the handbook is bigger.
+- These shelves are for ONE collection of the library, described below, and for it
+  alone: name them for what this collection is, in its own terms. Other collections have
+  their own shelves.
 
 First, in `notes`, walk through the titles and say what clusters you actually see. Then
 name the shelves.
 
-The collections:
+The collection:
 {collections}
 
-The volumes ({n} of them; a sample of the titles, drawn evenly from every collection):
+The volumes ({n} of them; a sample of the titles, drawn evenly through the collection):
 {titles}
 
 Tags previously applied to them, for reference only (inconsistent; do not copy them):
@@ -201,16 +200,35 @@ new_sub_shelf_name empty. Never invent a top shelf.
 
 @dataclass
 class Taxonomy:
-    """Top shelf name -> sub-shelf names, plus ids."""
+    """Top shelf name -> sub-shelf names, plus ids; and which collection each top shelf
+    was designed for, so a volume is placed among its own collection's shelves."""
 
     tops: dict[str, list[str]] = field(default_factory=dict)
     ids: dict[str, uuid.UUID] = field(default_factory=dict)  # any name -> category id
+    homes: dict[str, set[str]] = field(default_factory=dict)  # top name -> collection keys
 
     def render(self) -> str:
         return "\n".join(f"- {t} › " + " · ".join(subs) for t, subs in self.tops.items())
 
     def empty(self) -> bool:
         return not self.tops
+
+    def for_collections(self, keys: set[str]) -> Taxonomy:
+        """The shelves that belong to these collections; all of them when nothing says."""
+        if not self.homes or not keys:
+            return self
+        tops = {t: s for t, s in self.tops.items() if self.homes.get(t, set()) & keys}
+        if not tops:  # a cartridge too small for shelves of its own shelves with the local volumes
+            tops = {t: s for t, s in self.tops.items() if "local" in self.homes.get(t, set())}
+        if not tops:
+            return self
+        return Taxonomy(
+            tops=tops,
+            ids={
+                n: i for n, i in self.ids.items() if n in tops or any(n in s for s in tops.values())
+            },
+            homes={t: h for t, h in self.homes.items() if t in tops},
+        )
 
 
 async def load_taxonomy(db: AsyncSession) -> Taxonomy:
@@ -230,19 +248,28 @@ async def load_taxonomy(db: AsyncSession) -> Taxonomy:
             tx.ids[c.name] = c.id
     for subs in tx.tops.values():
         subs.sort()
+    from library_agent.db.models import LibraryMeta
+
+    meta = await db.get(LibraryMeta, DESIGN_KEY)
+    for top, keys in ((meta.value or {}).get("homes") or {}).items() if meta else []:
+        if top in tx.tops:
+            tx.homes[top] = set(keys)
     return tx
 
 
-async def _subjects_in_use(db: AsyncSession) -> list[tuple[str, int, list[str]]]:
-    rows = (
-        await db.execute(
-            select(Category.name, func.count(DocumentCategory.document_id))
-            .join(DocumentCategory, DocumentCategory.category_id == Category.id)
-            .where(Category.canonical.is_(True))
-            .group_by(Category.id)
-            .order_by(func.count(DocumentCategory.document_id).desc())
-        )
-    ).all()
+async def _subjects_in_use(
+    db: AsyncSession, document_ids: list[uuid.UUID] | None = None
+) -> list[tuple[str, int, list[str]]]:
+    q = (
+        select(Category.name, func.count(DocumentCategory.document_id))
+        .join(DocumentCategory, DocumentCategory.category_id == Category.id)
+        .where(Category.canonical.is_(True))
+        .group_by(Category.id)
+        .order_by(func.count(DocumentCategory.document_id).desc())
+    )
+    if document_ids is not None:
+        q = q.where(DocumentCategory.document_id.in_(document_ids))
+    rows = (await db.execute(q)).all()
     out = []
     for name, n in rows:
         titles = list(
@@ -365,8 +392,9 @@ REDESIGN_FRACTION = 0.25
 REDESIGN_MIN = 20
 
 
-async def record_design(db: AsyncSession) -> None:
-    """Remember when the top shelves were designed and on how many read volumes."""
+async def record_design(db: AsyncSession, homes: dict[str, set[str]] | None = None) -> None:
+    """Remember when the top shelves were designed, on how many read volumes, and which
+    collection each top shelf was designed for."""
     from datetime import UTC, datetime
 
     from library_agent.db.models import LibraryMeta
@@ -375,7 +403,11 @@ async def record_design(db: AsyncSession) -> None:
         await db.execute(select(func.count()).select_from(Document).where(Document.tier >= 1))
     ).scalar() or 0
     row = await db.get(LibraryMeta, DESIGN_KEY)
-    value = {"at": datetime.now(UTC).isoformat(), "read_volumes": n}
+    value = {
+        "at": datetime.now(UTC).isoformat(),
+        "read_volumes": n,
+        "homes": {t: sorted(k) for t, k in (homes or {}).items()},
+    }
     if row:
         row.value = value
     else:
@@ -443,21 +475,28 @@ async def shelf_health(db: AsyncSession) -> dict[str, Any]:
 
 
 DESIGN_TITLES = 300
+# A collection smaller than this is not designed for on its own; it is shelved with the
+# volumes that were added directly.
+DESIGN_MIN = 20
 
 
-async def _design_sample(db: AsyncSession) -> tuple[list[str], str, str]:
-    """The titles the designer reads, and a line on each collection.
+@dataclass
+class Collection:
+    key: str  # "cart:<id>" or "local"
+    name: str
+    description: str | None
+    genre: str | None
+    docs: list  # rows with id, title, genre
 
-    The first three hundred titles in alphabetical order were all one cartridge's when
-    that cartridge was a thousand volumes, and the design never saw the other three
-    hundred and ninety: an internal wiki went under "System Exploitation". Every
-    collection -- each cartridge, and the volumes shelved directly -- gets a share of the
-    sample with a floor, taken evenly through its titles, and the prompt is told what the
-    collections are."""
+
+async def _collections(db: AsyncSession) -> list[Collection]:
+    """The read volumes, by collection: each cartridge, and the volumes shelved
+    directly. A cartridge too small to design for joins the local volumes."""
     rows = (
         await db.execute(
             text("""
-            select d.title, c.name as coll, c.genre as cgenre, c.description as about, d.genre
+            select d.id, d.title, d.genre,
+                   c.id as cid, c.name as coll, c.genre as cgenre, c.description as about
             from document d
             left join cartridge_document cd on cd.document_id = d.id
             left join cartridge c on c.id = cd.cartridge_id
@@ -466,182 +505,205 @@ async def _design_sample(db: AsyncSession) -> tuple[list[str], str, str]:
             """)
         )
     ).all()
-    groups: dict[str, list] = {}
+    seen: set = set()
+    groups: dict[str, Collection] = {}
     for r in rows:
-        groups.setdefault(r.coll or "", []).append(r)
-    all_titles = [r.title for r in rows]
-    total = len(rows)
-    floor = min(40, DESIGN_TITLES // max(1, len(groups)))
-    picked: list[str] = []
-    lines: list[str] = []
-    for coll, members in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-        share = max(floor, round(DESIGN_TITLES * len(members) / max(1, total)))
-        share = min(share, len(members))
-        step = max(1, len(members) // share)
-        picked.extend(m.title for m in members[::step][:share])
-        # The cartridge's genre if it has one, else the commonest among its volumes.
-        cg = next((m.cgenre for m in members if m.cgenre), None)
-        counts = Counter(m.genre for m in members if m.genre)
-        genre = cg or (counts.most_common(1)[0][0] if counts else None)
-        what = f"{len(members)} volumes" + (
-            f", mostly {genre}" if genre and not cg else f", {genre}" if genre else ""
+        if r.id in seen:
+            continue  # a volume in two cartridges is designed for once, with the first
+        seen.add(r.id)
+        key = f"cart:{r.cid}" if r.cid else "local"
+        c = groups.setdefault(
+            key,
+            Collection(
+                key=key,
+                name=r.coll or "shelved directly",
+                description=r.about,
+                genre=r.cgenre,
+                docs=[],
+            ),
         )
-        about = next((m.about for m in members if m.about), None)
-        line = f"- {coll} (a cartridge; {what})" if coll else f"- shelved directly ({what})"
-        if about:
-            # The maker's own account of the collection outranks any guess from titles.
-            line += f": {' '.join(about.split())[:600]}"
-        lines.append(line)
-    titles = "\n".join(f"- {x[:70]}" for x in picked)
-    return all_titles, titles, "\n".join(lines)
+        c.docs.append(r)
+    local = groups.setdefault(
+        "local",
+        Collection(key="local", name="shelved directly", description=None, genre=None, docs=[]),
+    )
+    for key in list(groups):
+        if key != "local" and len(groups[key].docs) < DESIGN_MIN:
+            local.docs.extend(groups.pop(key).docs)
+    out = [c for c in groups.values() if c.docs]
+    out.sort(key=lambda c: -len(c.docs))
+    return out
+
+
+def _collection_line(c: Collection) -> str:
+    counts = Counter(d.genre for d in c.docs if d.genre)
+    genre = c.genre or (counts.most_common(1)[0][0] if counts else None)
+    what = f"{len(c.docs)} volumes" + (
+        f", {genre}" if c.genre else f", mostly {genre}" if genre else ""
+    )
+    line = (
+        f"- {c.name} (a cartridge; {what})" if c.key != "local" else f"- shelved directly ({what})"
+    )
+    if c.description:
+        # The maker's own account of the collection outranks any guess from titles.
+        line += f": {' '.join(c.description.split())[:600]}"
+    return line
+
+
+def _title_sample(c: Collection) -> str:
+    n = min(DESIGN_TITLES, len(c.docs))
+    step = max(1, len(c.docs) // n)
+    return "\n".join(f"- {d.title[:70]}" for d in c.docs[::step][:n])
+
+
+async def _design_one(db: AsyncSession, c: Any, coll: Collection, progress=None) -> dict[str, Any]:
+    """Design one collection's shelves from its own titles and tags, fold its old tags
+    into them, and return shelves with their absorbs -- nothing applied yet."""
+    doc_ids = [d.id for d in coll.docs]
+    subjects = await _subjects_in_use(db, doc_ids)
+    listing = ", ".join(f"{name} ({n})" for name, n, _ in subjects)
+    names = [name for name, _, _ in subjects]
+    n = len(coll.docs)
+    # One field, usually: a top shelf per hundred volumes or so, one for a small
+    # collection, never more than the rack allows.
+    max_top = 1 if n < 40 else max(2, min(MAX_TOP, n // 100))
+    per_sub = f"{max(3, n // 12)} to {max(8, n // 5)}"
+    design: dict[str, Any] = {}
+    for attempt in range(3):
+        if progress:
+            await progress(0, 1, f"designing the shelves for {coll.name}")
+        design = await c.structured(
+            providers.model_for("threads"),
+            TAXONOMY_PROMPT.format(
+                max_top=max_top,
+                max_sub=MAX_SUB,
+                per_sub=per_sub,
+                n=n,
+                titles=_title_sample(coll),
+                subjects=listing or "none",
+                collections=_collection_line(coll),
+            ),
+            design_schema(max_top, min_top=1 if max_top == 1 else 2),
+            system=SYSTEM_LIBRARIAN,
+            instructions=TAXONOMY_PROMPT,
+            temperature=0.1 + 0.2 * attempt,
+            think=True,
+        )
+        if _taxonomy_is_sane(design, max_top):
+            log.info("%s: design accepted: %s", coll.name, _top_names(design))
+            break
+        log.info("%s: design attempt %d rejected: %s", coll.name, attempt, _top_names(design))
+    shelves = (design.get("shelves") or [])[:max_top]
+    shelf_lines = []
+    subs: list[str] = []
+    for s in shelves:
+        kids = [taxonomy.normalize_name(str(x)) for x in s.get("sub_shelves") or []]
+        kids = [k for k in kids if k]
+        subs.extend(kids)
+        shelf_lines.append(
+            f"- {taxonomy.normalize_name(str(s.get('name') or ''))} › " + " · ".join(kids)
+        )
+    subs = list(dict.fromkeys(subs))
+    folded: dict[str, str] = {}
+    if subs and names:
+        # One line of output per tag, so a big shelf is folded in batches: a thousand
+        # tags in one call ran past the output budget and came back as half a JSON
+        # document.
+        for i in range(0, len(names), FOLD_BATCH):
+            batch = names[i : i + FOLD_BATCH]
+            if progress:
+                await progress(i, len(names), f"folding {coll.name}'s old subjects in")
+            assign = await c.structured(
+                providers.model_for("threads"),
+                ASSIGN_PROMPT.format(
+                    shelf="\n".join(shelf_lines), tags="\n".join(f"- {n}" for n in batch)
+                ),
+                assign_schema(batch, subs),
+                system=SYSTEM_LIBRARIAN,
+                temperature=0.1,
+                num_predict=4000,  # one line per tag; the grammar is finite
+            )
+            got = assign.get("assignments") or []
+            log.info("%s: fold: %d assignments for %d tags", coll.name, len(got), len(batch))
+            for a in got:
+                folded.setdefault(str(a.get("subject")), str(a.get("sub_shelf")))
+    return {
+        "shelves": [
+            {
+                "name": s.get("name"),
+                "sub_shelves": [
+                    {
+                        "name": k,
+                        "absorbs": [
+                            n for n, sub in folded.items() if sub == taxonomy.normalize_name(str(k))
+                        ],
+                    }
+                    for k in s.get("sub_shelves") or []
+                ],
+            }
+            for s in shelves
+        ]
+    }
 
 
 async def build_taxonomy(
     db: AsyncSession, *, client: Ollama | None = None, progress=None
 ) -> Taxonomy:
-    """One model call organises every subject in use into two levels, then it is applied."""
-    subjects = await _subjects_in_use(db)
-    if not subjects:
+    """Each collection -- every cartridge, and the volumes shelved directly -- gets its
+    own shelves, designed from its own titles and tags; a volume is later placed only
+    among its collection's shelves. One design for the whole library kept folding a
+    minority collection into the majority's headings, however it was told not to."""
+    colls = await _collections(db)
+    if not colls:
         return Taxonomy()
-    listing = ", ".join(f"{name} ({n})" for name, n, _ in subjects)
-    all_titles, titles, collections = await _design_sample(db)
-    # A small library gets a small shelf: 170 volumes want four bays, not eight.
-    max_top = max(2, min(MAX_TOP, len(all_titles) // 40))
-    per_sub = f"{max(3, len(all_titles) // 12)} to {max(8, len(all_titles) // 5)}"
-    names = [name for name, _, _ in subjects]
     own = client is None
     c = client or LLM()
+    designs: list[tuple[Collection, dict[str, Any]]] = []
     try:
-        design: dict[str, Any] = {}
-        for attempt in range(3):
-            if progress:
-                await progress(0, 1, "designing the shelves")
-            design = await c.structured(
-                providers.model_for("threads"),
-                TAXONOMY_PROMPT.format(
-                    max_top=max_top,
-                    max_sub=MAX_SUB,
-                    per_sub=per_sub,
-                    n=len(all_titles),
-                    titles=titles,
-                    subjects=listing,
-                    collections=collections,
-                ),
-                design_schema(max_top),
-                system=SYSTEM_LIBRARIAN,
-                instructions=TAXONOMY_PROMPT,
-                temperature=0.1 + 0.2 * attempt,
-                think=True,
-            )
-            if _taxonomy_is_sane(design, max_top):
-                log.info("taxonomy attempt %d accepted: %s", attempt, _top_names(design))
-                break
-            log.info("taxonomy attempt %d rejected: %s", attempt, _top_names(design))
-        design["shelves"] = (design.get("shelves") or [])[:max_top]
-        shelf_lines = []
-        subs: list[str] = []
-        for s in design.get("shelves") or []:
-            kids = [taxonomy.normalize_name(str(x)) for x in s.get("sub_shelves") or []]
-            kids = [k for k in kids if k]
-            subs.extend(kids)
-            shelf_lines.append(
-                f"- {taxonomy.normalize_name(str(s.get('name') or ''))} › " + " · ".join(kids)
-            )
-        subs = list(dict.fromkeys(subs))
-        folded: dict[str, str] = {}
-        if subs:
-            # One line of output per tag, so a big shelf is folded in batches: a
-            # thousand tags in one call ran past the output budget and came back as
-            # half a JSON document.
-            for i in range(0, len(names), FOLD_BATCH):
-                batch = names[i : i + FOLD_BATCH]
-                if progress:
-                    await progress(i, len(names), "folding the old subjects in")
-                assign = await c.structured(
-                    providers.model_for("threads"),
-                    ASSIGN_PROMPT.format(
-                        shelf="\n".join(shelf_lines), tags="\n".join(f"- {n}" for n in batch)
-                    ),
-                    assign_schema(batch, subs),
-                    system=SYSTEM_LIBRARIAN,
-                    temperature=0.1,
-                    num_predict=4000,  # one line per tag; the grammar is finite
-                )
-                got = assign.get("assignments") or []
-                log.info("fold: %d assignments for %d tags", len(got), len(batch))
-                for a in got:
-                    folded.setdefault(str(a.get("subject")), str(a.get("sub_shelf")))
-        out = {
-            "shelves": [
-                {
-                    "name": s.get("name"),
-                    "sub_shelves": [
-                        {
-                            "name": k,
-                            "absorbs": [
-                                n
-                                for n, sub in folded.items()
-                                if sub == taxonomy.normalize_name(str(k))
-                            ],
-                        }
-                        for k in s.get("sub_shelves") or []
-                    ],
-                }
-                for s in design.get("shelves") or []
-            ]
-        }
-        log.info(
-            "fold: %d tags absorbed; unmatched sub-shelf names: %s",
-            sum(len(k["absorbs"]) for s in out["shelves"] for k in s["sub_shelves"]),
-            sorted(
-                set(folded.values())
-                - {
-                    taxonomy.normalize_name(str(k))
-                    for s in design.get("shelves") or []
-                    for k in s.get("sub_shelves") or []
-                }
-            ),
-        )
+        for coll in colls:
+            designs.append((coll, await _design_one(db, c, coll, progress)))
     finally:
         if own:
             await c.aclose()
 
     # Clear the old structure; every canonical category is re-homed below.
     await db.execute(update(Category).values(parent_id=None))
-    await record_design(db)
     tx = Taxonomy()
     absorbed: set[uuid.UUID] = set()
-    top_names = {
-        taxonomy.normalize_name(str(s.get("name") or ""))
-        for s in (out.get("shelves") or [])[:MAX_TOP]
-    }
-    for shelf in (out.get("shelves") or [])[:MAX_TOP]:
-        top = await taxonomy.get_or_create(db, str(shelf.get("name") or ""))
-        if not top:
-            continue
-        top.parent_id = None
-        tx.tops[top.name] = []
-        tx.ids[top.name] = top.id
-        for sub in (shelf.get("sub_shelves") or [])[:MAX_SUB]:
-            name = taxonomy.normalize_name(str(sub.get("name") or ""))
-            if name in top_names or name in tx.ids:
-                # Belt and braces after the sanity check: a name that is also a top
-                # shelf, or already a sub-shelf elsewhere, is not a place.
-                log.info("sub-shelf %r dropped: it names a top shelf or another sub-shelf", name)
+    for coll, out in designs:
+        for shelf in (out.get("shelves") or [])[:MAX_TOP]:
+            top_name = taxonomy.normalize_name(str(shelf.get("name") or ""))
+            if top_name in tx.ids and top_name not in tx.tops:
+                log.info(
+                    "%s: top shelf %r dropped: it is a sub-shelf elsewhere", coll.name, top_name
+                )
                 continue
-            child = await taxonomy.get_or_create(db, name)
-            if not child or child.id == top.id:
+            top = await taxonomy.designate(db, top_name)
+            if not top:
                 continue
-            child.parent_id = top.id
-            child.canonical = True
-            for old_name in sub.get("absorbs") or []:
-                old = await taxonomy.get_or_create(db, str(old_name))
-                if old and old.id not in (child.id, top.id) and old.name not in tx.tops:
-                    await _fold(db, old, child)
-                    absorbed.add(old.id)
-            if child.name not in tx.tops[top.name]:
+            top.parent_id = None
+            # Two collections naming the same field share the shelf.
+            tx.tops.setdefault(top.name, [])
+            tx.ids[top.name] = top.id
+            tx.homes.setdefault(top.name, set()).add(coll.key)
+            for sub in (shelf.get("sub_shelves") or [])[:MAX_SUB]:
+                name = taxonomy.normalize_name(str(sub.get("name") or ""))
+                if not name or name in tx.ids:
+                    # A name that is a top shelf, or a sub-shelf already, is not a place.
+                    log.info("%s: sub-shelf %r dropped: the name is taken", coll.name, name)
+                    continue
+                child = await taxonomy.designate(db, name)
+                if not child or child.id == top.id:
+                    continue
+                child.parent_id = top.id
+                for old_name in sub.get("absorbs") or []:
+                    old = await taxonomy.get_or_create(db, str(old_name))
+                    if old and old.id not in (child.id, top.id) and old.name not in tx.tops:
+                        await _fold(db, old, child)
+                        absorbed.add(old.id)
                 tx.tops[top.name].append(child.name)
                 tx.ids[child.name] = child.id
+    await record_design(db, tx.homes)
     # A top shelf is a shelf, not a tag: nothing should sit on it directly.
     await db.execute(
         update(Document)
@@ -650,6 +712,18 @@ async def build_taxonomy(
     )
     await db.flush()
     return tx
+
+
+async def _collection_keys(db: AsyncSession, doc: Document) -> set[str]:
+    """Which collections' shelves a volume may be placed on: its cartridges', or the
+    local ones; a cartridge too small to have shelves of its own counts as local."""
+    rows = (
+        await db.execute(
+            text("select cartridge_id from cartridge_document where document_id = :d"),
+            {"d": doc.id},
+        )
+    ).all()
+    return {f"cart:{r[0]}" for r in rows} or {"local"}
 
 
 async def _collection_note(db: AsyncSession, doc: Document) -> str:
@@ -728,6 +802,7 @@ async def place_document(
     doc = (await db.execute(select(Document).where(Document.id == document_id))).scalar_one()
     summary, tags = await _summary_and_tags(db, doc)
     collection = await _collection_note(db, doc)
+    tx = tx.for_collections(await _collection_keys(db, doc))
     own = client is None
     c = client or LLM()
     try:

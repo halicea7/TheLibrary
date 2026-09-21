@@ -12,7 +12,7 @@ import time
 import uuid
 from typing import Any, ClassVar
 
-from arq import Retry
+from arq import Retry, func
 from arq.connections import RedisSettings
 from sqlalchemy import func, select, update
 
@@ -30,6 +30,11 @@ log = logging.getLogger(__name__)
 # Tier 1 on a long book legitimately runs for many minutes; ARQ's 300s default would
 # kill it partway through.
 JOB_TIMEOUT = 60 * 60 * 3
+# A rebuild of threads on a large shelf is thousands of summaries and judgements, wholesale
+# each time: at 1,600 volumes it ran past three hours, was killed, was retried from the
+# start, and would have looped like that all night. Its own bound, and the reshelve's,
+# is a day.
+LIBRARY_TIMEOUT = 60 * 60 * 24
 PAUSE_REQUEUE_SECONDS = 600  # a pause longer than this sends the job back to the queue
 PAUSE_RETRY_DEFER = 300
 POLL_SECONDS = 15
@@ -347,8 +352,8 @@ class WorkerSettings:
     functions: ClassVar[list] = [
         read_document,
         backfill,
-        build_library_layer,
-        reshelve_library,
+        func(build_library_layer, timeout=LIBRARY_TIMEOUT),
+        func(reshelve_library, timeout=LIBRARY_TIMEOUT),
         describe_figures_job,
     ]
     on_startup = _startup

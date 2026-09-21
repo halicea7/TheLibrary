@@ -14,11 +14,11 @@ from sse_starlette.sse import EventSourceResponse
 
 from library_agent.chat.answer import STANCES
 from library_agent.chat.session import get_or_create_conversation, run_turn
-from library_agent.config import settings
 from library_agent.db.models import Conversation, Message
 from library_agent.db.session import SessionDep, session_scope
 from library_agent.library.shelving import expand_category_ids
-from library_agent.llm.ollama import Ollama
+from library_agent.llm import providers
+from library_agent.llm.client import LLM
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -58,14 +58,12 @@ class MessageOut(BaseModel):
 
 @router.get("/chat/models")
 async def chat_models() -> dict[str, object]:
-    cfg = settings()
-    async with Ollama() as c:
-        thinking = {
-            name: await c.supports_thinking(name) for name in cfg.chat_model_options.values()
-        }
+    options = providers.chat_options()
+    async with LLM() as c:
+        thinking = {name: await c.supports_thinking(name) for name in options.values()}
     return {
-        "default": cfg.chat_model,
-        "options": cfg.chat_model_options,
+        "default": options["general"],
+        "options": options,
         # Which models can think. Thinking cannot be switched off cleanly on the ones that
         # can -- with think=false the model narrates its reasoning into the answer -- so the
         # client toggle is show/hide, never on/off.

@@ -203,6 +203,12 @@ A team's documentation comes in as its own cartridge (`./library import ~/docs -
 
 Ollama can be local or remote — every model call follows `LIBRARY_OLLAMA_URL`, which defaults to `localhost:11434`, so an SSH tunnel to a GPU box needs no configuration at all.
 
+### Other providers
+
+Ollama is the default and needs nothing set up. Any role can also run on a **provider**: anything that speaks the OpenAI chat-completions protocol — OpenAI, Anthropic's compatible endpoint, OpenRouter, Groq, Mistral, DeepSeek, LM Studio, vLLM, llama.cpp's server, or another Ollama's `/v1`. Add one in Settings › Providers with an id, a base URL ending in `/v1` and a key; **test** lists its models and has one answer, so a wrong key or URL shows at once. Its models then appear in the role dropdowns under Settings › Models, prefixed with the id — `openrouter:anthropic/claude-sonnet-4.5` — and a role pointed at one carries a *remote* mark. Roles are chat (general and technical), reading, threads (cluster summaries, conflict judging, shelving), vision and troubleshooting; a role left at *default* is whatever the environment says.
+
+Providers and assignments live in `~/.library-agent/providers.json`, readable by you alone; the API and the worker both pick a change up without a restart. Two things are deliberate. *Reading* is switchable but warns before it changes: artifacts record the model that wrote them, and a different reader means the next backfill re-reads the whole shelf at that model's price. *Embeddings* are not switchable at all — every vector is `bge-m3` at 1024 dimensions, and moving them is a re-embedding of everything. Structured output asks for `response_format: json_schema` and falls back to `json_object` with the schema in the prompt where a server refuses it; reasoning a provider streams (`reasoning_content`) shows as the murmur.
+
 ## What was measured
 
 Retrieval is evaluated on a generated question set (a question per gold passage, the answer known) with a ladder of configurations, so every stage earns its place. Re-run on the current corpus — 1,219 volumes, 57 questions, most of them from the security material:

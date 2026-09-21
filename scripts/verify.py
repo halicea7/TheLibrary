@@ -7,7 +7,15 @@ the reader, searches with and without filters, runs chat turns on both models (t
 follow-up rewriting, stances, citation verification), inspects the library layer, deletes
 the document and confirms nothing is orphaned. Takes a few minutes because it waits on
 the model. Set LIBRARY_TESTDOCS to a folder of already-shelved files for the import check."""
-import asyncio, json, os, pathlib, subprocess, sys, tempfile, time, uuid
+import asyncio
+import json
+import os
+import pathlib
+import subprocess
+import tempfile
+import time
+import uuid
+
 import httpx
 
 API = "http://127.0.0.1:8077"
@@ -142,7 +150,8 @@ async def main():
         ok("preview counts", pv["counts"]["documents"]==1 and pv["counts"]["chunks"]>=1 and pv["counts"]["originals"]==0, f"{pv['counts']}")
         ex = await c.post("/api/cartridges/export", json={"document_ids":[did],"level":"readings","name":"Verify Room","colour":"#8a3d5e"})
         ok("export returns a zip", ex.status_code==200 and ex.headers.get("content-type","").startswith("application/zip") and ex.content[:2]==b"PK", f"{len(ex.content)} bytes")
-        import zipfile, io
+        import io
+        import zipfile
         z = zipfile.ZipFile(io.BytesIO(ex.content)); names = z.namelist()
         ok("readings level ships no passages", "data/chunks.jsonl" in names and "sixty-five milliseconds" not in z.read("data/chunks.jsonl").decode() and not any(n.startswith("documents/") for n in names))
         cid = json.loads(z.read("cartridge.json"))["id"]

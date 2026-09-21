@@ -10,7 +10,11 @@ check that the librarian says so rather than inventing a source.
     uv run python scripts/consistency.py [--runs 3] [--model general|technical]
 """
 
-import argparse, asyncio, json, statistics, sys, time
+import argparse
+import asyncio
+import statistics
+import time
+
 import httpx
 
 API = "http://127.0.0.1:8077"

@@ -35,6 +35,8 @@ from library_agent.db.models import (
     OwnerKind,
     TargetKind,
 )
+from library_agent.llm import providers
+from library_agent.llm.client import LLM
 from library_agent.llm.embed import embed_texts
 from library_agent.llm.ollama import Ollama
 from library_agent.reading import genre as genre_mod
@@ -133,7 +135,7 @@ async def build_clusters(
 ) -> ClusterResult:
     cfg = settings()
     own = client is None
-    c = client or Ollama()
+    c = client or LLM()
     try:
         artifact_ids, doc_ids, texts, vectors = await _load_sections(db, c)
         if len(artifact_ids) < 6:
@@ -200,7 +202,7 @@ async def build_clusters(
                 genre_note = f"Note: {phrase}.\n" if phrase else ""
                 try:
                     out = await c.structured(
-                        cfg.reader_model,
+                        providers.model_for("threads"),
                         CLUSTER_PROMPT.format(members=members, genre_note=genre_note),
                         CLUSTER_SCHEMA,
                         temperature=0.0,
@@ -216,7 +218,7 @@ async def build_clusters(
                     # disagree, the cluster is shown.
                     try:
                         again = await c.structured(
-                            cfg.reader_model,
+                            providers.model_for("threads"),
                             CLUSTER_PROMPT.format(members=members, genre_note=genre_note),
                             CLUSTER_SCHEMA,
                             temperature=0.0,
@@ -246,7 +248,7 @@ async def build_clusters(
                         "claim_sources": [titles.get(doc_ids[i], "?") for i in idxs[:16]],
                         "genre": dom,
                     },
-                    model=cfg.reader_model,
+                    model=providers.model_for("threads"),
                     prompt_version=cfg.prompt_versions.get("cluster_summary", "v1"),
                     tier=1,
                 )

@@ -77,6 +77,7 @@ from library_agent.library.cartridge_design import (
     sanitize_art,
     store_art,
 )
+from library_agent.llm.client import LLM
 from library_agent.llm.embed import embed_texts
 from library_agent.llm.ollama import Ollama
 
@@ -1132,7 +1133,7 @@ async def import_cartridge(
     ]
     if any(items for _, items in pending):
         own = client is None
-        c = client or Ollama()
+        c = client or LLM()
         try:
             for kind, items in pending:
                 if not items:

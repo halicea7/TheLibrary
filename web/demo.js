@@ -226,6 +226,14 @@
     if (p.startsWith('/api/compose/')) { note(); return json({ ok: true }); }
     if (p === '/api/settings' && method === 'GET') return json(settings);
     if (p === '/api/settings/incidents' && method === 'GET') return json(incidents);
+    if (p === '/api/settings/providers' && method === 'GET') return json({ providers: [{ id: 'openrouter', name: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', has_key: true, key_tail: 'demo', headers: {} }], file: '~/.library-agent/providers.json', catalogue: { ollama: ['qwen3:30b-a3b', 'huihui_ai/qwen3-coder-abliterated:latest', 'qwen2.5vl:latest'], openrouter: ['openrouter:anthropic/claude-sonnet-4.5', 'openrouter:openai/gpt-5', 'openrouter:deepseek/deepseek-r1'] }, roles: [
+      { id: 'chat_general', label: 'Chat (general)', note: 'answers questions; switchable per conversation', model: 'qwen3:30b-a3b', default: 'qwen3:30b-a3b', overridden: false, remote: false },
+      { id: 'chat_technical', label: 'Chat (technical)', note: 'the coder model for technical questions', model: 'openrouter:anthropic/claude-sonnet-4.5', default: 'huihui_ai/qwen3-coder-abliterated:latest', overridden: true, remote: true },
+      { id: 'reading', label: 'Reading', note: 'Tier 1 and 2; artifacts record their model, so a different one re-reads the whole shelf on the next backfill', model: 'qwen3:30b-a3b', default: 'qwen3:30b-a3b', overridden: false, remote: false },
+      { id: 'threads', label: 'Threads', note: 'cluster summaries, conflict judging, shelving', model: 'qwen3:30b-a3b', default: 'qwen3:30b-a3b', overridden: false, remote: false },
+      { id: 'vision', label: 'Vision', note: "reads a PDF's figures; empty turns it off", model: 'qwen2.5vl:latest', default: 'qwen2.5vl:latest', overridden: false, remote: false },
+      { id: 'troubleshoot', label: 'Troubleshooting', note: 'reads an incident against the docs', model: 'huihui_ai/qwen3-coder-abliterated:latest', default: 'huihui_ai/qwen3-coder-abliterated:latest', overridden: false, remote: false }] });
+    if (p.match(/^\/api\/settings\/providers\/[^/]+\/test$/)) { note(); return json({ ok: true, models: ['anthropic/claude-sonnet-4.5', 'openai/gpt-5', 'deepseek/deepseek-r1'], model: 'anthropic/claude-sonnet-4.5', reply: 'ready', seconds: 0.8 }); }
     if (p.startsWith('/api/settings/')) { note(); return json({ ok: true }); }
     if (p === '/api/jobs') return json(jobs);
     if (p === '/api/jobs/state') return json({ paused: false });

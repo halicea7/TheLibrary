@@ -29,6 +29,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from library_agent.config import settings
 from library_agent.db.models import Incident
 from library_agent.db.session import session_scope
+from library_agent.llm import providers
+from library_agent.llm.client import LLM
 from library_agent.llm.ollama import Ollama
 
 log = logging.getLogger(__name__)
@@ -476,13 +478,12 @@ async def advise(db: AsyncSession, incident_id: uuid.UUID, *, client: Ollama | N
     inc = await db.get(Incident, incident_id)
     if not inc:
         raise KeyError("no such incident")
-    cfg = settings()
     query = f"{inc.kind} {inc.message} {inc.source} " + (inc.detail or "")[-600:]
     docs = relevant_docs(query)
     doc_text = "\n\n".join(f"[{h}]\n{p}" for h, p, _ in docs) or "(nothing relevant found)"
-    model = cfg.troubleshoot_model or cfg.chat_model_options.get("technical") or cfg.reader_model
+    model = providers.model_for("troubleshoot")
     own = client is None
-    c = client or Ollama()
+    c = client or LLM()
     try:
         out = await c.structured(
             model,

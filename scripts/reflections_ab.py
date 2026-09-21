@@ -12,18 +12,28 @@ the only difference is the notes. The judge sees both answers in random order.
     uv run python scripts/reflections_ab.py [--n 20] [--model general]
 """
 
-import argparse, asyncio, json, random, statistics, sys, uuid
+import argparse
+import asyncio
+import json
+import random
+import statistics
+import sys
+
 from sqlalchemy import select, text
 
 sys.path.insert(0, "src")
-from library_agent.chat import answer as answer_mod  # noqa: E402
-from library_agent.chat.citations import Source, build_sources, citation_validity, validate  # noqa: E402
-from library_agent.config import settings  # noqa: E402
-from library_agent.db.models import Artifact, ArtifactKind, Chunk, Document  # noqa: E402
-from library_agent.db.session import session_scope  # noqa: E402
-from library_agent.llm.ollama import Ollama  # noqa: E402
-from library_agent.reading.prompts import SYSTEM_LIBRARIAN  # noqa: E402
-from library_agent.retrieval.pipeline import CHAT_RETRIEVAL, retrieve  # noqa: E402
+from library_agent.chat import answer as answer_mod
+from library_agent.chat.citations import (
+    build_sources,
+    citation_validity,
+    validate,
+)
+from library_agent.config import settings
+from library_agent.db.models import Artifact, ArtifactKind
+from library_agent.db.session import session_scope
+from library_agent.llm.client import LLM
+from library_agent.reading.prompts import SYSTEM_LIBRARIAN
+from library_agent.retrieval.pipeline import CHAT_RETRIEVAL, retrieve
 
 QGEN = {"type": "object", "properties": {"question": {"type": "string", "maxLength": 200}}, "required": ["question"]}
 QGEN_PROMPT = """Here is a passage from a document titled "{title}", and the library's note on it.
@@ -78,7 +88,7 @@ async def main():
     model = cfg.chat_model_options.get(a.model, a.model)
     rnd = random.Random(a.seed)
 
-    async with Ollama() as client, session_scope() as db:
+    async with LLM() as client, session_scope() as db:
         # Passages that have a note, from annotated volumes.
         rows = (await db.execute(text("""
             select c.id as chunk_id, c.text, d.title, a.text as note

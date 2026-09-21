@@ -9,9 +9,9 @@ from sqlalchemy import text
 
 from library_agent.config import settings
 from library_agent.db.session import session_scope
+from library_agent.llm.client import LLM
 from library_agent.llm.embed import embed_query
 from library_agent.llm.lease import reading_may_proceed, redis_client
-from library_agent.llm.ollama import Ollama
 
 
 async def main() -> int:
@@ -60,7 +60,7 @@ async def main() -> int:
             await r.aclose()
 
     async def _ollama():
-        async with Ollama() as c:
+        async with LLM() as c:
             loaded = await c.loaded_models()
             return f"ok (resident: {', '.join(loaded) or 'none'})"
 

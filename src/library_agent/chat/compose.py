@@ -31,9 +31,10 @@ from library_agent.config import settings
 from library_agent.db.models import Document
 from library_agent.db.session import session_scope
 from library_agent.library.cartridge import cartridge_provenance
+from library_agent.llm import providers
+from library_agent.llm.client import LLM
 from library_agent.llm.lease import mark_chat_active, mark_chat_done, redis_client
 from library_agent.llm.liveness import Busy, gate, liveness
-from library_agent.llm.ollama import Ollama
 from library_agent.reading.prompts import SYSTEM_LIBRARIAN
 from library_agent.retrieval.hybrid import SearchHit
 from library_agent.retrieval.pipeline import CHAT_RETRIEVAL, retrieve
@@ -171,10 +172,10 @@ async def compose(
     section_done) → done. The lease is held throughout: this is one long piece of work
     and background reading yields to it like it would to a chat."""
     cfg = settings()
-    model = model or cfg.chat_model
+    model = model or providers.model_for("chat_general")
     n_sections, words = LENGTHS.get(length, LENGTHS["medium"])
     redis = redis_client()
-    client = Ollama()
+    client = LLM()
     comp = Composition(brief=brief)
     held = False
     try:

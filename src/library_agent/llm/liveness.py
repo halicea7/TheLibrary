@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from library_agent.config import settings
+from library_agent.llm import providers
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ class Liveness:
                 r = await c.post(
                     "/api/generate",
                     json={
-                        "model": cfg.chat_model,
+                        "model": providers.ollama_probe_model(),
                         "prompt": "Reply with the single word: ready",
                         "stream": False,
                         "think": False,

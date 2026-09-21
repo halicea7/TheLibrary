@@ -13,7 +13,6 @@ existed."""
 
 from __future__ import annotations
 
-import base64
 import logging
 import re
 import uuid
@@ -26,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from library_agent.config import settings
 from library_agent.db.models import CHUNK_NAMESPACE, Chunk, Document, Embedding, OwnerKind, Section
 from library_agent.ingest import figures as fig
+from library_agent.llm import providers
+from library_agent.llm.client import LLM
 from library_agent.llm.embed import embed_texts
 from library_agent.llm.ollama import Ollama
 
@@ -56,7 +57,8 @@ async def describe_figures(
 ) -> FigureResult:
     cfg = settings()
     res = FigureResult()
-    if not cfg.vision_model:
+    vision = providers.model_for("vision")
+    if not vision:
         return res
     doc = await db.get(Document, document_id)
     if not doc or doc.readings_only or not doc.source_path:
@@ -87,7 +89,7 @@ async def describe_figures(
         return best or (sections[0] if sections else None)
 
     own = client is None
-    c = client or Ollama()
+    c = client or LLM()
     texts: list[tuple[fig.Figure, str]] = []
     try:
         for f in figs:
@@ -97,20 +99,15 @@ async def describe_figures(
             if not png:
                 continue
             try:
-                r = await c._client.post(
-                    "/api/generate",
-                    json={
-                        "model": cfg.vision_model,
-                        "prompt": PROMPT.format(title=doc.title, caption=f.caption or "(none)"),
-                        "images": [base64.b64encode(png.read_bytes()).decode()],
-                        "stream": False,
-                        "keep_alive": cfg.keep_alive,
-                        "options": {"temperature": 0.2, "num_predict": 260},
-                    },
-                    timeout=180,
+                desc = " ".join(
+                    (
+                        await c.describe_image(
+                            vision,
+                            PROMPT.format(title=doc.title, caption=f.caption or "(none)"),
+                            png.read_bytes(),
+                        )
+                    ).split()
                 )
-                r.raise_for_status()
-                desc = " ".join((r.json().get("response") or "").split())
             except Exception:
                 log.warning(
                     "figure %s of %s: vision call failed", f.n, doc.title[:40], exc_info=True

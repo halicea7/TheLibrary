@@ -1134,3 +1134,25 @@ simulation no longer restarts on a whim: settled positions are kept in the brows
 the cloud opens where it was left; newcomers get a half-strength settle, a rebuilt thread
 set a nudge, and a full shake only when most of the cloud is new. Without WebGL the 2D
 drawing stands as it was.
+
+**Other providers.** "Ollama is the default and preference but I'd like to have options."
+A provider is anything speaking the OpenAI chat-completions protocol, named once in
+Settings and addressed by prefix: `openrouter:anthropic/claude-sonnet-4.5` goes to the
+provider called `openrouter`, a name with no configured prefix goes to Ollama as it always
+did (so `qwen3:30b-a3b` still parses as an Ollama name). `llm/client.py::LLM` is the one
+client the codebase constructs now -- an Ollama client that routes by prefix to
+`llm/openai_compat.py`, which offers the same generate / structured / chat_stream /
+describe_image surface. The structured-output guards (placeholders, prompt echoes) moved
+out of the Ollama class into `parse_structured` so both backends judge replies the same
+way; the OpenAI side asks for `json_schema` and learns per provider to fall back to
+`json_object` with the schema in the prompt. Roles (`llm/providers.py::ROLES`) replace the
+scattered `cfg.reader_model` reads: chat general/technical, reading, threads, vision,
+troubleshooting, each with its environment default and an optional override; the file
+`~/.library-agent/providers.json` (0600) holds providers and overrides and is re-read on
+mtime, so the worker sees a change without a restart. Reading is switchable with a warning
+(artifacts record their model; a different reader re-reads the shelf), embeddings are not
+(a re-embedding of everything). The liveness probe now picks a model that is actually on
+Ollama, so a chat pointed at a provider is not refused because Ollama lacks that name.
+Tested against an in-process fake server (key, json_schema fallback, streaming with
+reasoning, the routes) and live against Ollama's own `/v1` as a provider, which is also a
+fair way to try the feature without a key.

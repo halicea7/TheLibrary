@@ -4,18 +4,22 @@ each value with the variable that changes it."""
 
 from __future__ import annotations
 
+import time
 import uuid
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from library_agent.config import settings
 from library_agent.db.models import Document
 from library_agent.db.purge import count_orphans, gc_orphan_vectors, gc_store
 from library_agent.db.session import SessionDep
-from library_agent.llm import rerank
+from library_agent.llm import providers, rerank
 from library_agent.llm.liveness import gate, liveness
+from library_agent.llm.openai_compat import OpenAICompat
 from library_agent.ops import incidents
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -64,38 +68,12 @@ async def show(db: SessionDep) -> dict:
         },
         "models": [
             item(
-                "Reading",
-                cfg.reader_model,
-                "READER_MODEL",
-                "pinned; artifacts record which model wrote them",
-            ),
-            item(
-                "Chat (general)",
-                cfg.chat_model_options.get("general", cfg.chat_model),
-                "CHAT_MODEL_OPTIONS",
-                "switchable per conversation",
-            ),
-            item(
-                "Chat (technical)",
-                cfg.chat_model_options.get("technical"),
-                "CHAT_MODEL_OPTIONS",
-                "",
-            ),
-            item(
                 "Embeddings",
                 f"{cfg.embed_model} · {cfg.embed_dim}d",
                 "EMBED_MODEL",
                 "changing it means re-embedding everything",
             ),
             item("Reranker", cfg.reranker_model, "RERANKER_MODEL", "runs locally, torch/MPS"),
-            item(
-                "Troubleshooting",
-                cfg.troubleshoot_model
-                or cfg.chat_model_options.get("technical")
-                or cfg.reader_model,
-                "TROUBLESHOOT_MODEL",
-                "reads the incident against the docs",
-            ),
             item("Keep alive", cfg.keep_alive, "KEEP_ALIVE", "-1 pins models resident"),
         ],
         "retrieval": [
@@ -125,6 +103,140 @@ async def show(db: SessionDep) -> dict:
         },
         "incidents_open": await incidents.open_count(db),
     }
+
+
+# --- providers and the models each role runs on -------------------------------------
+
+_catalogue: dict[str, tuple[float, list[str]]] = {}
+
+
+async def _models_on(pid: str, prov: providers.Provider | None) -> list[str]:
+    """What a backend offers, remembered for a minute; a backend that will not answer
+    offers nothing rather than delaying the page."""
+    now = time.monotonic()
+    hit = _catalogue.get(pid)
+    if hit and now - hit[0] < 60:
+        return hit[1]
+    names: list[str] = []
+    try:
+        if prov is None:
+            async with httpx.AsyncClient(base_url=settings().ollama_url, timeout=3) as c:
+                r = await c.get("/api/tags")
+                names = sorted(m["name"] for m in r.json().get("models", []))
+        else:
+            async with OpenAICompat(prov) as c:
+                names = await c.models()
+    except Exception:  # noqa: BLE001
+        names = []
+    _catalogue[pid] = (now, names)
+    return names
+
+
+@router.get("/providers")
+async def list_providers() -> dict:
+    cfg = providers.load()
+    catalogue = {"ollama": await _models_on("ollama", None)}
+    for pid, prov in cfg.providers.items():
+        catalogue[pid] = [f"{pid}:{m}" for m in await _models_on(pid, prov)]
+    roles = []
+    for rid, meta in providers.ROLES.items():
+        model = providers.model_for(rid)
+        roles.append(
+            {
+                "id": rid,
+                "label": meta["label"],
+                "note": meta["note"],
+                "model": model,
+                "default": providers.default_for(rid),
+                "overridden": rid in cfg.models,
+                "remote": providers.is_remote(model) if model else False,
+            }
+        )
+    return {
+        "providers": [p.public() for p in cfg.providers.values()],
+        "roles": roles,
+        "catalogue": catalogue,
+        "file": str(providers.path()).replace(str(Path.home()), "~"),
+    }
+
+
+class ProviderIn(BaseModel):
+    name: str = ""
+    base_url: str
+    # Omitted or null keeps the key already on file; "" clears it.
+    api_key: str | None = None
+    headers: dict[str, str] = {}
+
+
+@router.put("/providers/{pid}")
+async def put_provider(pid: str, body: ProviderIn) -> dict:
+    if not providers.valid_id(pid):
+        raise HTTPException(422, "an id is lowercase letters, digits and dashes, 32 at most")
+    if pid == "ollama":
+        raise HTTPException(422, "ollama is the default and is set by LIBRARY_OLLAMA_URL")
+    base = body.base_url.strip().rstrip("/")
+    if not base.startswith(("http://", "https://")):
+        raise HTTPException(422, "the base URL starts with http:// or https://")
+    cfg = providers.load()
+    old = cfg.providers.get(pid)
+    key = body.api_key if body.api_key is not None else (old.api_key if old else "")
+    cfg.providers[pid] = providers.Provider(
+        id=pid, name=body.name.strip() or pid, base_url=base, api_key=key, headers=body.headers
+    )
+    providers.save(cfg)
+    _catalogue.pop(pid, None)
+    return cfg.providers[pid].public()
+
+
+@router.delete("/providers/{pid}")
+async def delete_provider(pid: str) -> dict:
+    cfg = providers.load()
+    if pid not in cfg.providers:
+        raise HTTPException(404, "no such provider")
+    del cfg.providers[pid]
+    # Roles that pointed at it go back to their defaults.
+    freed = [r for r, m in cfg.models.items() if m.startswith(pid + ":")]
+    for r in freed:
+        del cfg.models[r]
+    providers.save(cfg)
+    _catalogue.pop(pid, None)
+    return {"deleted": pid, "roles_reset": freed}
+
+
+@router.post("/providers/{pid}/test")
+async def test_provider(pid: str, model: str | None = None) -> dict:
+    prov = providers.load().providers.get(pid)
+    if not prov:
+        raise HTTPException(404, "no such provider")
+    if model and model.startswith(pid + ":"):
+        model = model[len(pid) + 1 :]
+    t0 = time.monotonic()
+    async with OpenAICompat(prov) as c:
+        out = await c.probe(model)
+    out["seconds"] = round(time.monotonic() - t0, 2)
+    if out["models"]:
+        _catalogue[pid] = (time.monotonic(), out["models"])
+    return out
+
+
+@router.put("/models")
+async def put_models(body: dict[str, str | None]) -> dict:
+    """Assign roles: {role: "model"} to override, {role: null} to return to the default.
+    Reading is included on purpose and the page says what changing it costs."""
+    cfg = providers.load()
+    for role, model in body.items():
+        if role not in providers.ROLES:
+            raise HTTPException(422, f"no role called {role}")
+        if model is None:
+            cfg.models.pop(role, None)
+            continue
+        model = model.strip()
+        prov, _ = providers.split(model)
+        if ":" in model and prov is None and model.split(":", 1)[0] in cfg.providers:
+            raise HTTPException(422, f"{model} names no model on that provider")
+        cfg.models[role] = model
+    providers.save(cfg)
+    return {r: providers.model_for(r) for r in providers.ROLES}
 
 
 @router.post("/gc")

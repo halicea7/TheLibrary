@@ -35,19 +35,9 @@ async def test_figures_become_passages_and_replace_on_rerun(db, paper, monkeypat
     doc.source_path = str(paper)
     await db.flush()
 
-    class FakeResp:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"response": "A line chart of recall rising with depth, flattening past twenty."}
-
-    class FakeHttp:
-        async def post(self, *a, **k):
-            return FakeResp()
-
     class FakeClient:
-        _client = FakeHttp()
+        async def describe_image(self, model, prompt, png, **kw):
+            return "A line chart of recall rising with depth, flattening past twenty."
 
         async def embed(self, texts, model=None):
             return [[0.01] * 1024 for _ in texts]

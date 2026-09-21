@@ -31,7 +31,6 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from library_agent.config import settings
 from library_agent.db.models import (
     Artifact,
     ArtifactKind,
@@ -43,6 +42,8 @@ from library_agent.db.models import (
     TargetKind,
 )
 from library_agent.library import taxonomy
+from library_agent.llm import providers
+from library_agent.llm.client import LLM
 from library_agent.llm.ollama import Ollama
 from library_agent.reading.prompts import SYSTEM_LIBRARIAN
 
@@ -441,12 +442,12 @@ async def build_taxonomy(db: AsyncSession, *, client: Ollama | None = None) -> T
     per_sub = f"{max(3, len(all_titles) // 12)} to {max(8, len(all_titles) // 5)}"
     names = [name for name, _, _ in subjects]
     own = client is None
-    c = client or Ollama()
+    c = client or LLM()
     try:
         design: dict[str, Any] = {}
         for attempt in range(3):
             design = await c.structured(
-                settings().reader_model,
+                providers.model_for("threads"),
                 TAXONOMY_PROMPT.format(
                     max_top=max_top,
                     max_sub=MAX_SUB,
@@ -478,7 +479,7 @@ async def build_taxonomy(db: AsyncSession, *, client: Ollama | None = None) -> T
         folded: dict[str, str] = {}
         if subs:
             assign = await c.structured(
-                settings().reader_model,
+                providers.model_for("threads"),
                 ASSIGN_PROMPT.format(
                     shelf="\n".join(shelf_lines), tags="\n".join(f"- {n}" for n in names)
                 ),
@@ -613,10 +614,10 @@ async def place_document(
     doc = (await db.execute(select(Document).where(Document.id == document_id))).scalar_one()
     summary, tags = await _summary_and_tags(db, doc)
     own = client is None
-    c = client or Ollama()
+    c = client or LLM()
     try:
         out = await c.structured(
-            settings().reader_model,
+            providers.model_for("threads"),
             PLACE_PROMPT.format(
                 shelf=tx.render(),
                 title=doc.title,
@@ -721,7 +722,7 @@ async def split_crowded(
             n = len(docs)
             lo, hi = 3, max(4, min(8, -(-n // 20)))
             out = await client.structured(
-                settings().reader_model,
+                providers.model_for("threads"),
                 SPLIT_PROMPT.format(
                     top=top,
                     sub=sub,
@@ -863,7 +864,7 @@ async def reshelve(
     if category_id:
         rebuild = False
     own = client is None
-    c = client or Ollama()
+    c = client or LLM()
     res = ReshelveResult()
     try:
         tx = await load_taxonomy(db)

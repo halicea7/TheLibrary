@@ -31,8 +31,8 @@ from library_agent.config import settings
 from library_agent.db.models import Chunk, Document, Embedding
 from library_agent.db.purge import count_orphans
 from library_agent.db.session import SessionDep, session_scope
+from library_agent.llm.client import LLM
 from library_agent.llm.liveness import gate, liveness
-from library_agent.llm.ollama import Ollama
 from library_agent.ops import incidents
 
 log = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ async def health(db: SessionDep) -> HealthOut:
     # every model call fails. Say so plainly rather than showing an empty model list.
     reachable = True
     try:
-        async with Ollama() as c:
+        async with LLM() as c:
             resident = await c.loaded_models()
     except Exception:  # noqa: BLE001 - health must report, not raise
         resident, reachable = [], False

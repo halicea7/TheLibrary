@@ -14,10 +14,10 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from library_agent.chat import compose as comp
-from library_agent.config import settings
 from library_agent.db.session import SessionDep
 from library_agent.ingest.tier0 import ingest
 from library_agent.library.shelving import expand_category_ids
+from library_agent.llm import providers
 
 router = APIRouter(prefix="/api/compose", tags=["compose"])
 
@@ -41,8 +41,7 @@ async def compose_stream(req: ComposeIn, db: SessionDep) -> EventSourceResponse:
     if req.length not in comp.LENGTHS:
         raise HTTPException(422, f"length is one of {sorted(comp.LENGTHS)}")
     cats = await expand_category_ids(db, req.category_ids) if req.category_ids else None
-    cfg = settings()
-    model = cfg.chat_model_options.get(req.model or "", req.model) if req.model else None
+    model = providers.chat_options().get(req.model or "", req.model) if req.model else None
 
     async def events() -> AsyncIterator[dict]:
         async for ev in comp.compose(

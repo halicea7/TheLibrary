@@ -29,6 +29,8 @@ from library_agent.db.models import (
 )
 from library_agent.ingest.chunk import build_context_prefix
 from library_agent.library import taxonomy
+from library_agent.llm import providers
+from library_agent.llm.client import LLM
 from library_agent.llm.embed import embed_texts
 from library_agent.llm.ollama import Ollama
 from library_agent.reading import genre as genre_mod
@@ -110,13 +112,12 @@ async def _upsert_artifact(
 
 async def stale_documents(db: AsyncSession) -> list[uuid.UUID]:
     """Documents whose Tier 1 artifacts predate the current prompt versions or model."""
-    cfg = settings()
     rows = (
         await db.execute(
             select(Artifact.target_id).where(
                 Artifact.kind == ArtifactKind.DOCUMENT_SUMMARY,
                 (Artifact.prompt_version != _version("document_summary"))
-                | (Artifact.model != cfg.reader_model),
+                | (Artifact.model != providers.model_for("reading")),
             )
         )
     ).scalars()
@@ -143,7 +144,7 @@ async def run_tier1(
     force: bool = False,
 ) -> Tier1Result:
     cfg = settings()
-    model = cfg.reader_model
+    model = providers.model_for("reading")
 
     doc = (await db.execute(select(Document).where(Document.id == document_id))).scalar_one()
     sections = list(
@@ -159,7 +160,7 @@ async def run_tier1(
         raise ValueError(f"document {document_id} has no sections; run Tier 0 first")
 
     own = client is None
-    c = client or Ollama()
+    c = client or LLM()
     try:
         full_text = await _document_text(db, document_id)
         toc = "\n".join(

@@ -4,6 +4,7 @@ starving an interactive chat of headroom."""
 from __future__ import annotations
 
 from library_agent.config import settings
+from library_agent.llm.client import LLM
 from library_agent.llm.ollama import Ollama
 
 BATCH = 32
@@ -13,7 +14,7 @@ async def embed_texts(texts: list[str], client: Ollama | None = None) -> list[li
     if not texts:
         return []
     own = client is None
-    c = client or Ollama()
+    c = client or LLM()
     try:
         out: list[list[float]] = []
         for i in range(0, len(texts), BATCH):

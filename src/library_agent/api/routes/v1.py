@@ -22,6 +22,7 @@ from library_agent.config import settings
 from library_agent.db.models import Cartridge, CartridgeDocument, Category, Document
 from library_agent.db.session import SessionDep, session_scope
 from library_agent.library.shelving import expand_category_ids
+from library_agent.llm import providers
 from library_agent.retrieval.pipeline import RetrievalConfig, retrieve
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
@@ -106,10 +107,9 @@ async def _subject_ids(db, names: list[str]) -> list[uuid.UUID]:
 
 
 def _model(name: str | None) -> str | None:
-    cfg = settings()
     if not name:
         return None
-    return cfg.chat_model_options.get(name, name)
+    return providers.chat_options().get(name, name)
 
 
 def _caller(request: Request) -> str:

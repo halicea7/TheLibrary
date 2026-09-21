@@ -18,7 +18,7 @@ from library_agent.db.session import session_scope
 from library_agent.ingest import dedup
 from library_agent.ingest.extract import SUPPORTED, content_hash
 from library_agent.ingest.tier0 import ingest
-from library_agent.llm.ollama import Ollama
+from library_agent.llm.client import LLM
 
 
 def looks_like_prose(path: Path, *, sample_bytes: int = 6000) -> bool:
@@ -143,7 +143,7 @@ async def run(
                 )
             )
 
-    async with Ollama() as client:
+    async with LLM() as client:
         for i, path in enumerate(files, 1):
             # Cheap pre-check so re-running over the same tree is nearly free.
             async with session_scope() as db:

@@ -29,6 +29,8 @@ from library_agent.db.models import (
     Section,
     TargetKind,
 )
+from library_agent.llm import providers
+from library_agent.llm.client import LLM
 from library_agent.llm.embed import embed_texts
 from library_agent.llm.ollama import Ollama
 from library_agent.reading import prompts
@@ -70,7 +72,7 @@ async def run_tier2(
     gate=None,
 ) -> Tier2Result:
     cfg = settings()
-    model = cfg.deep_reader_model
+    model = providers.load().models.get("reading") or cfg.deep_reader_model
 
     doc = (await db.execute(select(Document).where(Document.id == document_id))).scalar_one()
     if doc.tier < 1:
@@ -88,7 +90,7 @@ async def run_tier2(
     orientation = await _orientation(db, document_id)
 
     own = client is None
-    c = client or Ollama()
+    c = client or LLM()
     made = skipped = 0
     previous = ""
     try:

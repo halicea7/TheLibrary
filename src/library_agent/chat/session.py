@@ -19,9 +19,10 @@ from library_agent.config import settings
 from library_agent.db.models import Conversation, Document, Message
 from library_agent.db.session import session_scope
 from library_agent.library.cartridge import cartridge_provenance
+from library_agent.llm import providers
+from library_agent.llm.client import LLM
 from library_agent.llm.lease import mark_chat_active, mark_chat_done, redis_client
 from library_agent.llm.liveness import Busy, gate, liveness
-from library_agent.llm.ollama import Ollama
 from library_agent.ops.incidents import record_exception
 from library_agent.retrieval.hybrid import SearchHit
 from library_agent.retrieval.pipeline import hits_for_chunks, retrieve
@@ -86,7 +87,7 @@ async def run_turn(
     and `seed` let the JSON API ask for cooler or reproducible answers."""
     cfg = settings()
     redis = redis_client()
-    client = Ollama()
+    client = LLM()
     state = TurnState(question=question)
     held = False
     lvl = effort_mod.get(effort)
@@ -118,7 +119,7 @@ async def run_turn(
             conv = (
                 await db.execute(select(Conversation).where(Conversation.id == conversation_id))
             ).scalar_one()
-            model = conv.model or cfg.chat_model
+            model = conv.model or providers.model_for("chat_general")
             conversational = conv.conversational
             category_ids = [uuid.UUID(x) for x in conv.category_ids] if conv.category_ids else None
             cartridge_ids = (

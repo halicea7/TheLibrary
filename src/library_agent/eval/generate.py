@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from library_agent.config import settings
 from library_agent.db.models import Chunk, Document, EvalQuestion
+from library_agent.llm.client import LLM
 from library_agent.llm.ollama import Ollama
 
 log = logging.getLogger(__name__)
@@ -130,7 +131,7 @@ async def generate_questions(
         await db.execute(delete(EvalQuestion).where(EvalQuestion.suite == suite))
 
     own = client is None
-    c = client or Ollama()
+    c = client or LLM()
     created: list[EvalQuestion] = []
     try:
         for r in picked:

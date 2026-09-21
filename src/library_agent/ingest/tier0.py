@@ -33,6 +33,7 @@ from library_agent.ingest import dedup
 from library_agent.ingest.chunk import chunk_document
 from library_agent.ingest.extract import content_hash, extract
 from library_agent.ingest.structure import build_sections
+from library_agent.llm.client import LLM
 from library_agent.llm.embed import embed_texts
 from library_agent.llm.ollama import Ollama
 
@@ -98,7 +99,7 @@ async def ingest(
         raise ValueError(f"no extractable text in {filename} (needs_ocr={ex.needs_ocr})")
 
     own_client = client is None
-    c = client or Ollama()
+    c = client or LLM()
     try:
         # Prefix is embedded with the chunk: that is the whole point of contextual retrieval.
         vectors = await embed_texts([f"{k.context_prefix}\n\n{k.text}" for k in chunks], c)

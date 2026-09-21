@@ -19,8 +19,8 @@ from sqlalchemy import func, select, update
 from library_agent.config import settings
 from library_agent.db.models import Document, Job, JobState
 from library_agent.db.session import session_scope
+from library_agent.llm.client import LLM
 from library_agent.llm.lease import PAUSED_KEY, reading_may_proceed, redis_client
-from library_agent.llm.ollama import Ollama
 from library_agent.ops.incidents import record_exception
 from library_agent.reading.tier1 import run_tier1
 from library_agent.reading.tier2 import run_tier2
@@ -88,7 +88,7 @@ async def read_document(ctx: dict, document_id: str, job_id: str, tier: int = 1)
         await _set_job(jid, progress_current=current, progress_total=total)
 
     try:
-        async with Ollama() as client, session_scope() as db:
+        async with LLM() as client, session_scope() as db:
             if tier >= 2:
                 # Annotation needs the orientation card from Tier 1; run it first if absent.
                 doc = await db.get(Document, did)
@@ -188,7 +188,7 @@ async def build_library_layer(
         db.add(job)
         await db.flush()
         jid = job.id
-    async with Ollama() as client:
+    async with LLM() as client:
         for n, k in enumerate(kinds):
             await _set_job(jid, progress_current=0, progress_total=1, yielded_reason=k)
 
@@ -240,7 +240,7 @@ async def reshelve_library(
         await _set_job(jid, progress_current=current, progress_total=total)
 
     try:
-        async with Ollama() as client, session_scope() as db:
+        async with LLM() as client, session_scope() as db:
             r = await reshelve(
                 db,
                 client=client,
@@ -294,7 +294,7 @@ async def describe_figures_job(ctx: dict, document_id: str, job_id: str) -> dict
     did, jid = uuid.UUID(document_id), uuid.UUID(job_id)
     await _set_job(jid, state=JobState.RUNNING)
     try:
-        async with Ollama() as client, session_scope() as db:
+        async with LLM() as client, session_scope() as db:
             r = await describe_figures(db, did, client=client, gate=_make_gate(jid))
         await _set_job(jid, state=JobState.DONE, yielded_reason=None)
         return {"document_id": document_id, "figures": r.figures, "described": r.described}

@@ -52,6 +52,33 @@ def size_context(prompt_chars: int, *, reserve_tokens: int = 3072, floor: int = 
     return ctx
 
 
+def parse_structured(
+    raw: str, schema: dict[str, Any], instructions: str | None = None
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Parse a structured reply and judge it. Returns (parsed, None) when it is usable,
+    else (None, why): "json" for unparseable, "placeholder" for schema-shaped filler,
+    "echo" for a field copied from the instructions. Shared by every backend, since
+    small models fail the same ways wherever they run."""
+    parsed: dict[str, Any] | None = None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        start, end = raw.find("{"), raw.rfind("}")
+        if start != -1 and end > start:
+            try:
+                parsed = json.loads(raw[start : end + 1])
+            except json.JSONDecodeError:
+                parsed = None
+    if not isinstance(parsed, dict):
+        return None, "json"
+    required = list(schema.get("required") or parsed.keys())
+    if any(is_placeholder(parsed.get(k)) for k in required):
+        return None, "placeholder"
+    if instructions and any(echoes_prompt(parsed.get(k), instructions) for k in required):
+        return None, "echo"
+    return parsed, None
+
+
 # Per model: does it support the `think` parameter? Sending think=true to a model that
 # lacks it is a hard 400 ("does not support thinking"), which is exactly what happened
 # when the non-thinking coder model was selected in chat. Cached for the process.
@@ -173,32 +200,19 @@ class Ollama:
                     num_predict=num_predict,
                     seed=seed,
                 )
-            parsed: dict[str, Any] | None = None
-            try:
-                parsed = json.loads(raw)
-            except json.JSONDecodeError as exc:
-                last = exc
-                start, end = raw.find("{"), raw.rfind("}")
-                if start != -1 and end > start:
-                    try:
-                        parsed = json.loads(raw[start : end + 1])
-                    except json.JSONDecodeError:
-                        parsed = None
+            parsed, why = parse_structured(raw, schema, instructions)
             if parsed is not None:
-                required = list(schema.get("required") or parsed.keys())
-                if any(is_placeholder(parsed.get(k)) for k in required):
-                    last = OllamaError("model returned placeholder values")
-                    ctx = min(ctx * 2, 65536)  # almost always a context squeeze
-                    continue
-                if instructions and any(
-                    echoes_prompt(parsed.get(k), instructions) for k in required
-                ):
-                    # Not a context problem; a sampling one. Nudge temperature so the
-                    # retry does not reproduce the same echo.
-                    last = OllamaError("model echoed the prompt into a field")
-                    temperature = min(temperature + 0.2, 0.7)
-                    continue
                 return parsed
+            if why == "json":
+                last = OllamaError("model returned malformed JSON")
+            elif why == "placeholder":
+                last = OllamaError("model returned placeholder values")
+                ctx = min(ctx * 2, 65536)  # almost always a context squeeze
+            else:
+                # Not a context problem; a sampling one. Nudge temperature so the
+                # retry does not reproduce the same echo.
+                last = OllamaError("model echoed the prompt into a field")
+                temperature = min(temperature + 0.2, 0.7)
         raise OllamaError(f"model {model} returned unusable output: {last}")
 
     async def _generate_thinking(
@@ -278,6 +292,34 @@ class Ollama:
                     yield "content", piece
                 if chunk.get("done"):
                     return
+
+    async def describe_image(
+        self,
+        model: str,
+        prompt: str,
+        png: bytes,
+        *,
+        temperature: float = 0.2,
+        num_predict: int = 260,
+        timeout: float = 180.0,
+    ) -> str:
+        """One image, one question, plain text back."""
+        import base64
+
+        r = await self._client.post(
+            "/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "images": [base64.b64encode(png).decode()],
+                "stream": False,
+                "keep_alive": settings().keep_alive,
+                "options": {"temperature": temperature, "num_predict": num_predict},
+            },
+            timeout=timeout,
+        )
+        r.raise_for_status()
+        return r.json().get("response") or ""
 
     async def supports_thinking(self, model: str) -> bool:
         if model not in _THINKING:

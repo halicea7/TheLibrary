@@ -17,7 +17,7 @@ from library_agent.db.models import EvalQuestion, EvalResult, EvalRun
 from library_agent.db.session import session_scope
 from library_agent.eval.generate import SUITE_RETRIEVAL, generate_questions
 from library_agent.eval.metrics import RetrievalMetrics
-from library_agent.llm.ollama import Ollama
+from library_agent.llm.client import LLM
 from library_agent.retrieval.pipeline import LADDER, RetrievalConfig, retrieve
 
 KS = (1, 3, 5, 10)
@@ -37,7 +37,7 @@ async def run_config(
     started = time.time()
     per_question: list[tuple[EvalQuestion, int | None]] = []
 
-    async with Ollama() as client, session_scope() as db:
+    async with LLM() as client, session_scope() as db:
         for q in questions:
             hits = await retrieve(db, q.question, config=config, client=client, limit=limit)
             rank = metrics.add(
@@ -92,7 +92,7 @@ async def main() -> None:
     args = ap.parse_args()
 
     if args.generate:
-        async with Ollama() as c, session_scope() as db:
+        async with LLM() as c, session_scope() as db:
             qs = await generate_questions(db, n=args.generate, suite=args.suite, client=c)
             print(f"generated {len(qs)} questions")
 

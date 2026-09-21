@@ -677,6 +677,22 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .kv td:last-child { color:var(--faint); font-size:11.5px; }
 .kv code { font:11px/1 var(--mono); color:var(--faint); background:var(--sunk); padding:1px 5px; border-radius:2px; }
 .acts { display:flex; flex-wrap:wrap; gap:14px; }
+.acts.inline { display:inline-flex; gap:10px; margin-left:12px; }
+.kv .dim { color:var(--dim); }
+.prov td:first-child { width:26%; } .prov td:nth-child(2) { font-family:var(--mono); font-size:12px; word-break:break-all; } .prov td:last-child { white-space:nowrap; }
+.prov .acts.inline { margin-left:0; }
+.prov-out-row td { border-bottom:1px solid var(--rule-soft); padding:0 0 6px; }
+.prov-out-row td:has(.prov-out[hidden]) { padding:0; border-bottom:0; }
+.prov-out { font:12px/1.5 var(--sans); color:var(--dim); margin-top:2px; }
+.prov-out .ok { color:var(--verdigris); } .prov-out .bad { color:var(--amber); }
+.prov-edit { display:grid; gap:8px; max-width:560px; margin:10px 0 4px; padding:12px 14px; border:1px solid var(--rule-soft); border-radius:4px; background:var(--sunk); }
+.prov-edit label { display:grid; grid-template-columns:70px 1fr; align-items:center; gap:10px; font:12px/1.4 var(--sans); color:var(--dim); }
+.prov-edit input { background:var(--paper, transparent); border:1px solid var(--rule); border-radius:3px; color:var(--fg); font:12.5px/1.4 var(--mono); padding:5px 8px; }
+.prov-edit input:focus { border-color:var(--verdigris); outline:none; }
+.prov-edit .hint { grid-column:2; font-size:11px; color:var(--faint); margin-top:-4px; }
+.roles select { max-width:100%; }
+.role-warn { margin-top:6px; font:12px/1.5 var(--sans); color:var(--amber); }
+.remote { font:10px/1 var(--mono); color:var(--verdigris); border:1px solid var(--verdigris); border-radius:2px; padding:1px 4px; margin-left:4px; vertical-align:middle; }
 .incident { border:1px solid var(--rule); border-radius:4px; padding:10px 12px; margin-bottom:10px; background:color-mix(in srgb, var(--panel) 70%, transparent); }
 .incident[data-resolved=true] { opacity:.55; }
 .inc-h { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
@@ -2612,7 +2628,9 @@ async function loadSettings() {
         <span data-ok="${sv.reranker}">Reranker (local)</span>
       </div>
     </div>
-    <div class="sect"><p class="label">Models</p>${kv(s.models)}</div>
+    <div class="sect" id="prov-sect"><p class="label">Providers</p><div class="empty">Looking…</div></div>
+    <div class="sect" id="roles-sect"><p class="label">Models</p><div class="empty">Looking…</div></div>
+    <div class="sect"><p class="label">Fixed</p>${kv(s.models)}</div>
     <div class="sect"><p class="label">Retrieval</p>${kv(s.retrieval)}</div>
     <div class="sect"><p class="label">Library</p>${kv(s.library)}
       <p class="empty" style="padding:8px 0 0">Configuration is read from the environment (or <code>.env</code>): set the variable shown and <code>./library restart</code>.</p></div>
@@ -2638,6 +2656,95 @@ async function loadSettings() {
     </div>
   </div>`;
   $('#inc-badge').hidden = !s.incidents_open; $('#inc-badge').textContent = s.incidents_open;
+  loadProviders();
+}
+// Providers and roles. Ollama is the default and needs no entry; a provider is any
+// OpenAI-protocol endpoint, named once and then addressed by prefix. Each role picks
+// its model from everything on offer.
+let provCache = null;
+async function loadProviders() {
+  const ps = $('#prov-sect'), rs = $('#roles-sect'); if (!ps) return;
+  let j; try { j = await (await fetch('/api/settings/providers')).json(); } catch (e) { ps.innerHTML = `<p class="label">Providers</p><div class="empty">${esc(String(e))}</div>`; return; }
+  provCache = j;
+  const rows = j.providers.map(p => `<tr data-pid="${esc(p.id)}"><td><b>${esc(p.name)}</b><div class="dim"><code>${esc(p.id)}:</code></div></td>
+      <td>${esc(p.base_url)}<div class="dim">${p.has_key ? 'key ····' + esc(p.key_tail) : 'no key'}</div></td>
+      <td><span class="acts inline"><button class="linkish" onclick="provTest('${esc(p.id)}', this)">test</button><button class="linkish" onclick="provEdit('${esc(p.id)}')">edit</button><button class="linkish danger" onclick="provRemove('${esc(p.id)}', this)">remove</button></span></td></tr>
+      <tr class="prov-out-row" data-pid="${esc(p.id)}"><td colspan="3"><div class="prov-out" hidden></div></td></tr>`).join('');
+  ps.innerHTML = `<p class="label">Providers</p>
+    ${rows ? `<table class="kv prov">${rows}</table>` : '<div class="empty">Only Ollama. Add a provider to run a role on something else: anything that speaks the OpenAI chat-completions protocol — OpenAI, Anthropic, OpenRouter, Groq, Mistral, DeepSeek, LM Studio, vLLM, llama.cpp — with a base URL ending in <code>/v1</code>.</div>'}
+    <div class="acts" style="margin-top:8px"><button class="linkish" onclick="provEdit('')">add a provider</button></div>
+    <div id="prov-form" hidden></div>
+    <p class="empty" style="padding:8px 0 0">Kept in <code>${esc(j.file)}</code>, readable by you alone; keys are never shown again once saved.</p>`;
+  // Roles: a select per role over everything on offer, grouped by where it lives.
+  const groups = Object.entries(j.catalogue);
+  const opts = (role) => {
+    const cur = role.model, seen = new Set();
+    let h = `<option value="" ${!role.overridden ? 'selected' : ''}>default · ${esc(role.default || 'none')}</option>`;
+    if (role.id === 'vision') h += `<option value="off" ${role.overridden && cur === '' ? 'selected' : ''}>off</option>`;
+    for (const [where, names] of groups) {
+      if (!names.length) continue;
+      h += `<optgroup label="${esc(where)}">` + names.map(n => { seen.add(n); return `<option value="${esc(n)}" ${role.overridden && n === cur ? 'selected' : ''}>${esc(n)}</option>`; }).join('') + '</optgroup>';
+    }
+    if (role.overridden && cur && !seen.has(cur)) h += `<option value="${esc(cur)}" selected>${esc(cur)} (not offered right now)</option>`;
+    return h;
+  };
+  rs.innerHTML = `<p class="label">Models</p><table class="kv roles">${j.roles.map(r => `<tr data-role="${r.id}">
+      <td>${esc(r.label)}${r.remote ? ' <span class="remote" title="runs on a provider, not Ollama">remote</span>' : ''}</td>
+      <td><select onchange="roleChange('${r.id}', this)">${opts(r)}</select>
+        ${r.id === 'reading' ? '<div class="role-warn" hidden>Artifacts record the model that wrote them. With a different reader, the next backfill re-reads the whole shelf — every volume, at that model\'s price. <button class="linkish" onclick="roleApply(\'reading\', this)">change it anyway</button> <button class="linkish" onclick="loadProviders()">keep</button></div>' : ''}</td>
+      <td>${esc(r.note)}</td></tr>`).join('')}</table>
+    <p class="empty" style="padding:8px 0 0">Embeddings stay on Ollama: every vector in the library is <code>bge-m3</code>, and moving them is a re-embedding of everything.</p>`;
+}
+function provEdit(pid) {
+  const p = provCache?.providers.find(x => x.id === pid) || { id: '', name: '', base_url: '', has_key: false };
+  const f = $('#prov-form'); f.hidden = false;
+  f.innerHTML = `<div class="prov-edit">
+    <label>id <input type="text" id="pv-id" value="${esc(p.id)}" placeholder="openrouter" ${pid ? 'readonly' : ''} spellcheck="false"><span class="hint">lowercase, the prefix models are named with: <code>${esc(p.id || 'id')}:model</code></span></label>
+    <label>name <input type="text" id="pv-name" value="${esc(p.name)}" placeholder="OpenRouter"></label>
+    <label>base URL <input type="text" id="pv-url" value="${esc(p.base_url)}" placeholder="https://openrouter.ai/api/v1" spellcheck="false"></label>
+    <label>API key <input type="password" id="pv-key" value="" placeholder="${p.has_key ? 'unchanged unless you type a new one' : 'sk-…'}" autocomplete="off"></label>
+    <div class="acts"><button class="linkish" onclick="provSave('${esc(pid)}', this)">save</button><button class="linkish" onclick="$('#prov-form').hidden=true">cancel</button></div>
+    <div class="prov-out" hidden></div></div>`;
+  (pid ? $('#pv-url') : $('#pv-id')).focus();
+}
+async function provSave(pid, btn) {
+  const id = (pid || $('#pv-id').value).trim().toLowerCase(), out = btn.closest('.prov-edit').querySelector('.prov-out');
+  const body = { name: $('#pv-name').value, base_url: $('#pv-url').value };
+  const key = $('#pv-key').value; if (key) body.api_key = key;
+  btn.textContent = 'saving…';
+  const r = await fetch(`/api/settings/providers/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { out.hidden = false; out.textContent = (await r.json()).detail || r.statusText; btn.textContent = 'save'; return; }
+  await loadProviders();
+  const row = document.querySelector(`.prov tr[data-pid="${CSS.escape(id)}"] button`); if (row) provTest(id, row);
+  $('#prov-form').hidden = true;
+}
+async function provTest(pid, btn) {
+  const out = document.querySelector(`.prov-out-row[data-pid="${CSS.escape(pid)}"] .prov-out`); out.hidden = false; out.textContent = 'asking…'; btn.textContent = 'testing…';
+  try {
+    const j = await (await fetch(`/api/settings/providers/${encodeURIComponent(pid)}/test`, { method: 'POST' })).json();
+    out.innerHTML = j.ok
+      ? `<span class="ok">answers</span> · ${j.models.length} model${j.models.length === 1 ? '' : 's'} offered · <code>${esc(j.model)}</code> replied “${esc(j.reply.slice(0, 40))}” in ${j.seconds}s`
+      : `<span class="bad">no</span> · ${esc(j.error || 'no models and no reply')}`;
+    if (j.ok) { const html = out.innerHTML; loadProviders().then(() => { const o = document.querySelector(`.prov-out-row[data-pid="${CSS.escape(pid)}"] .prov-out`); if (o) { o.hidden = false; o.innerHTML = html; } }); }
+  } catch (e) { out.textContent = String(e); }
+  btn.textContent = 'test';
+}
+async function provRemove(pid, btn) {
+  if (btn.dataset.armed !== '1') { btn.dataset.armed = '1'; btn.textContent = 'remove — sure?'; setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'remove'; }, 4000); return; }
+  await fetch(`/api/settings/providers/${encodeURIComponent(pid)}`, { method: 'DELETE' });
+  loadProviders();
+}
+async function roleChange(role, sel) {
+  if (role === 'reading') { const w = sel.parentElement.querySelector('.role-warn'); w.hidden = false; return; }
+  await roleApply(role, sel);
+}
+async function roleApply(role, el) {
+  const sel = el.closest('tr').querySelector('select');
+  const v = sel.value === '' ? null : sel.value === 'off' ? '' : sel.value;
+  const r = await fetch('/api/settings/models', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [role]: v }) });
+  if (!r.ok) { const w = el.closest('tr').querySelector('.role-warn, td:nth-child(2)'); w.hidden = false; w.textContent = (await r.json()).detail || r.statusText; return; }
+  loadProviders();
+  if (role.startsWith('chat')) loadModels();
 }
 function incidentHtml(i) {
   return `<div class="incident" data-resolved="${i.resolved}" id="inc-${i.id}">

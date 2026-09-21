@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from library_agent.config import settings
 from library_agent.db.models import Artifact, ArtifactKind, Cluster, TargetKind
+from library_agent.llm import providers
+from library_agent.llm.client import LLM
 from library_agent.llm.ollama import Ollama
 from library_agent.reading import genre as genre_mod
 
@@ -248,7 +250,7 @@ async def find_contradictions(
     )
 
     own = client is None
-    c = client or Ollama()
+    c = client or LLM()
     found = 0
     try:
         for n, row in enumerate(rows):
@@ -259,7 +261,7 @@ async def find_contradictions(
                 continue
             out = await judge_cluster(
                 c,
-                cfg.reader_model,
+                providers.model_for("threads"),
                 row.label,
                 claims,
                 row.titles,
@@ -294,7 +296,7 @@ async def find_contradictions(
                             target_id=row.id,
                             text=textval,
                             data=out,
-                            model=cfg.reader_model,
+                            model=providers.model_for("threads"),
                             prompt_version=cfg.prompt_versions.get("contradiction", "v1"),
                             tier=1,
                         )

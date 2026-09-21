@@ -12,7 +12,8 @@ import time
 import uuid
 from typing import Any, ClassVar
 
-from arq import Retry, func
+from arq import Retry
+from arq import func as arq_func
 from arq.connections import RedisSettings
 from sqlalchemy import func, select, update
 
@@ -352,8 +353,8 @@ class WorkerSettings:
     functions: ClassVar[list] = [
         read_document,
         backfill,
-        func(build_library_layer, timeout=LIBRARY_TIMEOUT),
-        func(reshelve_library, timeout=LIBRARY_TIMEOUT),
+        arq_func(build_library_layer, timeout=LIBRARY_TIMEOUT),
+        arq_func(reshelve_library, timeout=LIBRARY_TIMEOUT),
         describe_figures_job,
     ]
     on_startup = _startup

@@ -939,12 +939,14 @@ const web = {
         this.nodes.push(node);
         this.alpha = Math.max(this.alpha, 1);
       }
-      Object.assign(node, { id: n.id, t: n.t, top: n.top, sub: n.sub, c: n.c, tier: n.tier, target: 2 + Math.sqrt(n.n || 1) * .5 });
+      Object.assign(node, { id: n.id, t: n.t, top: n.top, sub: n.sub, c: n.c, k: n.k || [], tier: n.tier, target: 2 + Math.sqrt(n.n || 1) * .5 });
     }
     const before = this.nodes.length;
     this.nodes = this.nodes.filter(n => seen.has(n.id));
     for (const id of Object.keys(this.byId)) if (!seen.has(id)) delete this.byId[id];
     if (this.nodes.length !== before) this.alpha = Math.max(this.alpha, .4);
+    // A cartridge seated when the page opened is the room from the first frame.
+    if (!this.room && cartridges.size === 1) this.room = [...cartridges][0];
     const had = this.edges.length;
     this.edges = r.edges.filter(e => this.byId[e.a] && this.byId[e.b]).map(e => ({ a: this.byId[e.a], b: this.byId[e.b], w: e.w, k: e.k }));
     if (this.edges.length !== had) this.alpha = Math.max(this.alpha, .3);
@@ -1075,6 +1077,12 @@ const web = {
     const css = getComputedStyle(document.documentElement);
     const rubric = css.getPropertyValue('--rubric').trim(), verd = css.getPropertyValue('--verdigris').trim();
     const P = new Map(); for (const n of this.nodes) P.set(n, this.project(n));
+    // The dimming eases in and out rather than snapping.
+    this.dim += ((this.room ? 1 : 0) - this.dim) * .08;
+    const ghost = 1 - this.dim * .88;  // what an out-of-room volume keeps
+    const lift = 1 + this.dim * .5;    // what a room volume gains, so the room glows
+    const fade = n => (this.inRoom(n) ? (this.room ? lift : 1) : ghost);
+    if (Math.abs(this.dim - (this.room ? 1 : 0)) > .01) this.wake();
     // By day the glow is stained glass: saturated, bright hues multiplied into the
     // page, so where volumes overlap the colour deepens instead of greying.
     // Most volumes are unshelved and have no hue of their own; at night their ink haze
@@ -1092,7 +1100,7 @@ const web = {
       // By day the chart is its lines: the haze is nearly gone, so the edges carry it.
       const ek = dark ? (e.k === 'cite' ? .26 : e.k === 'thread' ? .18 : .08) : (e.k === 'cite' ? .32 : e.k === 'thread' ? .22 : .1);
       c.strokeStyle = lit > .05 ? rubric : `rgba(${ink},${ek * e.w * (.35 + .65 * depth)})`;
-      c.globalAlpha = lit > .05 ? .2 + .6 * lit : 1;
+      c.globalAlpha = Math.min(1, (lit > .05 ? .2 + .6 * lit : 1) * Math.min(fade(e.a), fade(e.b)));
       c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
     }
     c.globalAlpha = 1;
@@ -1110,15 +1118,15 @@ const web = {
       // gradient interpolates straight through the colour space, and a fade toward
       // black is invisible in additive light but reads as soot on a light page.
       if (n.lit > .02) { grd.addColorStop(0, rubric); grd.addColorStop(1, dark || rubric.length !== 7 ? 'rgba(0,0,0,0)' : rubric + '00'); c.globalAlpha = (dark ? .5 : .3) * n.lit; n.lit *= .992; }
-      else if (dark) { grd.addColorStop(0, colour(n, 62, 1)); grd.addColorStop(1, 'rgba(0,0,0,0)'); c.globalAlpha = hazeA; }
-      else { grd.addColorStop(0, colour(n, 55, 1)); grd.addColorStop(1, colour(n, 55, 0)); c.globalAlpha = hazeA; }
+      else if (dark) { grd.addColorStop(0, colour(n, 62, 1)); grd.addColorStop(1, 'rgba(0,0,0,0)'); c.globalAlpha = hazeA * fade(n); }
+      else { grd.addColorStop(0, colour(n, 55, 1)); grd.addColorStop(1, colour(n, 55, 0)); c.globalAlpha = hazeA * fade(n); }
       c.fillStyle = grd; c.beginPath(); c.arc(p.x, p.y, R, 0, Math.PI * 2); c.fill();
     }
     c.globalCompositeOperation = 'source-over';
     // the volumes themselves
     for (const n of order) {
       const p = P.get(n), near = 1 - p.depth;
-      c.globalAlpha = (n.tier === 0 ? (dark ? .3 : .6) : (dark ? .55 : .95)) * (.35 + .65 * near);
+      c.globalAlpha = Math.min(1, (n.tier === 0 ? (dark ? .3 : .6) : (dark ? .55 : .95)) * (.35 + .65 * near) * fade(n));
       c.fillStyle = n.lit > .02 ? rubric : (!dark && !n.c && !(n.top && this.hueOf[n.top] != null)) ? `rgba(${ink},1)` : colour(n, dark ? 70 : 40, 1);
       c.beginPath(); c.arc(p.x, p.y, Math.max(.6, n.r * p.s), 0, Math.PI * 2); c.fill();
       if (n.tier >= 2) { c.lineWidth = .7; c.strokeStyle = c.fillStyle; c.beginPath(); c.arc(p.x, p.y, n.r * p.s + 2, 0, Math.PI * 2); c.stroke(); }
@@ -1177,6 +1185,16 @@ const web = {
   },
   wake() { if (!this.frame) this.frame = requestAnimationFrame(t => this.loop(t)); },
   light(ids) { for (const id of ids) { const n = this.byId[id]; if (n) n.lit = 1; } this.wake(); },
+  // Seating a cartridge: its volumes stay bright and the camera settles on them; the
+  // rest of the cloud recedes to a ghost, so the room reads as a region of the whole.
+  room: null, dim: 0,
+  setRoom(id) {
+    this.room = id || null;
+    if (this.room) { const ids = this.nodes.filter(n => (n.k || []).includes(this.room)).map(n => n.id); this.focus(ids); }
+    else this.focus(null);
+    this.wake();
+  },
+  inRoom(n) { return !this.room || (n.k || []).includes(this.room); },
   scan(on) { this.scanning = on; if (!on) this.scanT = 1; this.wake(); },
   init() {
     this.canvas = $('#web'); this.ctx = this.canvas.getContext('2d');
@@ -1553,6 +1571,7 @@ function toggleCartridge(id) {
   cartridges.clear();
   if (!wasOn) cartridges.add(id);
   if (rack3d.ctrl) { rack3d.ctrl.show(id); rack3d.ctrl.seat(id, !wasOn); }
+  web.setRoom(wasOn ? null : id);
   rackUnder();
   loadRack(); loadShelf(); writeScope();
   $('#entry').placeholder = placeholderFor(view);

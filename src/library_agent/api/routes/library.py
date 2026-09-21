@@ -148,7 +148,9 @@ _WEB_NODES = """
 select d.id, d.title, d.tier, d.kind,
        (select count(*) from chunk c where c.document_id = d.id) as chunks,
        top.name as top_shelf, sub.name as sub_shelf,
-       cart.colour as cartridge_colour
+       cart.colour as cartridge_colour,
+       (select array_agg(cd2.cartridge_id::text) from cartridge_document cd2
+         where cd2.document_id = d.id) as cartridge_ids
 from document d
 left join category sub on sub.id = d.shelf_id
 left join category top on top.id = sub.parent_id
@@ -210,6 +212,7 @@ async def web(db: SessionDep) -> dict[str, object]:
             "top": r.top_shelf,
             "sub": r.sub_shelf,
             "c": r.cartridge_colour,
+            "k": r.cartridge_ids or [],  # the rooms this volume belongs to
         }
         for r in await db.execute(text(_WEB_NODES))
     ]

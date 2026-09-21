@@ -1096,3 +1096,13 @@ documentation, 130 paper, 83 report). Volumes already read keep their readings u
 read again; threads pick the genre up at the next rebuild. Email ingestion -- headers as
 section metadata, quoted replies stripped, one message a section -- is the next piece
 and needs a real mailbox to test on.
+
+**The room in the nebula.** "When I load a cartridge, dim the parts of the nebula that
+don't pertain to it and highlight the ones that do." Nodes now carry their cartridge
+ids (`k`) from `/api/library/web`; seating sets `web.room`, the dimming eases in over a
+second, volumes outside the room keep 12% of their light and their edges follow the
+dimmer endpoint, volumes inside gain half again, and the camera settles on the room's
+centroid. Lifting the cartridge eases it back. A cartridge seated when the page opens
+is the room from the first frame. On RTS the effect is a plum lattice of 391 volumes
+standing in front of the HackTricks core as a ghost -- which is also the first honest
+picture of how the two collections interleave.

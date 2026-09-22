@@ -41,7 +41,7 @@ class TestAssembly:
 
     def test_slug_and_lengths(self):
         assert slugify("RAG Reading Guide: Core Concepts!") == "rag-reading-guide-core-concepts"
-        assert set(LENGTHS) == {"short", "medium", "long", "report"}
+        assert set(LENGTHS) == {"short", "medium", "long", "report", "thesis"}
 
     def test_save_and_list(self, tmp_path, monkeypatch):
         from library_agent.config import settings
@@ -51,3 +51,51 @@ class TestAssembly:
         assert p.exists() and p.name.startswith("hello-world-") and p.suffix == ".md"
         rows = list_saved()
         assert rows and rows[0]["title"] == "Hello World" and rows[0]["file"] == p.name
+
+
+class TestArgumentMemory:
+    def test_established_flat_is_the_section_ledger(self):
+        from library_agent.chat.compose import _established
+
+        secs = [
+            {"heading": "One", "chapter": None, "takeaway": "Recursion terminates on a base case."},
+            {"heading": "Two", "chapter": None, "takeaway": "Tail calls need no stack frame."},
+        ]
+        # writing a third flat section: it sees both prior takeaways, none as a chapter
+        block = _established(secs, {}, None)
+        assert "§ One: Recursion terminates" in block
+        assert "§ Two: Tail calls" in block
+        assert "Chapter" not in block
+        # the very first section has nothing yet
+        assert "opening section" in _established([], {}, None)
+
+    def test_established_nested_shows_closed_chapters_then_current(self):
+        from library_agent.chat.compose import _established
+
+        secs = [
+            {"heading": "A1", "chapter": "Foundations", "takeaway": "Sets are primitive."},
+            {"heading": "A2", "chapter": "Foundations", "takeaway": "Functions map sets."},
+            {"heading": "B1", "chapter": "Structures", "takeaway": "Groups have inverses."},
+        ]
+        theses = {"Foundations": "The basic objects are sets and maps between them."}
+        # writing a second section of chapter "Structures"
+        block = _established(secs, theses, "Structures")
+        assert "Chapter «Foundations» established: The basic objects" in block
+        assert "§ B1: Groups have inverses" in block
+        # the current chapter's own thesis, and the finished chapter's sections, are not repeated
+        assert "§ A1:" not in block and "Chapter «Structures»" not in block
+
+    def test_markdown_nests_chapters_as_subsections(self):
+        from library_agent.chat.compose import Composition
+
+        c = Composition(title="Book", brief="b")
+        c.sections = [
+            {"heading": "A1", "chapter": "Part I", "body": "x", "cited": []},
+            {"heading": "A2", "chapter": "Part I", "body": "y", "cited": []},
+            {"heading": "B1", "chapter": "Part II", "body": "z", "cited": []},
+        ]
+        md = c.markdown()
+        assert "## Part I" in md and "## Part II" in md
+        assert "### A1" in md and "### B1" in md
+        # one chapter heading each, not one per section
+        assert md.count("## Part I\n") == 1 and md.count("## Part II\n") == 1

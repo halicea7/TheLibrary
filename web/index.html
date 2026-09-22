@@ -652,6 +652,8 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .doc h1.t { font:600 26px/1.25 var(--serif); margin:0 0 6px; max-width:68ch; }
 .doc .plan { font:12px/1.6 var(--mono); color:var(--faint); margin:0 0 18px; max-width:68ch; }
 .doc .plan.wove { font-family:var(--sans); color:var(--dim); border-left:2px solid var(--verdigris); padding-left:10px; }
+.doc h2.chap { font:600 15px/1.3 var(--serif); color:var(--verdigris); margin:26px 0 2px; padding-bottom:3px; border-bottom:1px solid var(--rule); letter-spacing:.01em; }
+.outline b.chap { display:block; width:100%; margin:6px 0 2px; font:600 10px/1.4 var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--verdigris); }
 .doc .outline { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 22px; }
 .doc .outline span { font:11px/1 var(--sans); padding:4px 9px; border:1px solid var(--rule); border-radius:99px; color:var(--faint); }
 .doc .outline span[data-state=writing] { color:var(--fg); border-color:var(--verdigris); }
@@ -2558,7 +2560,7 @@ function renderWrite() {
     <textarea class="brief" id="wr-brief" placeholder="What should the library write? e.g. A reading guide to retrieval-augmented generation for a new team member: what to read first, what each paper contributes, where they disagree." oninput="write.brief=this.value"></textarea>
     <div class="bar">
       <button class="go" id="wr-go" onclick="composeDoc()">draft it</button>
-      <label>length <select id="wr-len" onchange="write.length=this.value"><option value="short">short</option><option value="medium" selected>medium</option><option value="long">long</option><option value="report">report</option></select></label>
+      <label>length <select id="wr-len" onchange="write.length=this.value"><option value="short">short</option><option value="medium" selected>medium</option><option value="long">long</option><option value="report">report</option><option value="thesis">thesis</option></select></label>
       <span id="wr-scope"></span>
     </div>
     <div class="doc" id="wr-doc"></div>
@@ -2581,7 +2583,7 @@ async function composeDoc() {
   const body = { brief, length: write.length, model: $('#model').value,
     category_ids: [...subjects], cartridge_ids: [...cartridges],
     scope_label: [room ? room + "'s shelf" : '', subjects.size ? `${subjects.size} subjects` : ''].filter(Boolean).join(' and ') };
-  let secSources = [], secEl = null, said = null, buf = '', ev = null, text = '', result = null;
+  let secSources = [], secEl = null, said = null, buf = '', ev = null, text = '', result = null, wove = '', lastCh = null;
   murmur.start(doc);
   try {
     const res = await fetch('/api/compose', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -2597,21 +2599,26 @@ async function composeDoc() {
         const raw = (ev === 'token' || ev === 'thinking') ? rawFull : rawFull.trim();
         if (ev === 'threads') {
           const t = JSON.parse(raw);
-          doc.innerHTML = t.count
-            ? `<div class="plan wove">Woven from <b>${t.count}</b> thread${t.count === 1 ? '' : 's'} the library already found${t.disputed ? `, <b>${t.disputed}</b> with a disagreement` : ''}: ${t.labels.slice(0, 8).map(esc).join(' · ')}${t.labels.length > 8 ? ' …' : ''}</div>` + doc.innerHTML
-            : doc.innerHTML;
+          wove = t.count
+            ? `<div class="plan wove">Woven from <b>${t.count}</b> thread${t.count === 1 ? '' : 's'} the library already found${t.disputed ? `, <b>${t.disputed}</b> with a disagreement` : ''}: ${t.labels.slice(0, 8).map(esc).join(' · ')}${t.labels.length > 8 ? ' …' : ''}</div>`
+            : '';
+          if (wove) doc.innerHTML = wove;
         } else if (ev === 'plan') {
           const p = JSON.parse(raw);
-          doc.innerHTML = `<h1 class="t">${esc(p.title)}</h1><div class="plan">${esc(p.notes || '')}</div>
-            <div class="outline">${p.sections.map((s, i) => `<span id="wr-o${i}">${esc(s.heading)}</span>`).join('')}</div>`;
+          doc.innerHTML = wove + `<h1 class="t">${esc(p.title)}</h1><div class="plan">${esc(p.notes || '')}</div>
+            <div class="outline">${p.sections.map((s, i) => {
+              const head = s.chapter && s.chapter !== (p.sections[i - 1] || {}).chapter ? `<b class="chap">${esc(s.chapter)}</b>` : '';
+              return head + `<span id="wr-o${i}">${esc(s.heading)}</span>`;
+            }).join('')}</div>`;
           $('#wr-go').textContent = 'writing…';
         } else if (ev === 'sources') {
           const s = JSON.parse(raw); secSources = s.sources;
         } else if (ev === 'section') {
           const s = JSON.parse(raw);
           document.getElementById('wr-o' + s.index)?.setAttribute('data-state', 'writing');
+          if (s.chapter && s.chapter !== lastCh) { lastCh = s.chapter; const ch = document.createElement('h2'); ch.className = 'chap'; ch.textContent = s.chapter; doc.appendChild(ch); }
           secEl = document.createElement('div'); secEl.className = 'sec';
-          secEl.innerHTML = `<h2>${esc(s.heading)}</h2><div class="said md"><p></p></div>`;
+          secEl.innerHTML = `<${s.chapter ? 'h3' : 'h2'}>${esc(s.heading)}</${s.chapter ? 'h3' : 'h2'}><div class="said md"><p></p></div>`;
           doc.appendChild(secEl); said = secEl.querySelector('.said'); text = '';
           murmur.stop(); murmur.start(secEl);
         } else if (ev === 'thinking') {

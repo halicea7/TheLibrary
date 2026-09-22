@@ -48,7 +48,12 @@ LENGTHS = {
     "medium": ("4 to 6 sections", "250 to 400 words"),
     "long": ("6 to 9 sections", "400 to 600 words"),
     "report": ("8 to 12 sections", "500 to 800 words"),
+    "thesis": ("4 to 7 chapters, each of 2 to 4 sections", "500 to 800 words"),
 }
+# Lengths that plan in two levels: chapters, each with its own sections. The document
+# then carries a running thesis per chapter as well as a per-section ledger, so it holds
+# an argument over a scale that would otherwise drift.
+NESTED = {"thesis"}
 
 # Per section, compose retrieves harder than a chat turn: it is a background job, and the
 # document is only as good as what each section is given. Passages carry the exact words;
@@ -70,10 +75,11 @@ PLAN_SCHEMA: dict[str, Any] = {
         "sections": {
             "type": "array",
             "minItems": 2,
-            "maxItems": 9,
+            "maxItems": 32,
             "items": {
                 "type": "object",
                 "properties": {
+                    "chapter": {"type": "string", "maxLength": 90},
                     "heading": {"type": "string", "maxLength": 90},
                     "covers": {"type": "string", "maxLength": 300},
                     "retrieve": {"type": "string", "maxLength": 200},
@@ -96,6 +102,7 @@ Plan it: a title, and {n_sections}. For each section give the heading, what it s
 cover (one or two sentences), and the search query that would find the right passages in
 the library for it (concrete terms, not a question). Sections should not overlap; order
 them so the document reads front to back.
+{nesting}
 
 The threads above are connections the library has already found across several volumes —
 use them as the backbone of the plan, not an afterthought: a section should usually
@@ -120,13 +127,20 @@ You will be given numbered passages retrieved for THIS section. Use them as mate
   not a quotation. Cite them like passages. Lean on them for a work's overall argument and
   on the passages for its exact words and figures.
 
+This section is part of a longer document. You are told what earlier sections have already
+established. Build on it: do not restate what is settled, and where you rely on an earlier
+point, refer to it briefly ("as established earlier") rather than re-arguing it. Do not
+contradict it without saying you are doing so and why.
+
 Write only this section's body in markdown: no title, no heading (it is added for you),
 no preamble, no summary of other sections. Use lists, code and tables where they belong.
 Be concrete and specific."""
 
 WRITE_PROMPT = """Document: {title}
 Brief: {brief}
-Sections already written: {done}
+
+What the document has established so far:
+{established}
 
 Now write the section "{heading}", which should cover: {covers}
 Aim for {length}.
@@ -135,6 +149,23 @@ Passages for this section:
 
 {context}
 """
+
+# One or two sentences distilling what a finished section actually established -- not its
+# topic, its claim -- so a later section builds on the argument rather than the outline.
+TAKEAWAY_PROMPT = """A section titled "{heading}" was just written for the document "{title}".
+
+{body}
+
+State, as `claim`, the specific claim, result or distinction this section establishes that
+later sections should build on — one sentence, not what it is "about" but what it settles.
+No preamble, no reference to "this section"."""
+
+CHAPTER_PROMPT = """A chapter titled "{chapter}" of the document "{title}" is complete. Its
+sections established, in order:
+{takeaways}
+
+State, as `claim`, what the chapter as a whole establishes in one sentence — the
+through-line later chapters can rely on. No preamble."""
 
 
 @dataclass
@@ -149,8 +180,15 @@ class Composition:
 
     def markdown(self) -> str:
         out = [f"# {self.title}", ""]
+        nested = any(s.get("chapter") for s in self.sections)
+        last_ch = None
         for s in self.sections:
-            out += [f"## {s['heading']}", "", s.get("body", "").strip(), ""]
+            ch = s.get("chapter")
+            if nested and ch and ch != last_ch:
+                out += [f"## {ch}", ""]
+                last_ch = ch
+            depth = "###" if nested else "##"
+            out += [f"{depth} {s['heading']}", "", s.get("body", "").strip(), ""]
         used = sorted({n for s in self.sections for n in s.get("cited", [])})
         if used:
             out += ["## References", ""]
@@ -169,6 +207,80 @@ class Composition:
             "",
         ]
         return "\n".join(out)
+
+
+LEDGER_CAP = 3500  # the established-so-far block, before a section's own material
+
+
+_TAKEAWAY_SCHEMA = {
+    "type": "object",
+    "properties": {"claim": {"type": "string", "maxLength": 400}},
+    "required": ["claim"],
+}
+
+
+async def _takeaway(client, model, title: str, heading: str, body: str) -> str:
+    """One sentence on what a finished section established. A structured call, so a chatty
+    model cannot leak its preamble into the running memory; the memory is only as good as
+    this is faithful."""
+    body = (body or "").strip()
+    if len(body) < 80:
+        return ""
+    try:
+        out = await client.structured(
+            model,
+            TAKEAWAY_PROMPT.format(title=title, heading=heading, body=body[:4000]),
+            _TAKEAWAY_SCHEMA,
+            temperature=0.2,
+            think=False,
+            num_predict=200,
+        )
+        return " ".join(str(out.get("claim") or "").split())[:400]
+    except Exception:
+        log.warning("takeaway failed for %r", heading, exc_info=True)
+        return ""
+
+
+async def _chapter_thesis(client, model, title: str, chapter: str, takeaways: list[str]) -> str:
+    kept = [t for t in takeaways if t]
+    if not kept:
+        return ""
+    try:
+        out = await client.structured(
+            model,
+            CHAPTER_PROMPT.format(
+                title=title,
+                chapter=chapter,
+                takeaways="\n".join(f"- {t}" for t in kept),
+            ),
+            _TAKEAWAY_SCHEMA,
+            temperature=0.2,
+            think=False,
+            num_predict=200,
+        )
+        return " ".join(str(out.get("claim") or "").split())[:400] or kept[-1]
+    except Exception:
+        log.warning("chapter thesis failed for %r", chapter, exc_info=True)
+        return kept[-1]
+
+
+def _established(sections: list[dict], chapter_theses: dict[str, str], current_chapter) -> str:
+    """The running argument, two levels: the through-line of every chapter already closed,
+    then each finished section of the chapter in progress. Flat documents have one implicit
+    chapter, so this is simply their section ledger."""
+    parts: list[str] = []
+    for ch, thesis in chapter_theses.items():
+        if ch != current_chapter and thesis:
+            parts.append(f"Chapter «{ch}» established: {thesis}")
+    for s in sections:
+        if s.get("chapter") == current_chapter and s.get("takeaway"):
+            parts.append(f"§ {s['heading']}: {s['takeaway']}")
+    if not parts:
+        return "Nothing yet — this is the opening section."
+    block = "\n".join(parts)
+    if len(block) > LEDGER_CAP:  # keep the newest, drop the oldest section lines
+        block = "…\n" + block[-LEDGER_CAP:]
+    return block
 
 
 def slugify(s: str) -> str:
@@ -245,10 +357,22 @@ async def compose(
                 "labels": [t["label"] for t in threads],
             },
         }
+        nested = length in NESTED
+        nesting = (
+            "Group the sections into chapters: give every section a `chapter` (the title of "
+            "the part it belongs to), with the sections of one chapter consecutive and in "
+            "reading order. A chapter is a stage of the argument, not a bin."
+            if nested
+            else ""
+        )
         plan = await client.structured(
             model,
             PLAN_PROMPT.format(
-                brief=brief, scope=scope, threads=thread_text, n_sections=n_sections
+                brief=brief,
+                scope=scope,
+                threads=thread_text,
+                n_sections=n_sections,
+                nesting=nesting,
             ),
             PLAN_SCHEMA,
             system=SYSTEM_LIBRARIAN,
@@ -264,6 +388,7 @@ async def compose(
                 "heading": str(s.get("heading") or "").strip(),
                 "covers": str(s.get("covers") or "").strip(),
                 "retrieve": str(s.get("retrieve") or s.get("heading") or "").strip(),
+                "chapter": (str(s.get("chapter") or "").strip() or None) if nested else None,
             }
             for s in plan.get("sections") or []
             if s.get("heading")
@@ -277,6 +402,7 @@ async def compose(
                 "model": model,
             },
         }
+        chapter_theses: dict[str, str] = {}
 
         by_chunk: dict[str, Source] = {}
         for i, sec in enumerate(outline):
@@ -362,7 +488,18 @@ async def compose(
                     ],
                 },
             }
-            done = "; ".join(s["heading"] for s in comp.sections) or "none yet"
+            # A chapter that just ended is compressed to a through-line before the next one.
+            if nested and i > 0 and sec["chapter"] != outline[i - 1]["chapter"]:
+                prev = outline[i - 1]["chapter"]
+                if prev and prev not in chapter_theses:
+                    chapter_theses[prev] = await _chapter_thesis(
+                        client,
+                        model,
+                        comp.title,
+                        prev,
+                        [s["takeaway"] for s in comp.sections if s.get("chapter") == prev],
+                    )
+            established = _established(comp.sections, chapter_theses, sec["chapter"])
             context = (
                 render_context(section_hits, section_sources, max_chars=cfg.chat_passage_chars)
                 if section_hits
@@ -375,7 +512,7 @@ async def compose(
                     "content": WRITE_PROMPT.format(
                         title=comp.title,
                         brief=brief,
-                        done=done,
+                        established=established,
                         heading=sec["heading"],
                         covers=sec["covers"],
                         length=words,
@@ -385,7 +522,12 @@ async def compose(
             ]
             yield {
                 "event": "section",
-                "data": {"index": i, "heading": sec["heading"], "covers": sec["covers"]},
+                "data": {
+                    "index": i,
+                    "heading": sec["heading"],
+                    "covers": sec["covers"],
+                    "chapter": sec["chapter"],
+                },
             }
             buf: list[str] = []
             async for kind, piece in client.chat_stream(
@@ -405,17 +547,28 @@ async def compose(
             m = citation_validity(raw, section_sources)
             comp.emitted += m["markers_emitted"]
             comp.resolved += m["markers_resolved"]
+            # Distil what this section settled, for the sections that follow.
+            takeaway = await _takeaway(client, model, comp.title, sec["heading"], cleaned)
             comp.sections.append(
                 {
                     "heading": sec["heading"],
                     "covers": sec["covers"],
+                    "chapter": sec["chapter"],
                     "body": cleaned,
                     "cited": [s.n for s in used],
+                    "takeaway": takeaway,
                 }
             )
             yield {
                 "event": "section_done",
-                "data": {"index": i, "body": cleaned, "cited": [s.n for s in used], **m},
+                "data": {
+                    "index": i,
+                    "body": cleaned,
+                    "cited": [s.n for s in used],
+                    "chapter": sec["chapter"],
+                    "takeaway": takeaway,
+                    **m,
+                },
             }
 
         md = comp.markdown()

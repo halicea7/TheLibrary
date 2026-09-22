@@ -968,12 +968,18 @@ async def split_crowded(
                 log.warning("split of %s failed; it stays as it is", sub, exc_info=True)
                 continue
             names = [taxonomy.normalize_name(str(x)) for x in out.get("sub_shelves") or []]
-            # A catch-all ("Web Attack Types", "Other Exploits") just recreates the lump.
+            # A catch-all ("Web Attack Types", "Other Exploits") just recreates the lump;
+            # a name with brackets or quotes in it is a piece of the model's JSON, not a
+            # shelf ('User Management (41 Volumes)"], And It'S' was one).
             catchall = {"types", "other", "others", "general", "misc", "various", "miscellaneous"}
             names = [
                 x
                 for x in dict.fromkeys(names)
-                if x and x not in tx.tops and x != sub and not (set(x.lower().split()) & catchall)
+                if x
+                and x not in tx.tops
+                and x != sub
+                and not (set(x.lower().split()) & catchall)
+                and re.fullmatch(r"[\w][\w &/'\-]{1,38}", x)
             ]
             if len(names) < 2:
                 log.info("split of %s produced nothing usable", sub)
@@ -992,34 +998,38 @@ async def split_crowded(
             names = [n for n in names if n in tx.tops[top]]
             if len(names) < 2:
                 continue
-            # The crowded shelf comes off the rack; its volumes get re-placed below.
-            tx.tops[top].remove(sub)
-            crowded = await db.get(Category, sid)
-            if crowded:
-                crowded.parent_id = None
-            await db.flush()
-            # Re-place within this top shelf only.
-            local = Taxonomy(tops={top: tx.tops[top]}, ids=dict(tx.ids))
+            # Re-place the crowded shelf's volumes among the new sub-shelves -- only
+            # those, so none goes back on the lump -- while the crowded shelf stays on
+            # the rack. It comes off only once it is empty: a volume whose re-placement
+            # fails keeps a real place rather than a shelf with no top.
+            local = Taxonomy(tops={top: names}, ids=tx.ids)
+            fallback = tx.ids[names[0]]
             for i, d in enumerate(docs):
                 if gate:
                     await gate()
-                d.shelf_id = None
                 try:
                     if await place_document(db, d.id, client=client, tx=local, allow_new=False):
                         moved += 1
+                    else:
+                        d.shelf_id = fallback
                 except Exception:
                     log.warning("re-placing %s failed", d.id, exc_info=True)
+                    d.shelf_id = fallback
                 if progress:
                     await progress(i + 1, n, "splitting crowded shelves")
-            # Anything still unplaced keeps a home: the first new sub-shelf.
-            fallback = tx.ids[names[0]]
-            await db.execute(
-                update(Document)
-                .where(Document.id.in_([d.id for d in docs]), Document.shelf_id.is_(None))
-                .values(shelf_id=fallback)
-            )
-            tx.tops[top] = local.tops[top]
-            tx.ids.update(local.ids)
+            await db.flush()
+            left = (
+                await db.execute(
+                    select(func.count()).select_from(Document).where(Document.shelf_id == sid)
+                )
+            ).scalar() or 0
+            if left == 0:
+                tx.tops[top].remove(sub)
+                crowded = await db.get(Category, sid)
+                if crowded:
+                    crowded.parent_id = None
+            else:
+                log.warning("split of %s: %d volumes stayed on it; it stays on the rack", sub, left)
             await db.flush()
     return moved
 

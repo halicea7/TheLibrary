@@ -153,20 +153,27 @@ class TestPlacementEvidence:
 
 
 class TestShelfHealth:
-    """When the button should glow: no shelves, unplaced volumes, or a grown collection."""
+    """When the button should glow: no shelves, unplaced volumes, or a grown collection.
 
-    async def test_no_shelves_yet(self, db):
+    On a database of its own: these read the whole collection -- how many volumes there
+    are, whether any top shelf exists, how much it has grown since it was designed -- so
+    against the real library they answer about the real library, and "no shelves yet"
+    stopped being true the day the shelf was designed."""
+
+    async def test_no_shelves_yet(self, scratch_db):
         from library_agent.library.shelving import shelf_health
 
+        db = scratch_db
         await make_document(db, title="A", body="alpha " * 40, tier=1)
         h = await shelf_health(db)
         # Never designed on this collection: either there are no shelves, or nothing
         # says when they were designed.
         assert h["needed"] and ("no shelves" in h["reason"] or "not been designed" in h["reason"])
 
-    async def test_grown_past_design(self, db):
+    async def test_grown_past_design(self, scratch_db):
         from library_agent.library.shelving import record_design, shelf_health
 
+        db = scratch_db
         top = await taxonomy.get_or_create(db, "Cybersecurity")
         sub = await taxonomy.get_or_create(db, "Web Exploitation")
         sub.parent_id = top.id

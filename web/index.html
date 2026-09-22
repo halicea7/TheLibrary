@@ -218,6 +218,16 @@ body {
 .shelf-sub .shelf-name { text-transform:none; letter-spacing:0; font:500 12.5px/1.3 var(--serif); color:var(--dim); }
 .shelf-sub .shelf-name[aria-pressed=true] { color:var(--verdigris); }
 .shelf-h .linkish { margin-left:auto; }
+/* Looking along the shelf: a pencil line, not a search box. Titles and shelf names only;
+   Find is the one that reads inside. */
+.shelf-q {
+  width:100%; margin:4px 0 0; padding:5px 0 4px; background:none; border:0; border-radius:0;
+  border-bottom:1px solid var(--rule); outline:none; -webkit-appearance:none; appearance:none;
+  font:italic 12.5px/1.3 var(--serif); color:var(--fg);
+}
+.shelf-q::placeholder { color:var(--faint); }
+.shelf-q:focus { border-bottom-color:var(--verdigris); }
+.shelf-q::-webkit-search-cancel-button { -webkit-appearance:none; }
 
 .vol { padding:8px 0; border-bottom:1px solid var(--rule-soft); }
 .vol:last-child { border-bottom:0; }
@@ -833,6 +843,7 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 
     <div class="shelf-h" style="padding:0"><p class="label spaced" style="margin-bottom:0">Shelf</p><button class="linkish" id="reshelve" onclick="reshelve(this)" title="Have the library organise its shelf: top shelves, sub-shelves, one place per volume">reshelve</button></div>
     <div class="acts" id="shelf-acts" style="gap:12px;margin:4px 0 2px;font:11px/1.5 var(--sans);color:var(--faint)"></div>
+    <input class="shelf-q" id="shelf-q" type="search" placeholder="Look along the shelf" aria-label="Filter the shelf by title or shelf name" autocomplete="off" spellcheck="false"/>
     <div id="shelf" style="margin-top:8px"></div>
   </aside>
 
@@ -1436,11 +1447,11 @@ let catIndex = {};          // name -> id, so shelf headers can drive the same f
 let openDoc = null;
 const collapsed = new Set(JSON.parse(localStorage.getItem('shelf.collapsed') || '[]'));
 
-function volHtml(d) {
+function volHtml(d, words = []) {
   const c = d.cartridge;
   return `
     <div class="vol ${d.id === openDoc ? 'current' : ''}">
-      <button class="vol-t" onclick="openVolume('${d.id}')" title="Open">${esc(d.title)}</button>
+      <button class="vol-t" onclick="openVolume('${d.id}')" title="Open">${hl(esc(d.title), words)}</button>
       <div class="vol-m">
         <span class="state s${d.tier}" title="${STATE[d.tier]}"></span>
         <span>${STATE[d.tier]}</span>
@@ -1468,6 +1479,7 @@ async function shelfHealth() {
   b.title = h.needed ? `A reshelve is due: ${h.reason}. Click to have the library redesign its shelves from everything it holds.`
     : 'Have the library organise its shelf: top shelves, sub-shelves, one place per volume';
 }
+let shelfDocs = [];
 async function loadShelf() {
   shelfHealth();
   const [docs, cats] = await Promise.all([
@@ -1475,6 +1487,21 @@ async function loadShelf() {
     (await fetch('/api/categories')).json(),
   ]);
   catIndex = Object.fromEntries(cats.map(c => [c.name, c.id]));
+  shelfDocs = docs;
+  renderShelf();
+}
+// Every word must begin a word somewhere in the title, the shelf, or the cartridge.
+function shelfWords() {
+  return ($('#shelf-q')?.value || '').trim().toLowerCase().split(/\s+/).filter(w => w.length > 0);
+}
+function shelfMatch(d, words) {
+  if (!words.length) return true;
+  const hay = [d.title, d.shelf?.top, d.shelf?.sub, d.cartridge?.name].filter(Boolean).join(' ');
+  return words.every(w => new RegExp('(?<![\\p{L}\\p{N}])' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'iu').test(hay));
+}
+function renderShelf() {
+  const docs = shelfDocs;
+  const words = shelfWords();
   if (!docs.length) {
     $('#shelf').innerHTML = `<div class="empty"><b>Nothing shelved yet.</b>Drop a paper above. It is searchable within seconds; reading it takes a few minutes more.</div>`;
     return;
@@ -1482,9 +1509,10 @@ async function loadShelf() {
   // Top shelf › sub-shelf › volume. Each volume sits in exactly one place; anything the
   // library has not shelved yet waits at the bottom.
   const shown = cartridges.size ? docs.filter(d => d.cartridge && cartridges.has(d.cartridge.id)) : docs;
+  const found = shown.filter(d => shelfMatch(d, words));
   const tops = {};
   const waiting = [];
-  for (const d of shown) {
+  for (const d of found) {
     if (!d.shelf) { waiting.push(d); continue; }
     const top = (tops[d.shelf.top] ||= { id: d.shelf.top_id, subs: {}, n: 0 });
     (top.subs[d.shelf.sub] ||= { id: d.shelf.sub_id, vols: [] }).vols.push(d);
@@ -1492,7 +1520,7 @@ async function loadShelf() {
   }
   const byCount = (a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0]);
   const group = (key, name, id, n, inner, cls = 'shelf-group') => {
-    const open = !collapsed.has(key);
+    const open = words.length > 0 || !collapsed.has(key);
     return `<div class="${cls}" data-open="${open}">
       <div class="shelf-h">
         <button class="caret" aria-expanded="${open}" aria-label="Collapse ${esc(name)}" onclick="toggleGroup('${esc(key).replace(/'/g,"\\'")}')">▾</button>
@@ -1509,7 +1537,7 @@ async function loadShelf() {
       const key = tname + ' › ' + sname;
       // Sub-shelves start closed unless opened before: twenty open runs is a wall.
       if (!collapsed.has(key) && !opened.has(key)) collapsed.add(key);
-      return group(key, sname, sub.id, sub.vols.length, sub.vols.map(volHtml).join(''), 'shelf-sub');
+      return group(key, sname, sub.id, sub.vols.length, sub.vols.map(d => volHtml(d, words)).join(''), 'shelf-sub');
     }).join('');
     return group(tname, tname, top.id, top.n, inner);
   }).join('');
@@ -1518,10 +1546,30 @@ async function loadShelf() {
     const label = read.length ? 'Not yet shelved' : 'Not yet read';
     h += group('__waiting', label, null, waiting.length,
       (read.length && Object.keys(tops).length ? `<div class="empty" style="padding:4px 0 8px">Read, but the shelf has not placed ${read.length === 1 ? 'it' : 'them'} yet — <button class="linkish" onclick="reshelve(this, false)">shelve now</button></div>` : '')
-      + [...read, ...unread].map(volHtml).join(''));
+      + [...read, ...unread].map(d => volHtml(d, words)).join(''));
+  }
+  if (words.length && !found.length) {
+    h = `<div class="empty"><b>Nothing on the shelf by that name.</b>This looks at titles and shelves only — <button class="linkish" onclick="findFromShelf()">look inside the passages</button></div>`;
+  } else if (words.length) {
+    h = `<div class="empty" style="padding:0 0 6px">${found.length} of ${shown.length} volumes</div>` + h;
   }
   $('#shelf').innerHTML = h;
   shelfActs(shown);
+}
+function findFromShelf() {
+  const q = $('#shelf-q').value.trim();
+  setView('find');
+  $('#entry').value = q;
+  if (q.length > 1) runFind(q);
+}
+{
+  let t;
+  const q = $('#shelf-q');
+  q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(renderShelf, 90); });
+  q.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && q.value) { e.stopPropagation(); q.value = ''; renderShelf(); }
+    if (e.key === 'Enter') { const first = $('#shelf .vol-t'); if (first) first.click(); }
+  });
 }
 // Batch reading for what is in view: read the unread, annotate the read. Scoped like the
 // shelf itself -- a seated cartridge or a chosen subject narrows it -- and two-step armed,

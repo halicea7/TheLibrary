@@ -45,7 +45,7 @@ from library_agent.db.models import (
 from library_agent.llm import providers
 from library_agent.llm.client import LLM
 from library_agent.llm.embed import embed_texts
-from library_agent.llm.ollama import Ollama
+from library_agent.llm.ollama import Ollama, is_placeholder
 from library_agent.reading import genre as genre_mod
 
 log = logging.getLogger(__name__)
@@ -251,6 +251,7 @@ async def build_clusters(
             current = (
                 prev is not None
                 and prev.label is not None
+                and not (prev.label and is_placeholder(prev.label))  # filler is redone
                 and prev.id not in kept
                 and (art is None or (art.model == model and art.prompt_version == version))
             )

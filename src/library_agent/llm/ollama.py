@@ -19,7 +19,13 @@ class OllamaError(RuntimeError):
 
 # Models under a too-small context emit schema-shaped placeholders rather than failing,
 # which is far worse than an error because it silently writes junk into the index.
-_PLACEHOLDER = re.compile(r"^[.\u2026\s]*$|^(string|text|summary|todo|n/a)$", re.IGNORECASE)
+# A field named for itself ("The theme name", "label") is the same failure in words.
+_PLACEHOLDER = re.compile(
+    r"^[.\u2026\s]*$|^(string|text|summary|todo|n/a)$"
+    r"|^(the |a |your )?(theme|topic|document|section)?\s*(name|label|title|summary)"
+    r"( here| goes here)?\.?$",
+    re.IGNORECASE,
+)
 
 
 def is_placeholder(value: object) -> bool:

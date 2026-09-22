@@ -14,13 +14,22 @@ class TestPlaceholderDetection:
     """A too-small context makes the model emit schema-shaped placeholders instead of
     failing, which silently writes junk into the index. This guard is what caught it."""
 
-    @pytest.mark.parametrize("junk", ["...", "…", "   ", "", "string", "TODO", "n/a"])
+    @pytest.mark.parametrize(
+        "junk",
+        ["...", "…", "   ", "", "string", "TODO", "n/a", "The theme name", "label", "Title here"],
+    )
     def test_detects_junk(self, junk):
         assert is_placeholder(junk)
 
     @pytest.mark.parametrize(
         "real",
-        ["RAPTOR builds a recursive summary tree", "Information Retrieval", "0.94 recall"],
+        [
+            "RAPTOR builds a recursive summary tree",
+            "Information Retrieval",
+            "0.94 recall",
+            "Name Resolution",
+            "Theme Parks",
+        ],
     )
     def test_accepts_real_values(self, real):
         assert not is_placeholder(real)

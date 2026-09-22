@@ -285,17 +285,26 @@ class Ollama:
         before the first visible token, so the caller should surface it rather than
         leave the user staring at nothing. This was the true cause of every slow first
         token previously blamed on memory and prefill."""
+        # A finite answer, like every other call here. Without a cap a model that loops
+        # -- the abliterated coder is prone to it -- streams until the request times out;
+        # one answer reached ~144k characters and was cut off mid-word. A thinking model
+        # spends this budget on reasoning as well as the answer, so it gets more room.
+        thinks = await self.supports_thinking(model)
         payload = {
             "model": model,
             "messages": messages,
             "stream": True,
             "keep_alive": settings().keep_alive,
-            "options": {"temperature": temperature, "num_ctx": num_ctx},
+            "options": {
+                "temperature": temperature,
+                "num_ctx": num_ctx,
+                "num_predict": 16384 if thinks else 4096,
+            },
         }
         if seed is not None:
             payload["options"]["seed"] = seed
         # Only ask a model to think if it can; the others just answer.
-        if await self.supports_thinking(model):
+        if thinks:
             payload["think"] = True
         # Long thinking is legitimate; endless is not.
         async with self._client.stream("POST", "/api/chat", json=payload, timeout=900.0) as r:

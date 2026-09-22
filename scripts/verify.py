@@ -237,7 +237,14 @@ async def main():
     async with httpx.AsyncClient(base_url=API, timeout=600) as c:
         st = (await c.get("/api/settings")).json()
         ok("settings reports services", st["services"]["postgres"] and st["services"]["redis"] and st["services"]["ollama"], f"resident: {len(st['services']['resident_models'])}")
-        ok("settings lists models with their env vars", all(m["env"].startswith("LIBRARY_") for m in st["models"]) and len(st["models"]) >= 5)
+        ok("settings lists the fixed models with their env vars", all(m["env"].startswith("LIBRARY_") for m in st["models"]) and len(st["models"]) >= 3)
+        pv = (await c.get("/api/settings/providers")).json()
+        roles = {r["id"]: r for r in pv["roles"]}
+        ok("every role reports the model it runs on", {"chat_general","reading","threads","vision","troubleshoot"} <= set(roles) and all(r["model"] or r["id"]=="vision" for r in pv["roles"]), f"{len(roles)} roles")
+        ok("ollama's models are offered to the roles", bool(pv["catalogue"].get("ollama")), f"{len(pv['catalogue'].get('ollama') or [])} models")
+        ok("a provider's key is never returned", all("api_key" not in p for p in pv["providers"]))
+        r = await c.put("/api/settings/models", json={"threads": None})
+        ok("a role resets to its default", r.status_code == 200 and r.json()["threads"] == roles["threads"]["default"])
         before = len((await c.get("/api/settings/incidents")).json())
         await c.post("/api/settings/incidents/test"); await c.post("/api/settings/incidents/test")
         incs = (await c.get("/api/settings/incidents")).json()

@@ -37,7 +37,9 @@ from library_agent.llm.lease import mark_chat_active, mark_chat_done, redis_clie
 from library_agent.llm.liveness import Busy, gate, liveness
 from library_agent.reading.prompts import SYSTEM_LIBRARIAN
 from library_agent.retrieval.hybrid import SearchHit
-from library_agent.retrieval.pipeline import CHAT_RETRIEVAL, retrieve
+from library_agent.retrieval.pipeline import RetrievalConfig, retrieve
+from library_agent.retrieval.readings import named_documents, retrieve_readings
+from library_agent.retrieval.threads import relevant_threads, render_threads
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +47,20 @@ LENGTHS = {
     "short": ("3 to 4 sections", "150 to 250 words"),
     "medium": ("4 to 6 sections", "250 to 400 words"),
     "long": ("6 to 9 sections", "400 to 600 words"),
+    "report": ("8 to 12 sections", "500 to 800 words"),
 }
+
+# Per section, compose retrieves harder than a chat turn: it is a background job, and the
+# document is only as good as what each section is given. Passages carry the exact words;
+# readings (the library's Tier 1 summary of a section) carry a whole work's argument, so a
+# section that surveys a theme is not built from five stray paragraphs.
+COMPOSE_PASSAGES = 10
+COMPOSE_READINGS = 6
+COMPOSE_CONFIG = RetrievalConfig(name="compose", use_reranker=True, rerank_depth=40, per_document=3)
+# The thread block plus a section's passages and readings are a large prompt; the compose
+# model is chosen to have the room. A section still writes into a modest reply.
+COMPOSE_NUM_CTX = 65536
+COMPOSE_THREADS = 12
 
 PLAN_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -76,12 +91,18 @@ Brief:
 {brief}
 
 {scope}
-
+{threads}
 Plan it: a title, and {n_sections}. For each section give the heading, what it should
 cover (one or two sentences), and the search query that would find the right passages in
 the library for it (concrete terms, not a question). Sections should not overlap; order
-them so the document reads front to back. In `notes`, say briefly what shape you chose
-and why. Do not write the document.
+them so the document reads front to back.
+
+The threads above are connections the library has already found across several volumes —
+use them as the backbone of the plan, not an afterthought: a section should usually
+develop a thread, drawing the works it spans together. Where the library marked a
+disagreement (⚡), give it its due — a section, or a clearly argued paragraph within one —
+rather than smoothing it over. In `notes`, say briefly what shape you chose and why.
+Do not write the document.
 """
 
 WRITE_SYSTEM = """You are the librarian of a personal research library, writing a document for its
@@ -95,6 +116,9 @@ You will be given numbered passages retrieved for THIS section. Use them as mate
   reader can tell it apart from what the shelf says.
 - If the passages do not cover something the section needs, say so in a sentence rather
   than inventing it.
+- Some numbered items are marked "the library's reading of": its own summary of a section,
+  not a quotation. Cite them like passages. Lean on them for a work's overall argument and
+  on the passages for its exact words and figures.
 
 Write only this section's body in markdown: no title, no heading (it is added for you),
 no preamble, no summary of other sections. Use lists, code and tables where they belong.
@@ -172,7 +196,7 @@ async def compose(
     section_done) → done. The lease is held throughout: this is one long piece of work
     and background reading yields to it like it would to a chat."""
     cfg = settings()
-    model = model or providers.model_for("chat_general")
+    model = model or providers.model_for("compose")
     n_sections, words = LENGTHS.get(length, LENGTHS["medium"])
     redis = redis_client()
     client = LLM()
@@ -194,14 +218,44 @@ async def compose(
             return
         await mark_chat_active(redis)
         scope = f"Scope: only {scope_label}." if scope_label else "Scope: the whole library."
+        # What the library already connects across volumes, nearest this brief. The plan
+        # is built on these; a volume the brief names is favoured throughout.
+        named = []
+        async with session_scope() as db:
+            named = await named_documents(db, brief)
+            threads = await relevant_threads(
+                db,
+                brief,
+                client=client,
+                limit=COMPOSE_THREADS,
+                category_ids=category_ids,
+                cartridge_ids=cartridge_ids,
+            )
+        thread_block = render_threads(threads)
+        thread_text = (
+            f"\nThe library has already connected these across several volumes:\n{thread_block}\n"
+            if thread_block
+            else ""
+        )
+        yield {
+            "event": "threads",
+            "data": {
+                "count": len(threads),
+                "disputed": sum(1 for t in threads if t.get("contradiction")),
+                "labels": [t["label"] for t in threads],
+            },
+        }
         plan = await client.structured(
             model,
-            PLAN_PROMPT.format(brief=brief, scope=scope, n_sections=n_sections),
+            PLAN_PROMPT.format(
+                brief=brief, scope=scope, threads=thread_text, n_sections=n_sections
+            ),
             PLAN_SCHEMA,
             system=SYSTEM_LIBRARIAN,
             instructions=PLAN_PROMPT,
             temperature=0.3,
             think=True,
+            num_ctx=COMPOSE_NUM_CTX,
             num_predict=2500,
         )
         comp.title = (plan.get("title") or brief[:80]).strip()
@@ -228,15 +282,32 @@ async def compose(
         for i, sec in enumerate(outline):
             await mark_chat_active(redis)
             async with session_scope() as db:
-                hits = await retrieve(
+                q = sec["retrieve"] or sec["heading"]
+                passages = await retrieve(
                     db,
-                    sec["retrieve"] or sec["heading"],
-                    config=CHAT_RETRIEVAL,
+                    q,
+                    config=COMPOSE_CONFIG,
                     client=client,
-                    limit=cfg.chat_passages,
+                    limit=COMPOSE_PASSAGES,
                     category_ids=category_ids,
                     cartridge_ids=cartridge_ids,
+                    favour=named,
                 )
+                readings = await retrieve_readings(
+                    db,
+                    q,
+                    client=client,
+                    limit=COMPOSE_READINGS,
+                    category_ids=category_ids,
+                    cartridge_ids=cartridge_ids,
+                    favour=named,
+                )
+                # Passages first (exact words), then readings (a work's argument), each
+                # section a page of the shelf and a page of what the library made of it.
+                seen_r = {(h.document_id, h.section_path) for h in passages}
+                hits = passages + [
+                    h for h in readings if (h.document_id, h.section_path) not in seen_r
+                ]
                 docs = {
                     d.id: d
                     for d in (
@@ -265,6 +336,7 @@ async def compose(
                         page=h.page,
                         cartridge=provenance.get(h.document_id),
                         readings_only=bool(d and d.readings_only),
+                        kind=getattr(h, "kind", "passage"),
                     )
                     by_chunk[key] = src
                     comp.sources.append(src)
@@ -284,6 +356,7 @@ async def compose(
                             "document_id": s.document_id,
                             "cartridge": s.cartridge,
                             "readings_only": s.readings_only,
+                            "kind": s.kind,
                         }
                         for s in section_sources
                     ],
@@ -315,7 +388,9 @@ async def compose(
                 "data": {"index": i, "heading": sec["heading"], "covers": sec["covers"]},
             }
             buf: list[str] = []
-            async for kind, piece in client.chat_stream(model, messages, temperature=0.5):
+            async for kind, piece in client.chat_stream(
+                model, messages, temperature=0.5, num_ctx=COMPOSE_NUM_CTX
+            ):
                 if kind == "thinking":
                     yield {"event": "thinking", "data": piece}
                     continue

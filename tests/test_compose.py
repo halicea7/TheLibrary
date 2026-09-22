@@ -41,7 +41,7 @@ class TestAssembly:
 
     def test_slug_and_lengths(self):
         assert slugify("RAG Reading Guide: Core Concepts!") == "rag-reading-guide-core-concepts"
-        assert set(LENGTHS) == {"short", "medium", "long"}
+        assert set(LENGTHS) == {"short", "medium", "long", "report"}
 
     def test_save_and_list(self, tmp_path, monkeypatch):
         from library_agent.config import settings

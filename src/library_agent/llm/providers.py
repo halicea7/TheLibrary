@@ -42,6 +42,10 @@ ROLES: dict[str, dict[str, str]] = {
         "note": "Tier 1 and 2; artifacts record their model, so a different one re-reads the whole shelf on the next backfill",
     },
     "threads": {"label": "Threads", "note": "cluster summaries, conflict judging, shelving"},
+    "compose": {
+        "label": "Compose (long-form)",
+        "note": "writes documents from the whole shelf; a background job, so a larger, slower model earns its keep here without slowing chat",
+    },
     "vision": {"label": "Vision", "note": "reads a PDF's figures; empty turns it off"},
     "troubleshoot": {"label": "Troubleshooting", "note": "reads an incident against the docs"},
 }
@@ -180,6 +184,9 @@ def default_for(role: str) -> str:
         return cfg.reader_model
     if role == "threads":
         return cfg.reader_model
+    if role == "compose":
+        # Long-form writing wants the deepest model on offer; by default the chat model.
+        return cfg.chat_model_options.get("general", cfg.chat_model)
     if role == "vision":
         return cfg.vision_model
     if role == "troubleshoot":

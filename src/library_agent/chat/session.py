@@ -44,7 +44,7 @@ async def _history(db: AsyncSession, conversation_id: uuid.UUID) -> list[tuple[s
         await db.execute(
             select(Message.role, Message.content)
             .where(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at)
+            .order_by(*Message.in_order())
         )
     ).all()
     return [(r.role, r.content) for r in rows]

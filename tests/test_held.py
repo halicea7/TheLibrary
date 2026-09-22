@@ -25,3 +25,32 @@ async def test_unknown_chunk_ids_are_skipped(db):
     import uuid
 
     assert await hits_for_chunks(db, [uuid.uuid4()]) == []
+
+
+class TestConversationOrder:
+    """Both messages of a turn are written in one transaction and share a timestamp;
+    the question must still come back before the answer."""
+
+    async def test_a_turn_replays_question_first(self, db):
+        from sqlalchemy import select
+
+        from library_agent.db.models import Conversation, Message
+
+        conv = Conversation(title="T")
+        db.add(conv)
+        await db.flush()
+        # written answer-first, as the row order that caused the bug had them
+        db.add(Message(conversation_id=conv.id, role="assistant", content="A", sources={"n": 1}))
+        db.add(Message(conversation_id=conv.id, role="user", content="Q"))
+        await db.flush()
+        rows = list(
+            (
+                await db.execute(
+                    select(Message)
+                    .where(Message.conversation_id == conv.id)
+                    .order_by(*Message.in_order())
+                )
+            ).scalars()
+        )
+        assert [m.role for m in rows] == ["user", "assistant"]
+        assert [m.content for m in rows] == ["Q", "A"]

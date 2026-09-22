@@ -493,6 +493,14 @@ class Message(Base):
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
+    @staticmethod
+    def in_order() -> tuple[Any, Any]:
+        """How a conversation reads. Both messages of a turn are written in one
+        transaction, so `now()` gives them the same timestamp and the row order is
+        whatever the table hands back -- a replay once showed the answer above the
+        question. Within a timestamp, the question comes first."""
+        return (Message.created_at, Message.role == "assistant")
+
 
 # --------------------------------------------------------------------------- meta
 

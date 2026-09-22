@@ -157,7 +157,7 @@ async def list_conversations(db: SessionDep, limit: int = 20) -> list[Conversati
                 await db.execute(
                     select(Message.content)
                     .where(Message.conversation_id == c.id, Message.role == "user")
-                    .order_by(Message.created_at)
+                    .order_by(*Message.in_order())
                     .limit(1)
                 )
             ).scalar()
@@ -195,7 +195,7 @@ async def get_conversation(conversation_id: uuid.UUID, db: SessionDep) -> list[M
             await db.execute(
                 select(Message)
                 .where(Message.conversation_id == conversation_id)
-                .order_by(Message.created_at)
+                .order_by(*Message.in_order())
             )
         ).scalars()
     )

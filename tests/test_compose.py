@@ -41,6 +41,7 @@ class TestAssembly:
         # the composition carries a stable id, stamped in the colophon
         assert c.id and f"The Library · {c.id}" in md
         import uuid as _uuid
+
         _uuid.UUID(c.id)  # a real uuid
 
     def test_slug_and_lengths(self):
@@ -128,10 +129,80 @@ class TestLabelSanitizing:
 
         c = Composition(title="G", brief="b")
         c.sources = [
-            Source(n=1, chunk_id="c1", document_id="d1", document_title="Wiki",
-                   section_path="Ops › **Overview** › `run`", page=4),
+            Source(
+                n=1,
+                chunk_id="c1",
+                document_id="d1",
+                document_title="Wiki",
+                section_path="Ops › **Overview** › `run`",
+                page=4,
+            ),
         ]
         c.sections = [{"heading": "One", "covers": "", "body": "x [1].", "cited": [1]}]
         md = c.markdown()
         assert "[1] Wiki, p.4 — Ops › Overview › run" in md
         assert "**" not in md and "`run`" not in md
+
+
+class TestReviewFlags:
+    def test_flags_render_as_caveats_under_their_section(self):
+        from library_agent.chat.compose import Composition
+
+        c = Composition(title="G", brief="b")
+        c.sections = [
+            {
+                "heading": "One",
+                "covers": "",
+                "body": "Salting stops all attacks [1].",
+                "cited": [1],
+                "flags": [
+                    {
+                        "quote": "Salting stops all attacks",
+                        "issue": "the passage covers storage, not the whole auth flow",
+                        "condition": "the login path is itself injectable",
+                    }
+                ],
+            },
+            {
+                "heading": "Two",
+                "covers": "",
+                "body": "A measured claim [1].",
+                "cited": [1],
+                "flags": [],
+            },
+        ]
+        from library_agent.chat.citations import Source
+
+        c.sources = [
+            Source(
+                n=1, chunk_id="c1", document_id="d1", document_title="T", section_path="", page=1
+            )
+        ]
+        md = c.markdown()
+        assert "> ⚠ **Review** — “Salting stops all attacks”: the passage covers storage" in md
+        assert "It could fail if the login path is itself injectable" in md
+        # the well-supported section gets no caveat
+        assert md.count("⚠ **Review**") == 1
+
+    async def test_review_flags_only_genuine_overreach(self, scratch_db):
+        from library_agent.chat.compose import _review
+
+        class Client:
+            async def structured(self, model, prompt, schema, **kw):
+                # a model that finds one overreach
+                return {
+                    "flags": [
+                        {
+                            "quote": "X is impossible",
+                            "issue": "sources say hard, not impossible",
+                            "condition": "a weak key is used",
+                        },
+                        {"quote": "", "issue": "dropped: no quote"},  # incomplete, filtered out
+                    ]
+                }
+
+        flags = await _review(Client(), "m", "H", "A" * 200, "[1] passage text")
+        assert len(flags) == 1 and flags[0]["quote"] == "X is impossible"
+        assert flags[0]["condition"] == "a weak key is used"
+        # too-short a body is not reviewed at all
+        assert await _review(Client(), "m", "H", "tiny", "[1] x") == []

@@ -306,7 +306,8 @@ class ComposeIn(BaseModel):
     room: str | None = None
     subjects: list[str] = Field(default_factory=list)
     model: str | None = None
-    length: str = Field(default="medium", description="short | medium | long")
+    length: str = Field(default="medium", description="short | medium | long | report | thesis")
+    review: bool = Field(default=True, description="flag claims that reach past their evidence")
     shelve: bool = Field(default=False, description="also add the document to the library")
 
 
@@ -331,6 +332,7 @@ async def compose_json(req: ComposeIn, request: Request) -> dict:
         category_ids=subjects or None,
         cartridge_ids=[room] if room else None,
         scope_label=req.room or ", ".join(req.subjects),
+        review=req.review,
         caller=_caller(request),
     ):
         if ev["event"] == "done":
@@ -345,6 +347,7 @@ async def compose_json(req: ComposeIn, request: Request) -> dict:
         "references": result["references"],
         "verified": {"emitted": result["markers_emitted"], "resolved": result["markers_resolved"]},
         "sections": result["sections"],
+        "flags": result.get("flags", 0),
     }
     if req.shelve:
         import tempfile

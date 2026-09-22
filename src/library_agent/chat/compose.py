@@ -173,6 +173,52 @@ sections established, in order:
 State, as `claim`, what the chapter as a whole establishes in one sentence — the
 through-line later chapters can rely on. No preamble."""
 
+# The review pass: after a section is written, read it back against the passages it was
+# given and flag where it reaches past them. It does not rewrite -- the argument stays as
+# the librarian made it; the flags are for the reader to weigh. Amber, in the apparatus.
+REVIEW_SYSTEM = """You are a careful reviewer of a section written for a research library, and
+you are hard on it. You are given the section and the numbered passages it was written from.
+Find only claims that reach past the evidence — do not rewrite, do not praise, do not
+restate. A claim overreaches when:
+- the passage it cites supports part of the statement but not the whole of it;
+- it is absolute (never, always, cannot, guarantees, impossible, no way) where the sources
+  are conditional, or hold only under assumptions the sources state;
+- it generalises from a single case, or asserts a cause the sources only correlate;
+- it is presented as established but no passage actually supports it.
+A well-supported section has no flags. Do not invent problems to have something to say."""
+
+REVIEW_PROMPT = """Section: "{heading}"
+
+{body}
+
+Passages it was written from:
+{context}
+
+Return `flags`: each an overreaching claim, quoting the exact sentence from the section as
+`quote`, saying in `issue` why the evidence does not carry the whole claim, and in
+`condition` the circumstance under which the claim would be false. Empty if the section
+does not overreach."""
+
+REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "flags": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "quote": {"type": "string", "maxLength": 300},
+                    "issue": {"type": "string", "maxLength": 400},
+                    "condition": {"type": "string", "maxLength": 400},
+                },
+                "required": ["quote", "issue"],
+            },
+        }
+    },
+    "required": ["flags"],
+}
+
 
 @dataclass
 class Composition:
@@ -185,6 +231,7 @@ class Composition:
     hits_by_n: dict[int, SearchHit] = field(default_factory=dict)
     emitted: int = 0
     resolved: int = 0
+    flags: int = 0  # claims the review pass flagged as reaching past their evidence
 
     def markdown(self) -> str:
         out = [f"# {self.title}", ""]
@@ -197,6 +244,9 @@ class Composition:
                 last_ch = ch
             depth = "###" if nested else "##"
             out += [f"{depth} {s['heading']}", "", s.get("body", "").strip(), ""]
+            for fl in s.get("flags", []):
+                cond = f" It could fail if {fl['condition']}" if fl.get("condition") else ""
+                out += [f"> ⚠ **Review** — “{fl['quote']}”: {fl['issue']}{cond}", ""]
         used = sorted({n for s in self.sections for n in s.get("cited", [])})
         if used:
             out += ["## References", ""]
@@ -275,6 +325,39 @@ async def _chapter_thesis(client, model, title: str, chapter: str, takeaways: li
         return kept[-1]
 
 
+async def _review(client, model, heading: str, body: str, context: str) -> list[dict]:
+    """Read a finished section against its passages and flag where it reaches past them.
+    Flag-only: it never touches the prose."""
+    if len(body.strip()) < 120 or not context.strip():
+        return []
+    try:
+        out = await client.structured(
+            model,
+            REVIEW_PROMPT.format(heading=heading, body=body[:6000], context=context),
+            REVIEW_SCHEMA,
+            system=REVIEW_SYSTEM,
+            temperature=0.2,
+            think=False,
+            num_predict=700,
+        )
+    except Exception:
+        log.warning("review failed for %r", heading, exc_info=True)
+        return []
+    flags = []
+    for f in out.get("flags") or []:
+        quote = " ".join(str(f.get("quote") or "").split())
+        issue = " ".join(str(f.get("issue") or "").split())
+        if quote and issue:
+            flags.append(
+                {
+                    "quote": quote[:300],
+                    "issue": issue[:400],
+                    "condition": " ".join(str(f.get("condition") or "").split())[:400],
+                }
+            )
+    return flags
+
+
 def _established(sections: list[dict], chapter_theses: dict[str, str], current_chapter) -> str:
     """The running argument, two levels: the through-line of every chapter already closed,
     then each finished section of the chapter in progress. Flat documents have one implicit
@@ -313,6 +396,7 @@ async def compose(
     category_ids: list[uuid.UUID] | None = None,
     cartridge_ids: list[uuid.UUID] | None = None,
     scope_label: str = "",
+    review: bool = True,
     caller: str = "ui",
 ) -> AsyncIterator[dict]:
     """Yields SSE-shaped events: plan → for each section (section, sources, token*,
@@ -561,6 +645,13 @@ async def compose(
             comp.resolved += m["markers_resolved"]
             # Distil what this section settled, for the sections that follow.
             takeaway = await _takeaway(client, model, comp.title, sec["heading"], cleaned)
+            # Review the section against its own passages; flag where it reaches past them.
+            flags = (
+                await _review(client, model, sec["heading"], cleaned, context)
+                if review and section_hits
+                else []
+            )
+            comp.flags += len(flags)
             comp.sections.append(
                 {
                     "heading": sec["heading"],
@@ -569,6 +660,7 @@ async def compose(
                     "body": cleaned,
                     "cited": [s.n for s in used],
                     "takeaway": takeaway,
+                    "flags": flags,
                 }
             )
             yield {
@@ -579,6 +671,7 @@ async def compose(
                     "cited": [s.n for s in used],
                     "chapter": sec["chapter"],
                     "takeaway": takeaway,
+                    "flags": flags,
                     **m,
                 },
             }
@@ -592,6 +685,7 @@ async def compose(
                 "markdown": md,
                 "sections": len(comp.sections),
                 "sources": len(comp.sources),
+                "flags": comp.flags,
                 "markers_emitted": comp.emitted,
                 "markers_resolved": comp.resolved,
                 "references": [

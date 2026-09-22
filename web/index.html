@@ -662,6 +662,12 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .seal svg { width:190px; height:190px; }
 .seal figcaption { font:10px/1.5 var(--mono); color:var(--faint); margin-top:2px; }
 .seal figcaption code { color:var(--dim); }
+.caveat { font:11.5px/1.5 var(--sans); color:var(--dim); margin:8px 0 0; padding:6px 10px; border-left:2px solid var(--amber); background:color-mix(in srgb, var(--amber) 7%, transparent); border-radius:0 3px 3px 0; }
+.caveat b { color:var(--amber); font-weight:600; }
+.caveat q { color:var(--fg); font-style:italic; }
+.caveat q::before { content:"\201C"; } .caveat q::after { content:"\201D"; }
+.write .bar .rev { display:inline-flex; align-items:center; gap:5px; font:11px/1 var(--sans); color:var(--dim); cursor:pointer; }
+.write .bar .rev input { accent-color:var(--verdigris); }
 .doc .sec h2 { font:600 18px/1.35 var(--serif); margin:22px 0 8px; max-width:68ch; }
 .doc .sec .said { margin-top:0; }
 .doc .refs { margin-top:26px; padding-top:14px; border-top:1px solid var(--rule); max-width:78ch; }
@@ -2555,7 +2561,7 @@ async function openVolume(id) {
 }
 
 /* ── write ────────────────────────────────────────────────────────────── */
-const write = { brief: '', length: 'medium', busy: false, last: null };
+const write = { brief: '', length: 'medium', review: true, busy: false, last: null };
 function renderWrite() {
   const el = $('#view-write');
   if (el.dataset.ready) { loadSaved(); return; }
@@ -2565,6 +2571,7 @@ function renderWrite() {
     <div class="bar">
       <button class="go" id="wr-go" onclick="composeDoc()">draft it</button>
       <label>length <select id="wr-len" onchange="write.length=this.value"><option value="short">short</option><option value="medium" selected>medium</option><option value="long">long</option><option value="report">report</option><option value="thesis">thesis</option></select></label>
+      <label class="rev" title="After writing, flag any claim that reaches past the passages it cites — the argument is left as written."><input type="checkbox" id="wr-review" checked onchange="write.review=this.checked"> review claims</label>
       <span id="wr-scope"></span>
     </div>
     <div class="doc" id="wr-doc"></div>
@@ -2632,7 +2639,7 @@ async function composeDoc() {
   const room = roomName();
   // No model here: Write runs on the compose role (its own, larger model), not the chat
   // selector. The model actually used comes back on the plan event.
-  const body = { brief, length: write.length,
+  const body = { brief, length: write.length, review: write.review,
     category_ids: [...subjects], cartridge_ids: [...cartridges],
     scope_label: [room ? room + "'s shelf" : '', subjects.size ? `${subjects.size} subjects` : ''].filter(Boolean).join(' and ') };
   let secSources = [], secEl = null, said = null, buf = '', ev = null, text = '', result = null, wove = '', lastCh = null;
@@ -2683,6 +2690,11 @@ async function composeDoc() {
           const s = JSON.parse(raw);
           document.getElementById('wr-o' + s.index)?.setAttribute('data-state', 'done');
           sources = secSources; renderAnswer(said, s.body);  // the apparatus reads the global
+          for (const fl of (s.flags || [])) {
+            const c = document.createElement('div'); c.className = 'caveat';
+            c.innerHTML = `<b>⚠ Review</b> <q>${esc(fl.quote)}</q> — ${esc(fl.issue)}${fl.condition ? ` <em>Could fail if ${esc(fl.condition)}.</em>` : ''}`;
+            secEl.appendChild(c);
+          }
           const here = [];
           for (const n of (s.cited || [])) {
             const src = secSources.find(x => x.n === n); if (!src) continue;
@@ -2703,7 +2715,7 @@ async function composeDoc() {
               <button class="go" onclick="saveDoc()">save .md</button>
               <button class="go" onclick="window.print()">print / PDF</button>
               <button class="go" onclick="shelveDoc(this)">shelve it in the library</button>
-              <span class="tally">${result.sections} sections · ${result.references.length} passages cited · ${result.markers_resolved} of ${result.markers_emitted} citations verified${usingModel ? ' · ' + esc(usingModel) : ''}</span>
+              <span class="tally">${result.sections} sections · ${result.references.length} passages cited · ${result.markers_resolved} of ${result.markers_emitted} citations verified${result.flags ? ` · <b style="color:var(--amber)">${result.flags} claim${result.flags === 1 ? '' : 's'} flagged</b>` : ''}${usingModel ? ' · ' + esc(usingModel) : ''}</span>
             </div>`);
         } else if (ev === 'error') {
           doc.insertAdjacentHTML('beforeend', `<p style="color:var(--amber)">${esc(raw)}</p>`);

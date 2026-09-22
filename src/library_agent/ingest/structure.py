@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from itertools import pairwise
 
 from library_agent.ingest.extract import Extracted
 
@@ -153,6 +154,36 @@ def _window_sections(text: str, target_chars: int = 6000) -> list[Section]:
     return sections
 
 
+# A section is the unit of reading: Tier 1 reads SECTION_CHARS of it and Tier 2 puts all
+# its chunks in one prompt. A book bookmarked by chapter only would have 60k-char sections,
+# read from their first tenth; split those into parts of about a Tier 1 read.
+SPLIT_OVER = 9000
+PART_CHARS = 6000
+
+
+def _split_long(text: str, sections: list[Section]) -> list[Section]:
+    out: list[Section] = []
+    for s in sections:
+        span = s.char_end - s.char_start
+        # a heading whose text is mostly its subsections is not long itself
+        if span <= SPLIT_OVER:
+            out.append(s)
+            continue
+        cuts = [s.char_start]
+        for m in _PARA.finditer(text, s.char_start, s.char_end):
+            if m.end() - cuts[-1] >= PART_CHARS and s.char_end - m.end() >= PART_CHARS // 3:
+                cuts.append(m.end())
+        if len(cuts) == 1:  # one unbroken block; cut it anyway rather than read a tenth
+            cuts = list(range(s.char_start, s.char_end - PART_CHARS // 3, PART_CHARS))
+        cuts.append(s.char_end)
+        for n, (a, b) in enumerate(pairwise(cuts)):
+            title = s.title if n == 0 or not s.title else f"{s.title} (cont. {n + 1})"
+            out.append(Section(order_index=0, title=title, level=s.level, char_start=a, char_end=b))
+    for i, s in enumerate(out):
+        s.order_index, s.children = i, []
+    return out
+
+
 def build_sections(ex: Extracted) -> list[Section]:
     """TOC-derived where possible, paragraph-windowed otherwise."""
     text = ex.text
@@ -205,6 +236,7 @@ def build_sections(ex: Extracted) -> list[Section]:
                 s.order_index = i
                 s.children = []
             if sections:
+                sections = _split_long(text, sections)
                 _assign_paths(sections)
                 for s in sections:
                     s.page_start = ex.page_for_offset(s.char_start)
@@ -240,6 +272,7 @@ def build_sections(ex: Extracted) -> list[Section]:
             s.order_index, s.children = i, []
     else:
         sections = _window_sections(text)
+    sections = _split_long(text, sections)
     _assign_paths(sections)
     for s in sections:
         s.page_start = ex.page_for_offset(s.char_start)

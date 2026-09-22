@@ -116,6 +116,16 @@ Write the document-level entry for this library.
 - categories: 2-4 topic labels for the document as a whole.
 {category_guidance}"""
 
+PART_SUMMARY_PROMPT = """Document: "{title}"
+What it is: {orientation}
+
+This is one stretch of a long document ({span}), as the summaries of its sections, in order:
+{sections}
+
+In 5-8 sentences, say what this stretch covers and argues, in order, keeping its specific
+names, figures and conclusions. Plain prose, no preamble. It will be read alongside the
+same digest of the document's other stretches to write the entry for the whole."""
+
 # ---------------------------------------------------------------- categories
 
 CATEGORY_GUIDANCE_TEMPLATE = """

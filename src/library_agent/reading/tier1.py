@@ -42,6 +42,7 @@ log = logging.getLogger(__name__)
 OPENING_CHARS = 4000
 CLOSING_CHARS = 2500
 SECTION_CHARS = 6000
+SUMMARY_CHARS = 18000  # section summaries the document entry reads at once
 
 
 @dataclass
@@ -134,6 +135,39 @@ async def _document_text(db: AsyncSession, document_id: uuid.UUID) -> str:
     return "\n\n".join(rows)
 
 
+async def _digest_stretches(c, model, title, one_liner, summaries, gate=None) -> str:
+    groups: list[list[tuple[Section, str]]] = [[]]
+    size = 0
+    for s, txt in summaries:
+        line = len(txt) + 40
+        if groups[-1] and size + line > SUMMARY_CHARS * 5 // 6:
+            groups.append([])
+            size = 0
+        groups[-1].append((s, txt))
+        size += line
+    out = []
+    for g in groups:
+        if gate:
+            await gate()
+        first, last = g[0][0], g[-1][0]
+        span = first.path or first.title or "?"
+        if last is not first:
+            span += " … " + (last.path or last.title or "?")
+        digest = await c.generate(
+            model,
+            prompts.PART_SUMMARY_PROMPT.format(
+                title=title,
+                orientation=one_liner,
+                span=span,
+                sections="\n\n".join(f"[{s.path or s.title or '?'}] {t}" for s, t in g),
+            ),
+            system=prompts.SYSTEM_LIBRARIAN,
+            num_predict=700,
+        )
+        out.append(f"[{span}] {digest.strip()}")
+    return "\n\n".join(out)
+
+
 async def run_tier1(
     db: AsyncSession,
     document_id: uuid.UUID,
@@ -163,9 +197,16 @@ async def run_tier1(
     c = client or LLM()
     try:
         full_text = await _document_text(db, document_id)
-        toc = "\n".join(
-            f"{'  ' * (s.level - 1)}- {s.path or s.title or '(untitled)'}" for s in sections
-        )
+
+        def outline(depth: int) -> str:
+            return "\n".join(
+                f"{'  ' * (s.level - 1)}- {s.title or '(untitled)'}"
+                for s in sections
+                if s.level <= depth and "(cont. " not in (s.title or "")
+            )
+
+        # a book's full outline overruns the card; its chapters alone do not
+        toc = next((t for d in (9, 2, 1) if len(t := outline(d)) <= 4000), outline(1))
 
         # --- 1. orientation card -------------------------------------------------
         orient = await c.structured(
@@ -288,12 +329,16 @@ async def run_tier1(
 
         # --- 3. document summary ---------------------------------------------------
         joined = "\n\n".join(f"[{s.path or s.title or '?'}] {txt}" for s, txt in summaries)
+        if len(joined) > SUMMARY_CHARS:
+            # A book's section summaries overrun the prompt: digest them a stretch at a
+            # time first, so the entry covers the last chapter as well as the first.
+            joined = await _digest_stretches(c, model, doc.title, one_liner, summaries, gate)
         doc_out = await c.structured(
             model,
             prompts.DOCUMENT_SUMMARY_PROMPT.format(
                 title=doc.title,
                 orientation=one_liner,
-                sections=joined[:18000],
+                sections=joined[:SUMMARY_CHARS],
                 category_guidance=guidance,
             ),
             prompts.DOCUMENT_SUMMARY_SCHEMA,

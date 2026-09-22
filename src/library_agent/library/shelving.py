@@ -985,13 +985,18 @@ async def split_crowded(
                 log.info("split of %s produced nothing usable", sub)
                 continue
             for name in names:
-                cat = await taxonomy.get_or_create(db, name)
-                # A proposed name can resolve, through an old fold, to the very shelf
-                # being split; that would put the volumes straight back on it.
+                # Literal, like a design: a name is revived if it was folded, never
+                # redirected to the shelf being split.
+                cat = await taxonomy.designate(db, name)
                 if not cat or cat.id == sid or cat.name in tx.tops:
                     continue
-                if cat.parent_id is None:
-                    cat.parent_id = tx.ids[top]
+                if cat.parent_id is not None and cat.parent_id != tx.ids[top]:
+                    # A sub-shelf on another top shelf. Listing it here would file this
+                    # shelf's volumes under that other top: 396 handbook pages went
+                    # under an internal wiki's 'Systems' that way.
+                    log.info("split of %s: %r is a sub-shelf elsewhere; skipped", sub, cat.name)
+                    continue
+                cat.parent_id = tx.ids[top]
                 if cat.name not in tx.tops[top]:
                     tx.tops[top].append(cat.name)
                     tx.ids[cat.name] = cat.id

@@ -103,3 +103,35 @@ class TestArgumentMemory:
         assert "### A1" in md and "### B1" in md
         # one chapter heading each, not one per section
         assert md.count("## Part I\n") == 1 and md.count("## Part II\n") == 1
+
+
+class TestLabelSanitizing:
+    """Section paths from HTML/wiki ingestion keep markup; it must not leak into a
+    reference list, but code and paths must survive."""
+
+    def test_strips_markup_keeps_code_and_paths(self):
+        from library_agent.chat.citations import plain_label
+
+        assert plain_label("🔧 **Learning Modules Overview**") == "🔧 Learning Modules Overview"
+        assert plain_label("Strapi `where` smuggling") == "Strapi where smuggling"
+        assert plain_label("<code>x</code> and <b>y</b>") == "x and y"
+        assert plain_label("~~gone~~ kept") == "gone kept"
+        # a lone glob, snake_case and a path are not markdown and stay intact
+        assert plain_label("LFI via /proc/*/fd") == "LFI via /proc/*/fd"
+        assert plain_label("Insecure Randomness › mt_rand") == "Insecure Randomness › mt_rand"
+        assert plain_label("AF_UNIX MSG_OOB") == "AF_UNIX MSG_OOB"
+        assert plain_label(None) == "" and plain_label("  a   b ") == "a b"
+
+    def test_references_are_clean(self):
+        from library_agent.chat.citations import Source
+        from library_agent.chat.compose import Composition
+
+        c = Composition(title="G", brief="b")
+        c.sources = [
+            Source(n=1, chunk_id="c1", document_id="d1", document_title="Wiki",
+                   section_path="Ops › **Overview** › `run`", page=4),
+        ]
+        c.sections = [{"heading": "One", "covers": "", "body": "x [1].", "cited": [1]}]
+        md = c.markdown()
+        assert "[1] Wiki, p.4 — Ops › Overview › run" in md
+        assert "**" not in md and "`run`" not in md

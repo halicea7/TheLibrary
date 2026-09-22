@@ -13,7 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from library_agent.chat import answer as answer_mod
 from library_agent.chat import effort as effort_mod
-from library_agent.chat.citations import Source, build_sources, citation_validity, validate
+from library_agent.chat.citations import (
+    Source,
+    build_sources,
+    citation_validity,
+    plain_label,
+    validate,
+)
 from library_agent.chat.rewrite import rewrite_query
 from library_agent.config import settings
 from library_agent.db.models import Conversation, Document, Message
@@ -229,9 +235,9 @@ async def run_turn(
             "data": [
                 {
                     "n": s.n,
-                    "title": s.document_title,
+                    "title": plain_label(s.document_title),
                     "page": s.page,
-                    "section": s.section_path,
+                    "section": plain_label(s.section_path),
                     "document_id": s.document_id,
                     "readings_only": s.readings_only,
                     "cartridge": s.cartridge,
@@ -300,11 +306,11 @@ async def run_turn(
                         "cited": [
                             {
                                 "n": s.n,
-                                "title": s.document_title,
+                                "title": plain_label(s.document_title),
                                 "page": s.page,
                                 "chunk_id": s.chunk_id,
                                 "document_id": s.document_id,
-                                "section": s.section_path,
+                                "section": plain_label(s.section_path),
                                 "kind": s.kind,
                             }
                             for s in used

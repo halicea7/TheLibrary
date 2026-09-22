@@ -26,7 +26,13 @@ from typing import Any
 
 from sqlalchemy import select
 
-from library_agent.chat.citations import Source, citation_validity, render_context, validate
+from library_agent.chat.citations import (
+    Source,
+    citation_validity,
+    plain_label,
+    render_context,
+    validate,
+)
 from library_agent.config import settings
 from library_agent.db.models import Document
 from library_agent.db.session import session_scope
@@ -199,9 +205,10 @@ class Composition:
                 if not src:
                     continue
                 loc = f", p.{src.page}" if src.page else ""
-                sec = f" — {src.section_path}" if src.section_path else ""
+                path = plain_label(src.section_path)
+                sec = f" — {path}" if path else ""
                 who = f" ({src.cartridge['name']})" if src.cartridge else ""
-                out.append(f"[{n}] {src.document_title}{loc}{sec}{who}")
+                out.append(f"[{n}] {plain_label(src.document_title)}{loc}{sec}{who}")
         stamp = datetime.now(UTC).strftime("%Y-%m-%d")
         out += [
             "",
@@ -481,9 +488,9 @@ async def compose(
                     "sources": [
                         {
                             "n": s.n,
-                            "title": s.document_title,
+                            "title": plain_label(s.document_title),
                             "page": s.page,
-                            "section": s.section_path,
+                            "section": plain_label(s.section_path),
                             "document_id": s.document_id,
                             "cartridge": s.cartridge,
                             "readings_only": s.readings_only,
@@ -590,9 +597,9 @@ async def compose(
                 "references": [
                     {
                         "n": s.n,
-                        "title": s.document_title,
+                        "title": plain_label(s.document_title),
                         "page": s.page,
-                        "section": s.section_path,
+                        "section": plain_label(s.section_path),
                         "document_id": s.document_id,
                         "cartridge": s.cartridge,
                     }

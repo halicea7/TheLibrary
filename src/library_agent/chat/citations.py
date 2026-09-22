@@ -16,6 +16,27 @@ from library_agent.retrieval.hybrid import SearchHit
 
 _MARKER = re.compile(r"\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]")
 
+# Section paths and titles from HTML/wiki ingestion keep their markup -- "**Overview**",
+# "`where` smuggling", "<code>x</code>" -- which leaks raw into a reference list. Strip the
+# paired emphasis and tags a heading picks up, but leave lone characters that belong to code
+# and paths (mt_rand, /proc/*/fd, a * glob) alone.
+_LABEL_SUBS = [
+    (re.compile(r"<[^>]+>"), ""),  # html tags
+    (re.compile(r"\*\*(.+?)\*\*"), r"\1"),  # **bold**
+    (re.compile(r"__(.+?)__"), r"\1"),  # __bold__
+    (re.compile(r"~~(.+?)~~"), r"\1"),  # ~~strike~~
+    (re.compile(r"`([^`]+)`"), r"\1"),  # `code`
+]
+
+
+def plain_label(s: str | None) -> str:
+    """A title or section path as plain text, safe to drop into a reference or a margin
+    note. Not for passage bodies -- only for the short labels a document displays."""
+    out = s or ""
+    for pat, repl in _LABEL_SUBS:
+        out = pat.sub(repl, out)
+    return " ".join(out.split())
+
 
 @dataclass
 class Source:
@@ -36,9 +57,10 @@ class Source:
 
     def label(self) -> str:
         loc = f", p.{self.page}" if self.page else ""
+        title = plain_label(self.document_title)
         if self.readings_only and self.cartridge:
-            return f"{self.cartridge['name']}'s reading of {self.document_title}{loc}"
-        return f"{self.document_title}{loc}"
+            return f"{self.cartridge['name']}'s reading of {title}{loc}"
+        return f"{title}{loc}"
 
 
 def build_sources(hits: list[SearchHit], held: set | None = None) -> list[Source]:
@@ -79,9 +101,10 @@ def render_context(
             body = body[:max_chars].rsplit(" ", 1)[0] + " …"
         note = (reflections or {}).get(str(hit.chunk_id))
         what = "the library's reading of " if src.kind == "reading" else ""
+        sec = plain_label(src.section_path)
         blocks.append(
-            f"[{src.n}] {what}{src.document_title}{loc}"
-            f"{f' — {src.section_path}' if src.section_path else ''}\n{body}"
+            f"[{src.n}] {what}{plain_label(src.document_title)}{loc}"
+            f"{f' — {sec}' if sec else ''}\n{body}"
             + (f"\n(the library's note on this passage: {note.strip()[:500]})" if note else "")
         )
     return "\n\n".join(blocks)

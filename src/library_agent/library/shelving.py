@@ -222,13 +222,10 @@ class Taxonomy:
             tops = {t: s for t, s in self.tops.items() if "local" in self.homes.get(t, set())}
         if not tops:
             return self
-        return Taxonomy(
-            tops=tops,
-            ids={
-                n: i for n, i in self.ids.items() if n in tops or any(n in s for s in tops.values())
-            },
-            homes={t: h for t, h in self.homes.items() if t in tops},
-        )
+        # The sub-shelf lists and the id map are shared, not copied: a sub-shelf the
+        # placer makes through this view must exist for the whole shelf, or a later
+        # split finds a name with no id.
+        return Taxonomy(tops=tops, ids=self.ids, homes=self.homes)
 
 
 async def load_taxonomy(db: AsyncSession) -> Taxonomy:
@@ -592,7 +589,14 @@ async def _design_one(db: AsyncSession, c: Any, coll: Collection, progress=None)
             think=True,
         )
         if _taxonomy_is_sane(design, max_top):
-            log.info("%s: design accepted: %s", coll.name, _top_names(design))
+            log.info(
+                "%s: design accepted: %s",
+                coll.name,
+                "; ".join(
+                    f"{s.get('name')} › {' · '.join(str(k) for k in s.get('sub_shelves') or [])}"
+                    for s in design.get("shelves") or []
+                ),
+            )
             break
         log.info("%s: design attempt %d rejected: %s", coll.name, attempt, _top_names(design))
     shelves = (design.get("shelves") or [])[:max_top]
@@ -668,8 +672,11 @@ async def build_taxonomy(
         if own:
             await c.aclose()
 
-    # Clear the old structure; every canonical category is re-homed below.
+    # Clear the old structure; every canonical category is re-homed below, and every
+    # read volume is taken off the shelf so that a placement that fails leaves it
+    # visibly unshelved rather than sitting on a shelf that no longer exists.
     await db.execute(update(Category).values(parent_id=None))
+    await db.execute(update(Document).where(Document.tier >= 1).values(shelf_id=None))
     tx = Taxonomy()
     absorbed: set[uuid.UUID] = set()
     for coll, out in designs:

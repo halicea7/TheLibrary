@@ -50,6 +50,10 @@ Drop PDFs, Markdown, HTML, or text onto the shelf — folders are walked. An HTM
 curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything once read
 ```
 
+**Look along the shelf** — the line under the shelf header filters it as you type: every word must begin a word in a volume's title, its shelf, or its cartridge, so *psych tac* finds the Psychological Tactics shelf. Matching shelves open, your words are lit, Enter opens the first volume, Escape clears. It reads names only; when nothing matches it offers to *look inside the passages*, which is Find.
+
+**Books read as books.** A PDF bookmarked by chapter only would hand the reader 40–60k-character sections, of which Tier 1 reads a fraction. So any section over ~9k characters is cut into parts of about one read at paragraph boundaries (*Chapter 3 (cont. 2)*), and a long document's summary is written from a digest of each stretch rather than from its opening chapters. A 700-page book reads fully — both tiers — in under twenty minutes.
+
 Background work shows under **In hand** in the left column, with a bar — a reading, an annotation, a threads rebuild counting its clusters — and a **pause**: the piece in progress finishes (a section, a cluster), nothing new starts until you resume, the queue keeps its order. Chat is never paused; it already has priority over reading.
 
 The hosted demo at the top of this page is the same `web/` directory served from GitHub Pages: on a `github.io` host (or with `?demo` on a local instance) the page loads `web/demo.js` first, a stand-in for the server that answers every API call with placeholder material and replaces the first-visit tour with a longer one that explains how each part works while doing it on screen. Nothing to update: it is always the current UI.
@@ -60,7 +64,9 @@ The first visit is walked: a **tour** lights one part of the room at a time — 
 
 **Ask** — talk to the collection. Narrow it by subject with the chips or by clicking a subject on the shelf. Switch models per conversation. Set a **stance** to loosen the librarian's reserve: *opinionated*, *contrarian · charitable*, *cynical · optimistic*; answers given under a stance are labelled in violet so you always know which ones were the librarian speaking for itself. The desk bar names the conversation, starts a new one, and lists earlier ones; opening one replays it with its margin notes, and asking again continues it.
 
-**Effort** — a dial in the tab bar. *quick*: three passages, no reranker, a lookup (~3 s). *normal*: five passages, reranked, follow-ups rewritten (~10 s). *deep*: the question is broken into two to four searches, each retrieved, the union reranked to ten passages, a larger context — for comparisons and multi-part questions (~25 s). The model has no clean effort knob of its own, so effort is the work around it, which is where answers actually change: on *compare SSTI and SQL injection*, quick and normal cite only the SSTI volumes; deep is the first level with both sides in hand. Also `effort` on `/api/v1/ask` and the MCP tool.
+An answer draws on two kinds of source. **Passages** are the exact words of a page. **Readings** are the library's own Tier 1 summary of a section — denser than a passage, and the only way a whole book fits in front of the model at once — retrieved beside the passages, cited the same way, and marked *reading* in the margin. A question that **names a volume** by title lifts the per-document cap for that volume, so its subject is not cut to a few passages among many. In Settings, an **About you** note — who the library is for, in your words — is read into every answer's system prompt, setting the register and what can be assumed; it is not a passage and never cited.
+
+**Effort** — a dial in the tab bar. *quick*: three passages, no reranker, a lookup (~3 s). *normal*: five passages and four section readings, reranked, follow-ups rewritten (~10 s). *deep*: the question is broken into two to four searches, each retrieved, the union reranked to sixteen passages beside eight readings, a larger context — for comparisons, multi-part questions, and "what does this work say across its chapters" (~25 s). The model has no clean effort knob of its own, so effort is the work around it, which is where answers actually change: on *compare SSTI and SQL injection*, quick and normal cite only the SSTI volumes; deep is the first level with both sides in hand. Also `effort` on `/api/v1/ask` and the MCP tool.
 
 **Find** — plain retrieval, showing each passage's dense and lexical rank. **hold** on a hit keeps that passage in hand: the next answer starts from the passages you hold and retrieval fills the rest of its budget around them, and their margin notes say *held*, so an answer shows which of its evidence was yours and which the library found. The tray under the composer lists what is in hand; follow-ups keep it until you let go. Your words are lit in each passage, marker-pen style, and the **sentence nearest your question** is lifted — the passages that matter most are often the ones found by meaning, with none of your words in them, and that sentence is why they came up. The nebula stays up behind it: when results land, the camera dives on each finding in turn with a spin and a large label; hovering a row takes over, and clicking opens the volume.
 
@@ -82,7 +88,11 @@ Threads are rebuilt on their own — once, ten minutes after the last read of a 
   <img src="docs/reader.jpg" alt="Reading BERT. The passage about WordPiece embeddings with the library's reflection beside it in the margin, and Figure 1 set into the section with its caption from the page." width="900"/>
 </p>
 
-**Write** — a brief in, a document out. The librarian plans an outline, then writes each section *retrieving for that section*, so every paragraph keeps its `[n]` margin notes, numbered across the whole document and verified per section; a references list closes it. Save it as `.md`, print it to PDF, or **shelve it** — it becomes a volume, and the library can read what it wrote. Scoped by the chips and the rack like everything else.
+**Write** — a brief in, a document out. Before it outlines, the librarian pulls the **threads** nearest the brief — the cross-document clusters the library already found, with the disagreements it judged among them — and builds the sections on those, giving each contradiction its due; a *woven from N threads* line says what went in. Then it writes each section *retrieving for that section* (ten passages and the library's readings of the nearest sections, favouring a volume the brief names), so every paragraph keeps its `[n]` margin notes, numbered across the whole document and verified per section.
+
+A long document holds its argument rather than drifting: when a section finishes, a structured call distils **what it established** — one claim, not a summary — and that running ledger is fed into every later section, which is told to build on it rather than repeat it. The **thesis** length plans in two levels, chapters each with sections, and the ledger works at both: a through-line per closed chapter plus the sections of the one in progress. Every composition is stamped with a **uuid** and closed by a **seal** — a small nebula of exactly what it drew on, one star per cited volume, coloured by provenance, lines where two were used together — ringed like a wax stamp with its id and date.
+
+Save it as `.md` (the seal travels as inline SVG), print it to PDF, or **shelve it** — it becomes a volume, clean of the seal, and the library can read what it wrote. Scoped by the chips and the rack like everything else. Write runs on its own model role (see Models), so a larger, slower model can compose while chat stays fast.
 
 <p align="center">
   <img src="docs/write.jpg" alt="Write. A brief at the top; below it the document the library composed: title, the plan's reasoning, the outline, and each section with its own margin notes." width="900"/>
@@ -102,7 +112,7 @@ Threads are rebuilt on their own — once, ten minutes after the last read of a 
 
 This is what makes a 500-document backfill a single overnight rather than the ~260 GPU-hours a per-chunk deep pass would cost.
 
-**Retrieval** is dense + lexical fused with reciprocal rank fusion, in one Postgres query, then reranked by a cross-encoder — every stage measured against a generated question set and switchable. Chat reranks; keyword search doesn't, because the eval showed the cross-encoder *hurts* short keyword queries. After fusion, passages are capped per document (two in chat, three in deep) so a question that spans two volumes reaches the model with both in hand.
+**Retrieval** is dense + lexical fused with reciprocal rank fusion, in one Postgres query, then reranked by a cross-encoder — every stage measured against a generated question set and switchable. Chat reranks; keyword search doesn't, because the eval showed the cross-encoder *hurts* short keyword queries. After fusion, passages are capped per document (two in chat, three in deep) so a question that spans two volumes reaches the model with both in hand — unless the question names a volume, which lifts the cap for it. Alongside the passages, Ask and Write also retrieve **readings** — the Tier 1 section summaries, embedded like everything else — so a whole work's argument reaches the model, not only the pages it quotes; Find does neither, staying plain passage search.
 
 **The nebula.** Behind Ask, Find and Threads the library is drawn as a cloud: one point per volume, edges where volumes cite each other, share a thread, or sit close in meaning, laid out by a small force simulation in three dimensions and turning slowly. It thickens as the library grows; the volumes an answer drew on light up as they are retrieved.
 
@@ -120,7 +130,7 @@ This is what makes a 500-document backfill a single overnight rather than the ~2
 
 ## Settings and incidents
 
-The Settings tab shows what the library is running on — services, models, retrieval and library configuration, each with the environment variable that changes it — and a maintenance row (collect garbage, rebuild threads, reshelve). Below it is the **incident log**: anything that escapes a route, fails a background job or a chat turn, or is logged at `ERROR` is recorded there, deduplicated within a window.
+The Settings tab opens with **About you** — a note on who the library is for, in your own words, read into every answer — then shows what the library is running on: services, models, retrieval and library configuration, each with the environment variable that changes it, and a maintenance row (collect garbage, rebuild threads, reshelve). Below it is the **incident log**: anything that escapes a route, fails a background job or a chat turn, or is logged at `ERROR` is recorded there, deduplicated within a window.
 
 *Troubleshoot* asks the model to read an incident against the library's own documentation — [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md), this README, the devlog, the launcher and ops scripts — and answer with a diagnosis, the likely cause (environment, configuration, data, model, or a defect in the library itself), steps with commands for *you* to run, and the sections it leaned on. Nothing is executed: it says what to do; you do it. Every suggested command is checked against the commands the docs actually show, and anything the model appears to have invented is marked. When the cause looks like a defect, it drafts a GitHub issue — what happened, the error, what was tried, the environment — and offers it as a pre-filled link, with home paths and anything key-shaped scrubbed.
 
@@ -197,6 +207,7 @@ A team's documentation comes in as its own cartridge (`./library import ~/docs -
 | Reading (all passes) | `qwen3:30b-a3b` | Pinned corpus-wide: artifacts from different models drift |
 | Chat — general | `qwen3:30b-a3b` | Thinks before answering; the UI streams it |
 | Chat — technical | `huihui_ai/qwen3-coder-abliterated` | Per-conversation toggle |
+| Compose (Write) | `qwen3:30b-a3b` | A background job, so it can carry a larger, slower model without slowing chat |
 | Embeddings | `bge-m3` | 1024-dim, stored as `halfvec` |
 | Reranker | `BAAI/bge-reranker-v2-m3` | In-process torch; the one thing not served by Ollama |
 | Figures | `qwen2.5vl` | Reads each figure into a passage at Tier 1; optional |
@@ -205,7 +216,7 @@ Ollama can be local or remote — every model call follows `LIBRARY_OLLAMA_URL`,
 
 ### Other providers
 
-Ollama is the default and needs nothing set up. Any role can also run on a **provider**: anything that speaks the OpenAI chat-completions protocol — OpenAI, Anthropic's compatible endpoint, OpenRouter, Groq, Mistral, DeepSeek, LM Studio, vLLM, llama.cpp's server, or another Ollama's `/v1`. Add one in Settings › Providers with an id, a base URL ending in `/v1` and a key; **test** lists its models and has one answer, so a wrong key or URL shows at once. Its models then appear in the role dropdowns under Settings › Models, prefixed with the id — `openrouter:anthropic/claude-sonnet-4.5` — and a role pointed at one carries a *remote* mark. Roles are chat (general and technical), reading, threads (cluster summaries, conflict judging, shelving), vision and troubleshooting; a role left at *default* is whatever the environment says.
+Ollama is the default and needs nothing set up. Any role can also run on a **provider**: anything that speaks the OpenAI chat-completions protocol — OpenAI, Anthropic's compatible endpoint, OpenRouter, Groq, Mistral, DeepSeek, LM Studio, vLLM, llama.cpp's server, or another Ollama's `/v1`. Add one in Settings › Providers with an id, a base URL ending in `/v1` and a key; **test** lists its models and has one answer, so a wrong key or URL shows at once. Its models then appear in the role dropdowns under Settings › Models, prefixed with the id — `openrouter:anthropic/claude-sonnet-4.5` — and a role pointed at one carries a *remote* mark. Roles are chat (general and technical), reading, threads (cluster summaries, conflict judging, shelving), **compose** (long-form Write, its own role so a slow, strong model writes documents while chat stays fast), vision and troubleshooting; a role left at *default* is whatever the environment says.
 
 Providers and assignments live in `~/.library-agent/providers.json`, readable by you alone; the API and the worker both pick a change up without a restart. Two things are deliberate. *Reading* is switchable but warns before it changes: artifacts record the model that wrote them, and a different reader means the next backfill re-reads the whole shelf at that model's price. *Embeddings* are not switchable at all — every vector is `bge-m3` at 1024 dimensions, and moving them is a re-embedding of everything. Structured output asks for `response_format: json_schema` and falls back to `json_object` with the schema in the prompt where a server refuses it; reasoning a provider streams (`reasoning_content`) shows as the murmur.
 
@@ -247,13 +258,13 @@ library                 one-command launcher
 src/library_agent/
   ingest/               extraction, section tree, chunking, dedup, bulk import
   reading/              tier 1 and tier 2 passes, versioned prompts
-  retrieval/            hybrid search, router, reranked pipeline
+  retrieval/            hybrid search, router, reranked pipeline; readings and threads for compose
   library/              clusters, citation graph, contradictions, taxonomy, shelving, cartridges
   ops/                  incidents and troubleshooting against the docs
   api/routes/v1.py      plain JSON for other programs; api/auth.py the door
   llm/liveness.py       the one-token probe and the generation gate
   mcp_server.py         the library as MCP tools
-  chat/                 citations, query rewriting, stances, streaming, composing
+  chat/                 citations, query rewriting, stances, streaming, composing (threads, argument memory, chapters, the seal)
   eval/                 question generation, recall@k harness
   api/  worker/  db/
 web/index.html          the UI, one file, no build step

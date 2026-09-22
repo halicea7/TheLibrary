@@ -1190,3 +1190,28 @@ nothing on the shelf and the volume was left homeless with only the tracer to sa
 (the placer asks once more, warmer; a reshelve gives the rest one last look after the
 splits and merges). The library's first year of code assumed a few hundred volumes;
 1,600 is where those assumptions came due.
+
+**The shelf, designed per collection.** The afternoon's reshelve filed an internal wiki
+under "System Exploitation": the designer read the first three hundred titles in
+alphabetical order, all one cartridge's, and never saw the other. Six reshelves later
+the one-prompt design had found five more ways to tangle two collections -- a top shelf
+named twice to satisfy a minimum of two, "Security" redirected through an old fold to a
+tag called "Network Services" while a sub-shelf had that name, a split adopting an
+existing tag under whatever top was being split, a crowded shelf taken off the rack
+before its volumes had been re-placed, thinking on top of written reasoning eating the
+split's whole output budget. Each is fixed where it lived, and the structure changed
+underneath them: **each collection -- every cartridge, and the volumes shelved directly --
+is designed for on its own**, from its own titles and tags and the description its maker
+writes on the edit page (`cartridge.description`, shipped in the manifest), and a volume
+is placed only among its collection's shelves (`Taxonomy.homes`, kept with the design).
+Design names are literal (`taxonomy.designate`); a sub-shelf name that lives elsewhere
+is not a place; placements are committed before the evening-out; a crowded shelf stays on
+the rack until it is empty. The wiki now sits under three top shelves of its own -- its
+systems, its administration, its infrastructure -- beside a Cybersecurity shelf for the
+handbook and a Machine Learning shelf for the papers, with nothing on the wrong side.
+Also today: the library's own log lines reach the worker log (they did not, which is why
+this took six runs instead of two); a UX professional's first sight of the room named the
+intent unprompted; and a partner team's OpenAI-protocol router was added as a provider
+and answered a cited question in their cartridge's room in eleven seconds, end to end,
+with a backoff on 429 so a throttled pass waits rather than dies. Ollama remains the
+default for every role.

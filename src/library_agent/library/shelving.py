@@ -862,6 +862,10 @@ async def _resolve_place(db: AsyncSession, tx: Taxonomy, out: dict[str, Any]) ->
                 sub.parent_id = tx.ids[top]
                 tx.tops[top].append(sub.name)
                 tx.ids[sub.name] = sub.id
+            elif sub and sub.parent_id != tx.ids[top]:
+                # The name is a sub-shelf on another top shelf -- another collection's,
+                # very likely. Placing here would leak the volume across; ask again.
+                sub = None
     return sub
 
 

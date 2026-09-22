@@ -172,6 +172,8 @@ through-line later chapters can rely on. No preamble."""
 class Composition:
     title: str = ""
     brief: str = ""
+    # A stable id for this composition: the seal's stamp, and how a shelved copy is known.
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
     sections: list[dict[str, Any]] = field(default_factory=list)  # heading, covers, body
     sources: list[Source] = field(default_factory=list)  # global numbering
     hits_by_n: dict[int, SearchHit] = field(default_factory=dict)
@@ -204,6 +206,8 @@ class Composition:
         out += [
             "",
             f"*Composed by The Library on {stamp} from {len(used)} passages; unmarked claims are the librarian's own synthesis.*",
+            "",
+            f"`The Library · {self.id}`",
             "",
         ]
         return "\n".join(out)
@@ -400,6 +404,7 @@ async def compose(
                 "notes": plan.get("notes", ""),
                 "sections": outline,
                 "model": model,
+                "id": comp.id,
             },
         }
         chapter_theses: dict[str, str] = {}
@@ -576,6 +581,7 @@ async def compose(
             "event": "done",
             "data": {
                 "title": comp.title,
+                "id": comp.id,
                 "markdown": md,
                 "sections": len(comp.sections),
                 "sources": len(comp.sources),

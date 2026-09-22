@@ -38,6 +38,10 @@ class TestAssembly:
         assert "[1] Alpha, p.3" in md and "[3] Gamma, p.9 (Ops)" in md
         assert "[2] Beta" not in md  # retrieved, never cited: not a reference
         assert "unmarked claims are the librarian's own synthesis" in md
+        # the composition carries a stable id, stamped in the colophon
+        assert c.id and f"The Library · {c.id}" in md
+        import uuid as _uuid
+        _uuid.UUID(c.id)  # a real uuid
 
     def test_slug_and_lengths(self):
         assert slugify("RAG Reading Guide: Core Concepts!") == "rag-reading-guide-core-concepts"

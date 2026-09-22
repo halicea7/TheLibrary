@@ -26,6 +26,7 @@ from library_agent.llm.liveness import Busy, gate, liveness
 from library_agent.ops.incidents import record_exception
 from library_agent.retrieval.hybrid import SearchHit
 from library_agent.retrieval.pipeline import hits_for_chunks, retrieve
+from library_agent.retrieval.readings import named_documents, retrieve_readings
 
 log = logging.getLogger(__name__)
 
@@ -159,6 +160,8 @@ async def run_turn(
                 held_hits = await hits_for_chunks(db, pinned) if pinned else []
                 seen: set = {h.chunk_id for h in held_hits}
                 merged: list[SearchHit] = []
+                # A volume the question names is its subject, not one voice among many.
+                named = await named_documents(db, question) if needs_retrieval else []
                 for q in queries if needs_retrieval else []:
                     for h in await retrieve(
                         db,
@@ -170,6 +173,7 @@ async def run_turn(
                         else max(3, lvl.passages // len(queries) + 2),
                         category_ids=category_ids,
                         cartridge_ids=cartridge_ids,
+                        favour=named,
                     ):
                         if h.chunk_id not in seen:
                             seen.add(h.chunk_id)
@@ -177,7 +181,26 @@ async def run_turn(
                 # Across several searches, keep the strongest; within one, retrieve() already did.
                 merged.sort(key=lambda h: -h.score)
                 room = max(lvl.passages - len(held_hits), 0)
-                state.hits = held_hits + merged[:room]
+                # The library's reading of the nearest sections, after the passages.
+                readings: list[SearchHit] = []
+                sections: set = set()
+                for q in queries if needs_retrieval and lvl.readings else []:
+                    for h in await retrieve_readings(
+                        db,
+                        q,
+                        client=client,
+                        limit=lvl.readings
+                        if len(queries) == 1
+                        else max(2, lvl.readings // len(queries) + 1),
+                        category_ids=category_ids,
+                        cartridge_ids=cartridge_ids,
+                        document_ids=document_ids,
+                        favour=named,
+                    ):
+                        if (h.document_id, h.section_path) not in sections:
+                            sections.add((h.document_id, h.section_path))
+                            readings.append(h)
+                state.hits = held_hits + merged[:room] + readings[: lvl.readings]
                 if document_ids:
                     state.hits = [h for h in state.hits if h.document_id in set(document_ids)]
                 state.sources = build_sources(state.hits, {h.chunk_id for h in held_hits})
@@ -213,6 +236,7 @@ async def run_turn(
                     "readings_only": s.readings_only,
                     "cartridge": s.cartridge,
                     "held": s.held,
+                    "kind": s.kind,
                 }
                 for s in state.sources
             ],
@@ -280,6 +304,8 @@ async def run_turn(
                                 "page": s.page,
                                 "chunk_id": s.chunk_id,
                                 "document_id": s.document_id,
+                                "section": s.section_path,
+                                "kind": s.kind,
                             }
                             for s in used
                         ],

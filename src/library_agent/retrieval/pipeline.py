@@ -57,7 +57,9 @@ async def retrieve(
     category_ids: list[uuid.UUID] | None = None,
     cartridge_ids: list[uuid.UUID] | None = None,
     document_ids: list[uuid.UUID] | None = None,
+    favour: list[uuid.UUID] | None = None,
 ) -> list[SearchHit]:
+    """`favour`: volumes the question is about, exempt from the per-volume cap."""
     cfg = settings()
     rc = config or RetrievalConfig()
     top_k = limit or rc.final_top_k or cfg.final_top_k
@@ -119,17 +121,20 @@ async def retrieve(
         candidates = head + tail
 
     if rc.per_document:
-        candidates = diversify(candidates, per_document=rc.per_document, limit=top_k)
+        candidates = diversify(
+            candidates, per_document=rc.per_document, limit=top_k, exempt=set(favour or ())
+        )
     return candidates[:top_k]
 
 
-def diversify(hits: list, *, per_document: int, limit: int) -> list:
+def diversify(hits: list, *, per_document: int, limit: int, exempt: set | None = None) -> list:
     """Two passes: first take up to `per_document` from each document in rank order; if
-    that leaves room, fill it with what was skipped, still in rank order."""
+    that leaves room, fill it with what was skipped, still in rank order. A document in
+    `exempt` -- the one the question is about -- is not capped."""
     taken: dict = {}
     first, rest = [], []
     for h in hits:
-        if taken.get(h.document_id, 0) < per_document:
+        if h.document_id in (exempt or ()) or taken.get(h.document_id, 0) < per_document:
             taken[h.document_id] = taken.get(h.document_id, 0) + 1
             first.append(h)
         else:

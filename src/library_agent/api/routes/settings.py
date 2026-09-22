@@ -219,6 +219,26 @@ async def test_provider(pid: str, model: str | None = None) -> dict:
     return out
 
 
+class About(BaseModel):
+    about: str
+
+
+@router.get("/about")
+async def get_about() -> dict:
+    return {"about": providers.load().about, "max": providers.ABOUT_MAX}
+
+
+@router.put("/about")
+async def put_about(body: About) -> dict:
+    """Who the library is for. Read into every answer, so it is kept short."""
+    if len(body.about) > providers.ABOUT_MAX:
+        raise HTTPException(422, f"at most {providers.ABOUT_MAX} characters")
+    cfg = providers.load()
+    cfg.about = body.about.strip()
+    providers.save(cfg)
+    return {"about": cfg.about, "max": providers.ABOUT_MAX}
+
+
 @router.put("/models")
 async def put_models(body: dict[str, str | None]) -> dict:
     """Assign roles: {role: "model"} to override, {role: null} to return to the default.

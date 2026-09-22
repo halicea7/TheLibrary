@@ -392,6 +392,7 @@ select, .toggle {
   vertical-align:.25em; padding:0 1px; letter-spacing:-.02em;
 }
 .mark.lit { background:color-mix(in srgb,var(--rubric) 20%,transparent); border-radius:2px; }
+.note .rd { font-style:italic; font-family:var(--serif); margin-right:5px; color:var(--faint); }
 .note {
   display:block; font:10.5px/1.45 var(--mono); color:var(--dim);
   padding:3px 0 3px 9px; border-left:1px solid var(--rubric); margin-bottom:6px;
@@ -768,6 +769,8 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .make .row > label:first-child { font:600 10.5px/2.2 var(--sans); letter-spacing:.06em; text-transform:uppercase; color:var(--dim); }
 .make input[type=text] { width:100%; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; color:var(--fg); font:14px/1.4 var(--serif); padding:7px 10px; }
 .make input[type=text]:focus { border-color:var(--verdigris); outline:none; }
+.settings .about textarea { width:100%; max-width:76ch; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; color:var(--fg); font:13.5px/1.45 var(--serif); padding:7px 10px; resize:vertical; }
+.settings .about textarea:focus { border-color:var(--verdigris); outline:none; }
 .make textarea { width:100%; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; color:var(--fg); font:13.5px/1.45 var(--serif); padding:7px 10px; resize:vertical; }
 .make textarea:focus { border-color:var(--verdigris); outline:none; }
 .swatches { display:flex; gap:6px; flex-wrap:wrap; padding-top:4px; }
@@ -2098,7 +2101,9 @@ function renderAnswer(el, text) {
       // A note from a cartridge wears its colour beside the rubric; a reading-only
       // source says so, since what it cites is their reading, not the page.
       const who = c ? `<span class="who">${esc(c.name)}${s.readings_only ? "'s reading" : ''}</span>` : '';
-      return `<span class="note ${c ? 'from' : ''}${s.held ? ' held' : ''}" data-n="${n}" ${c ? `style="--c:${esc(c.colour)}"` : ''}>${who}<b>${esc(short)}</b>${
+      // The library's own summary of a section, not a page of its text.
+      const rd = s.kind === 'reading' ? `<span class="rd" title="The library's reading of this section, not a quotation">reading</span>` : '';
+      return `<span class="note ${c ? 'from' : ''}${s.held ? ' held' : ''}" data-n="${n}" ${c ? `style="--c:${esc(c.colour)}"` : ''}>${who}${rd}<b>${esc(short)}</b>${
         s.page ? `<span class="pg">p.${s.page}</span>` : ''}${where ? ` · ${esc(where.slice(0,40))}` : ''}</span>`;
     }).join('');
     return `${html}<div class="apparatus">${notes}</div>`;
@@ -2170,7 +2175,8 @@ async function ask(text) {
         else if (ev === 'sources') {
           sources = JSON.parse(raw);
           web.scan(false); web.light([...new Set(sources.map(s => s.document_id))]);
-          desk(`<span class="working">${sources.length} passages in hand</span>`);
+          const nr = sources.filter(s => s.kind === 'reading').length, np = sources.length - nr;
+          desk(`<span class="working">${np} passage${np === 1 ? '' : 's'}${nr ? ` and ${nr} reading${nr === 1 ? '' : 's'}` : ''} in hand</span>`);
         }
         else if (ev === 'thinking') {
           if (!thought) murmur.start(asked);
@@ -2262,7 +2268,7 @@ async function openChat(id) {
     if (st) { wrap.dataset.stance = st; wrap.insertAdjacentHTML('afterbegin', `<div class="stanced">${esc(stanceMeta.find(s => s.id === st)?.label || st)}</div>`); }
     const said = document.createElement('div'); said.className = 'said';
     wrap.appendChild(said);
-    sources = (m.sources?.cited || []).map(c => ({ n: c.n, title: c.title, page: c.page, document_id: c.document_id, section: '' }));
+    sources = (m.sources?.cited || []).map(c => ({ n: c.n, title: c.title, page: c.page, document_id: c.document_id, section: c.section || '', kind: c.kind }));
     renderAnswer(said, m.content);
     asked = null;
   }
@@ -2656,6 +2662,27 @@ async function loadSaved() {
 let showResolved = false;
 const fmtWhen = iso => { if (!iso) return ''; const d = new Date(iso), m = (Date.now() - d) / 60000;
   return m < 1 ? 'just now' : m < 60 ? `${Math.round(m)}m ago` : m < 1440 ? `${Math.round(m/60)}h ago` : d.toLocaleDateString(); };
+async function loadAbout() {
+  const t = $('#about'); if (!t) return;
+  try {
+    const a = await (await fetch('/api/settings/about')).json();
+    t.value = a.about || ''; t.dataset.saved = t.value; aboutDirty(t);
+  } catch {}
+}
+function aboutDirty(t) {
+  $('#about-save').disabled = t.value.trim() === (t.dataset.saved || '').trim();
+  $('#about-n').textContent = t.value.length > 1500 ? `${t.value.length} / 2000` : '';
+}
+async function saveAbout(b) {
+  const t = $('#about');
+  b.disabled = true; b.textContent = 'saving…';
+  try {
+    const r = await fetch('/api/settings/about', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ about: t.value }) });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    const a = await r.json(); t.value = a.about; t.dataset.saved = a.about;
+    b.textContent = 'saved'; setTimeout(() => { b.textContent = 'save'; aboutDirty(t); }, 1400);
+  } catch (e) { b.textContent = 'save'; b.disabled = false; say(`Could not save: ${e.message}`, true); }
+}
 async function loadSettings() {
   const el = $('#view-settings');
   el.innerHTML = '<div class="empty">Reading the settings…</div>';
@@ -2670,6 +2697,12 @@ async function loadSettings() {
   const sv = s.services;
   el.innerHTML = `<div class="settings">
     <h2>Settings</h2>
+    <div class="sect about">
+      <p class="label">About you</p>
+      <p class="empty" style="padding:0 0 8px">Who the library is for and what you use it for, in your own words. Every answer reads it: it sets the register, what can be assumed, what needs no disclaimer. Leave it empty for a general reader.</p>
+      <textarea id="about" rows="4" maxlength="2000" placeholder="e.g. I'm a network engineer at a university. I use the library for our runbooks and vendor docs; answer as one engineer to another, and skip the basics." oninput="aboutDirty(this)"></textarea>
+      <div class="acts" style="margin-top:6px"><button class="linkish" id="about-save" onclick="saveAbout(this)" disabled>save</button><span id="about-n" class="shelf-n" style="margin-left:0"></span></div>
+    </div>
     <div class="sect">
       <p class="label">Services</p>
       <div class="svc">
@@ -2709,6 +2742,7 @@ async function loadSettings() {
   </div>`;
   $('#inc-badge').hidden = !s.incidents_open; $('#inc-badge').textContent = s.incidents_open;
   loadProviders();
+  loadAbout();
 }
 // Providers and roles. Ollama is the default and needs no entry; a provider is any
 // OpenAI-protocol endpoint, named once and then addressed by prefix. Each role picks

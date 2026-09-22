@@ -3,6 +3,7 @@ and the document entry is written from every stretch, not the opening chapters."
 
 from __future__ import annotations
 
+from itertools import pairwise
 from types import SimpleNamespace
 
 from library_agent.ingest.extract import Extracted, TocEntry
@@ -34,7 +35,7 @@ def test_chapter_bookmarks_split_into_parts():
     assert all(s.char_end - s.char_start >= PART_CHARS // 3 for s in two)
     # parts tile the chapter exactly, in order, on paragraph boundaries
     assert [s.order_index for s in secs] == list(range(len(secs)))
-    for a, b in zip(two, two[1:], strict=False):
+    for a, b in pairwise(two):
         assert a.char_end == b.char_start and text[b.char_start - 2 : b.char_start] == "\n\n"
     assert [s.title for s in secs if "(cont." not in (s.title or "")] == [
         "Chapter 1",

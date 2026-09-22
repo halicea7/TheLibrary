@@ -32,6 +32,7 @@ class SearchHit:
     lexical_rank: int | None
     context_prefix: str = ""
     rerank_score: float | None = None
+    kind: str = "passage"  # or "reading": the library's summary of the section
 
     def citation(self) -> str:
         loc = f", p.{self.page}" if self.page else ""

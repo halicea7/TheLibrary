@@ -6,10 +6,15 @@ around it -- and that is where answers actually change:
 
     quick    3 passages, no reranker, no rewrite of follow-ups, a small context.
              A lookup: what page says X.
-    normal   what the desk does by default: 5 passages, reranked, follow-ups rewritten.
+    normal   what the desk does by default: 5 passages and 4 section readings, reranked,
+             follow-ups rewritten.
     deep     the question is first broken into two to four searches, each retrieved,
-             the union reranked down to ten passages, a larger context. For comparative
-             and multi-part questions, where one search pulls everything from one volume.
+             the union reranked down to sixteen passages beside eight section readings,
+             a larger context. For comparative and multi-part questions, and for "what
+             does this work say across its chapters".
+
+A reading is the library's Tier 1 summary of a section: denser than a passage, and the
+only way a whole book fits in front of the model at once.
 
 Each level is measurable in seconds, which is the point of a dial."""
 
@@ -36,6 +41,7 @@ class Effort:
     multi_query: bool
     num_ctx: int
     passage_chars: int
+    readings: int = 0
 
 
 EFFORTS: dict[str, Effort] = {
@@ -56,15 +62,18 @@ EFFORTS: dict[str, Effort] = {
         multi_query=False,
         num_ctx=16384,
         passage_chars=1200,
+        readings=4,
     ),
     "deep": Effort(
         "deep",
-        passages=10,
+        # The tunnelled machine prefills fast enough that sixteen costs seconds, not tens.
+        passages=16,
         config=RetrievalConfig(name="deep", use_reranker=True, rerank_depth=40, per_document=3),
         rewrite=True,
         multi_query=True,
         num_ctx=32768,
         passage_chars=1400,
+        readings=8,
     ),
 }
 DEFAULT = "normal"

@@ -69,10 +69,15 @@ class Provider:
         }
 
 
+ABOUT_MAX = 2000
+
+
 @dataclass
 class Config:
     providers: dict[str, Provider] = field(default_factory=dict)
     models: dict[str, str] = field(default_factory=dict)  # role -> model, when overridden
+    # Who the library is for, in the owner's words: the answers take it into account.
+    about: str = ""
 
 
 def path() -> Path:
@@ -112,6 +117,7 @@ def load() -> Config:
     cfg.models = {
         r: m for r, m in (raw.get("models") or {}).items() if r in ROLES and m is not None
     }
+    cfg.about = str(raw.get("about") or "")[:ABOUT_MAX]
     _cache = (p, mtime, cfg)
     return cfg
 
@@ -131,6 +137,7 @@ def save(cfg: Config) -> None:
             for pid, v in cfg.providers.items()
         },
         "models": cfg.models,
+        "about": cfg.about,
     }
     tmp = p.with_suffix(".json.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

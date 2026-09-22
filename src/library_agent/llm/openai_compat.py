@@ -11,6 +11,7 @@ the murmur, and nothing is asked for."""
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from collections.abc import AsyncIterator
@@ -53,10 +54,24 @@ class OpenAICompat:
         return sorted(str(m.get("id")) for m in data if m.get("id"))
 
     async def _complete(self, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
-        r = await self._client.post("/chat/completions", json=payload, timeout=timeout)
-        if r.status_code >= 400:
-            raise OllamaError(f"{self.provider.name}: HTTP {r.status_code}: {r.text[:300]}")
-        return r.json()
+        # A router in front of many machines rate-limits; a 429 or a passing 5xx is a
+        # reason to wait, not to fail the pass. Retry-After is honoured when given.
+        delay = 2.0
+        for attempt in range(5):
+            r = await self._client.post("/chat/completions", json=payload, timeout=timeout)
+            if r.status_code in (429, 502, 503, 504) and attempt < 4:
+                wait = r.headers.get("retry-after")
+                try:
+                    pause = float(wait) if wait else delay
+                except ValueError:
+                    pause = delay
+                await asyncio.sleep(min(pause, 60.0))
+                delay = min(delay * 2, 30.0)
+                continue
+            if r.status_code >= 400:
+                raise OllamaError(f"{self.provider.name}: HTTP {r.status_code}: {r.text[:300]}")
+            return r.json()
+        raise OllamaError(f"{self.provider.name}: still throttled after retries")
 
     @staticmethod
     def _text(reply: dict[str, Any]) -> str:

@@ -1887,17 +1887,19 @@ function say(msg, bad) {
 /* ── accession ────────────────────────────────────────────────────────── */
 const SUPPORTED = /\.(pdf|md|markdown|txt|text|rst|html?|zip)$/i;
 
-// A dropped folder arrives as a directory entry, not a list of files. Walk it.
+// A dropped folder arrives as a directory entry, not a list of files. Walk it. A file
+// dropped directly is kept whatever its type, so accession() can say why it was skipped;
+// inside a folder, only the readable types are collected, or a deep folder is all noise.
 async function collect(items) {
   const out = [];
-  const walk = entry => new Promise(resolve => {
+  const walk = (entry, top) => new Promise(resolve => {
     if (entry.isFile) {
-      entry.file(f => { if (SUPPORTED.test(f.name) && !f.name.startsWith('.')) out.push(f); resolve(); }, resolve);
+      entry.file(f => { if (!f.name.startsWith('.') && (top || SUPPORTED.test(f.name))) out.push(f); resolve(); }, resolve);
     } else if (entry.isDirectory) {
       const reader = entry.createReader();
       const batch = () => reader.readEntries(async entries => {
         if (!entries.length) return resolve();
-        for (const e of entries) await walk(e);
+        for (const e of entries) await walk(e, false);
         batch();  // readEntries returns in pages; keep going until empty
       }, resolve);
       batch();
@@ -1905,22 +1907,27 @@ async function collect(items) {
   });
   for (const item of items) {
     const entry = item.webkitGetAsEntry?.();
-    if (entry) await walk(entry);
-    else if (item.getAsFile) { const f = item.getAsFile(); if (f && SUPPORTED.test(f.name)) out.push(f); }
+    if (entry) await walk(entry, true);
+    else if (item.getAsFile) { const f = item.getAsFile(); if (f) out.push(f); }
   }
   return out;
 }
 
 async function accession(files) {
-  files = [...files].filter(f => SUPPORTED.test(f.name));
-  if (!files.length) { say('Nothing there the library can read.', true); return; }
+  const all = [...files].filter(f => !f.name.startsWith('.'));
+  const skipped = all.filter(f => !SUPPORTED.test(f.name));
+  files = all.filter(f => SUPPORTED.test(f.name));
+  const skipMsg = skipped.length
+    ? ` Skipped ${skipped.length} unsupported: ${skipped.map(f => f.name).join(', ')} — the library takes PDF, Markdown, txt, rst, HTML and .zip.`
+    : '';
+  if (!files.length) { say(('Nothing there the library can read.' + skipMsg).trim(), true); return; }
   // A zip is a cartridge; it goes on the rack, not the shelf.
   const zips = files.filter(f => /\.zip$/i.test(f.name));
   for (const z of zips) await insertCartridge(z);
   files = files.filter(f => !/\.zip$/i.test(f.name));
-  if (!files.length) { loadShelf(); holdings(); loadSubjects(); return; }
+  if (!files.length) { if (skipMsg) say(skipMsg.trim(), true); loadShelf(); holdings(); loadSubjects(); return; }
   const many = files.length > 1;
-  let shelved = 0, dupes = 0, failed = 0;
+  let shelved = 0, dupes = 0, failed = 0; const reasons = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     say(many ? `Reading ${i + 1} of ${files.length} — ${file.name}` : `Reading ${file.name}…`);
@@ -1928,21 +1935,25 @@ async function accession(files) {
     try {
       const r = await fetch('/api/documents', { method:'POST', body:fd });
       const j = await r.json();
-      if (!r.ok) { failed++; if (!many) say(j.detail || 'That file could not be read.', true); continue; }
+      if (!r.ok) { failed++; reasons.push(`${file.name}: ${j.detail || 'unreadable'}`); if (!many) say(j.detail || 'That file could not be read.', true); continue; }
       if (j.status === 'duplicate') { dupes++; if (!many) say(`${file.name} is already on the shelf.`); }
       else {
         shelved++;
         if (!many) say(`${j.title} — ${j.sections} sections, ${j.chunks} passages, ${j.elapsed_seconds}s`
           + (j.needs_ocr ? ' · little text layer, may need OCR' : ''));
       }
-    } catch (e) { failed++; if (!many) say(String(e), true); }
+    } catch (e) { failed++; reasons.push(`${file.name}: ${String(e)}`); if (!many) say(String(e), true); }
     if (many && i % 5 === 4) { loadShelf(); holdings(); }
   }
   if (many) {
     const parts = [`${shelved} shelved`];
     if (dupes) parts.push(`${dupes} already there`);
     if (failed) parts.push(`${failed} unreadable`);
-    say(parts.join(' · ') + '. They are searchable now; reading them takes a few minutes each.', failed > 0 && !shelved);
+    // Name what failed and why, not just a count — a silent "unreadable" hides a scanned PDF.
+    const why = failed ? ' — ' + reasons.slice(0, 3).join(' · ') : '';
+    say(parts.join(' · ') + '.' + why + skipMsg + (shelved ? ' Searchable now; reading takes a few minutes each.' : ''), failed > 0 && !shelved);
+  } else if (skipMsg) {
+    say(skipMsg.trim(), true);
   }
   loadShelf(); holdings();
 }

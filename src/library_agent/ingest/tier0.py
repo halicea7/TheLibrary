@@ -96,7 +96,13 @@ async def ingest(
     sections = build_sections(ex)
     chunks = chunk_document(ex, sections, title)
     if not chunks:
-        raise ValueError(f"no extractable text in {filename} (needs_ocr={ex.needs_ocr})")
+        if ex.needs_ocr:
+            raise ValueError(
+                f"{filename} has almost no text layer — it looks like a scanned or "
+                "image-only PDF. The library reads text, not page images; run it through "
+                "OCR first (e.g. `ocrmypdf in.pdf out.pdf`) and add the result."
+            )
+        raise ValueError(f"no extractable text in {filename}")
 
     own_client = client is None
     c = client or LLM()

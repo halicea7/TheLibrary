@@ -281,3 +281,28 @@ class TestCoverage:
         # no material at all is thin without a call
         empty = await _coverage(Client(), "m", "brief", [])
         assert empty["verdict"] == "thin"
+
+
+class TestDurability:
+    def test_partial_markdown_is_marked(self):
+        from library_agent.chat.compose import Composition
+
+        c = Composition(title="D", brief="b")
+        c.sections = [{"heading": "One", "covers": "", "body": "x", "cited": []}]
+        assert "still writing" in c.markdown(partial=True)
+        assert "still writing" not in c.markdown()
+
+    def test_save_is_keyed_by_composition_id(self, tmp_path, monkeypatch):
+        from library_agent.chat import compose as comp
+        from library_agent.config import settings
+
+        monkeypatch.setattr(settings(), "storage_dir", tmp_path / "store")
+        c = comp.Composition(title="A Doc", brief="b")
+        c.sections = [{"heading": "One", "covers": "", "body": "first [x]", "cited": []}]
+        # the incremental save and a later full save land on ONE file (same id), not two
+        p1 = comp.save_markdown(c.title, c.markdown(partial=True))
+        c.sections.append({"heading": "Two", "covers": "", "body": "second", "cited": []})
+        p2 = comp.save_markdown(c.title, c.markdown())
+        assert p1 == p2 and c.id[:8] in p1.name
+        assert "still writing" not in p2.read_text()  # the final overwrite won
+        assert len(list(comp.compositions_dir().glob("*.md"))) == 1

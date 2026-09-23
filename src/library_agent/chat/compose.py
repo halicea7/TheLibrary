@@ -275,8 +275,10 @@ class Composition:
     resolved: int = 0
     flags: int = 0  # claims the review pass flagged as reaching past their evidence
 
-    def markdown(self) -> str:
+    def markdown(self, partial: bool = False) -> str:
         out = [f"# {self.title}", ""]
+        if partial:
+            out += ["*(still writing — this is the document so far)*", ""]
         nested = any(s.get("chapter") for s in self.sections)
         last_ch = None
         for s in self.sections:
@@ -818,6 +820,14 @@ async def compose(
                     **m,
                 },
             }
+            # Persist the document-so-far after every section, keyed by its id (so each save
+            # overwrites the last). If the viewer disconnects and this task is cancelled, the
+            # sections already written are on disk -- a thesis is never lost to a refresh, at
+            # worst the section in hand.
+            try:
+                save_markdown(comp.title, comp.markdown(partial=i + 1 < len(outline)))
+            except Exception:
+                log.warning("incremental save failed", exc_info=True)
 
         md = comp.markdown()
         yield {
@@ -860,8 +870,11 @@ async def compose(
 
 
 def save_markdown(title: str, markdown: str) -> Path:
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
-    path = compositions_dir() / f"{slugify(title)}-{stamp}.md"
+    # Key the file to the composition's own id when it carries one, so the server's
+    # auto-save and a later save of the same document (with its seal) are one file, not two.
+    m = re.search(r"`The Library · ([0-9a-f-]{8,})`", markdown)
+    tag = m.group(1)[:8] if m else datetime.now(UTC).strftime("%Y%m%d-%H%M")
+    path = compositions_dir() / f"{slugify(title)}-{tag}.md"
     path.write_text(markdown, encoding="utf-8")
     return path
 

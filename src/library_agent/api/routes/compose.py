@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import logging
 import tempfile
 import uuid
 from collections.abc import AsyncIterator
@@ -19,7 +22,14 @@ from library_agent.ingest.tier0 import ingest
 from library_agent.library.shelving import expand_category_ids
 from library_agent.llm import providers
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compose", tags=["compose"])
+
+# A document takes minutes on a large model; losing one because the viewer refreshed the
+# page is not acceptable. Each compose runs in its own task, detached from the request that
+# started it, so a dropped stream does not cancel it — it runs to the end and saves itself.
+# These references keep the tasks alive for their lifetime.
+_running: set[asyncio.Task] = set()
 
 
 class ComposeIn(BaseModel):
@@ -45,17 +55,62 @@ async def compose_stream(req: ComposeIn, db: SessionDep) -> EventSourceResponse:
     cats = await expand_category_ids(db, req.category_ids) if req.category_ids else None
     model = providers.chat_options().get(req.model or "", req.model) if req.model else None
 
+    # A bounded queue between the composing task and this stream. The task never blocks on
+    # it — if the viewer is gone or slow, streamed events drop, but the task keeps composing
+    # and, on `done`, saves the finished document to disk. The stream is a view of the work,
+    # not the work itself.
+    queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
+
+    async def run() -> None:
+        log.info("compose task started: %r", req.brief[:60])
+        try:
+            async for ev in comp.compose(
+                req.brief,
+                model=model,
+                length=req.length,
+                category_ids=cats,
+                cartridge_ids=req.cartridge_ids or None,
+                scope_label=req.scope_label,
+                review=req.review,
+                force=req.force,
+            ):
+                if ev["event"] == "done":
+                    try:
+                        comp.save_markdown(ev["data"]["title"], ev["data"]["markdown"])
+                    except Exception:
+                        log.warning("auto-save of composition failed", exc_info=True)
+                try:
+                    queue.put_nowait(ev)
+                except asyncio.QueueFull:
+                    pass  # nobody is reading fast enough; the saved file is the real output
+        except Exception as exc:
+            log.exception("composition task failed")
+            try:
+                queue.put_nowait({"event": "error", "data": str(exc)[:500]})
+            except asyncio.QueueFull:
+                pass
+        except asyncio.CancelledError:
+            log.warning("compose task CANCELLED (viewer likely disconnected)")
+            raise
+        finally:
+            log.info("compose task ending")
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(None)
+
+    task = asyncio.create_task(run())
+    _running.add(task)
+    task.add_done_callback(_running.discard)
+
     async def events() -> AsyncIterator[dict]:
-        async for ev in comp.compose(
-            req.brief,
-            model=model,
-            length=req.length,
-            category_ids=cats,
-            cartridge_ids=req.cartridge_ids or None,
-            scope_label=req.scope_label,
-            review=req.review,
-            force=req.force,
-        ):
+        while True:
+            try:
+                ev = await asyncio.wait_for(queue.get(), timeout=1.0)
+            except TimeoutError:
+                if task.done() and queue.empty():
+                    break
+                continue
+            if ev is None:
+                break
             payload = ev["data"]
             yield {
                 "event": ev["event"],

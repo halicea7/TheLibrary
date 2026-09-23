@@ -2775,13 +2775,41 @@ async function loadSaved() {
   el.innerHTML = list.length ? `<p class="label spaced">Written before</p>` + list.map(f =>
     `<div class="row"><button class="linkish t" onclick="viewSaved('${encodeURIComponent(f.file)}')" title="Read it here">${esc(f.title)}</button><span class="m">${fmtWhen(f.modified)} · ${(f.bytes / 1024).toFixed(0)} KB</span><button class="linkish" onclick="viewSaved('${encodeURIComponent(f.file)}')">view</button><a class="linkish" href="/api/compose/saved/${encodeURIComponent(f.file)}" download>download</a></div>`).join('') : '';
 }
-// A saved document, or a restored draft, has a seal as raw inline SVG at its foot; render
-// the prose as markdown and pass that block through as HTML.
+// The seal at a saved document's foot is inline SVG. It is the only part rendered as HTML
+// rather than escaped markdown, and a composed body can carry text from untrusted documents,
+// so it is scrubbed to a plain-SVG allowlist: known SVG tags only, no scripts, no event
+// handlers, no external refs. Anything that is not a clean <svg> renders as nothing.
+const _SVG_TAGS = new Set([
+  'svg', 'defs', 'g', 'path', 'circle', 'line', 'ellipse', 'rect',
+  'polyline', 'polygon', 'text', 'textpath', 'tspan', 'title',
+]);
+function sanitizeSvg(markup) {
+  try {
+    const doc = new DOMParser().parseFromString(markup.trim(), 'image/svg+xml');
+    const svg = doc.documentElement;
+    if (!svg || svg.nodeName.toLowerCase() !== 'svg' || doc.querySelector('parsererror')) return '';
+    const scrub = (el) => {
+      for (const a of [...el.attributes]) {
+        const n = a.name.toLowerCase();
+        if (n.startsWith('on') || ((n === 'href' || n === 'xlink:href') && !a.value.trim().startsWith('#')))
+          el.removeAttribute(a.name);
+      }
+      for (const child of [...el.children]) {
+        if (_SVG_TAGS.has(child.nodeName.toLowerCase())) scrub(child);
+        else child.remove();
+      }
+    };
+    scrub(svg);
+    return svg.outerHTML;
+  } catch { return ''; }
+}
+// A saved document, or a restored draft, has a seal as inline SVG at its foot; render the
+// prose as escaped markdown and the seal as a sanitised <svg>.
 function renderDocMarkdown(text, into) {
   const m = text.match(/\n<p align="center">([\s\S]*?)<\/p>\s*$/);
   const body = m ? text.slice(0, m.index) : text;
-  const seal = m ? `<figure class="seal">${m[1]}</figure>` : '';
-  into.innerHTML = `<div class="md">${mdBlocks(body).join('')}</div>${seal}`;
+  const seal = m ? sanitizeSvg(m[1]) : '';
+  into.innerHTML = `<div class="md">${mdBlocks(body).join('')}</div>${seal ? `<figure class="seal">${seal}</figure>` : ''}`;
 }
 async function viewSaved(file) {
   const doc = $('#wr-doc'); if (!doc) return;

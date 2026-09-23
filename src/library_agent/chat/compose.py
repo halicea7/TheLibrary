@@ -142,6 +142,19 @@ established. Build on it: do not restate what is settled, and where you rely on 
 point, refer to it briefly ("as established earlier") rather than re-arguing it. Do not
 contradict it without saying you are doing so and why.
 
+Hold every example to the question before you use it:
+- What was supposed to be protected, and what actually happened?
+- Was that a security FAILURE, or a control working as intended? Access that was correctly
+  denied is the control succeeding — never present a failed login or a blocked action as a
+  vulnerability.
+- What mechanism caused it, and does that mechanism actually bear on the brief? An example
+  that shares a word with the brief but turns on a different mechanism does not support it.
+- Keep related protocols, tools, modes and identifiers distinct; do not merge two that
+  differ in mechanism just because their names or purposes are close.
+- Do not assert how common, default or motivated something is ("widespread", "rarely
+  changed by users", "vendors prioritise speed") unless a passage says so; if it is your
+  inference, mark it as your inference, uncited.
+
 Write only this section's body in markdown: no title, no heading (it is added for you),
 no preamble, no summary of other sections. Use lists, code and tables where they belong.
 Be concrete and specific."""
@@ -219,27 +232,38 @@ COVERAGE_SCHEMA: dict[str, Any] = {
 # given and flag where it reaches past them. It does not rewrite -- the argument stays as
 # the librarian made it; the flags are for the reader to weigh. Amber, in the apparatus.
 REVIEW_SYSTEM = """You are a careful reviewer of a section written for a research library, and
-you are hard on it. You are given the section and the numbered passages it was written from.
-Find only claims that reach past the evidence — do not rewrite, do not praise, do not
-restate. A claim overreaches when:
+you are hard on it. You are given the document's brief, the section, and the numbered
+passages it was written from. Find only claims that reach past the evidence or miss the
+question — do not rewrite, do not praise, do not restate. A claim is a flaw when:
 - the passage it cites supports part of the statement but not the whole of it;
 - it is absolute (never, always, cannot, guarantees, impossible, no way) where the sources
   are conditional, or hold only under assumptions the sources state;
 - it generalises from a single case, or asserts a cause the sources only correlate;
-- it is presented as established but no passage actually supports it.
-A well-supported section has no flags. Do not invent problems to have something to say."""
+- it is presented as established but no passage actually supports it;
+- it treats an intended rejection as a failure — an access correctly denied, a login that
+  failed by design, is the security control WORKING, not a vulnerability;
+- its mechanism does not bear on the brief's question — an example pulled in by a shared
+  word, not by the mechanism the brief asks about;
+- it merges two related protocols, tools, modes or identifiers that differ in mechanism;
+- it asserts prevalence, defaults or motivation ("widespread", "rarely changed", "vendors
+  cut corners") that no passage supports.
+A well-supported, on-question section has no flags. Do not invent problems to have something
+to say. Write each flag in full — never leave a sentence unfinished."""
 
-REVIEW_PROMPT = """Section: "{heading}"
+REVIEW_PROMPT = """The document's brief: {brief}
+
+Section: "{heading}"
 
 {body}
 
 Passages it was written from:
 {context}
 
-Return `flags`: each an overreaching claim, quoting the exact sentence from the section as
-`quote`, saying in `issue` why the evidence does not carry the whole claim, and in
-`condition` the circumstance under which the claim would be false. Empty if the section
-does not overreach."""
+Return `flags`: each a claim that reaches past its evidence or misses the brief's question,
+quoting the exact sentence from the section as `quote`, saying in `issue` what is wrong (the
+evidence does not carry it, or it answers a different question, or it calls a control working
+a failure), and in `condition` the circumstance under which the claim is false or beside the
+point. Empty if the section is sound and on-question."""
 
 REVIEW_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -251,8 +275,8 @@ REVIEW_SCHEMA: dict[str, Any] = {
                 "type": "object",
                 "properties": {
                     "quote": {"type": "string", "maxLength": 300},
-                    "issue": {"type": "string", "maxLength": 400},
-                    "condition": {"type": "string", "maxLength": 400},
+                    "issue": {"type": "string", "maxLength": 550},
+                    "condition": {"type": "string", "maxLength": 550},
                 },
                 "required": ["quote", "issue"],
             },
@@ -423,21 +447,39 @@ async def _coverage(client, model, brief: str, hits: list[SearchHit]) -> dict:
     }
 
 
-async def _review(client, model, heading: str, body: str, context: str) -> list[dict]:
-    """Read a finished section against its passages and flag where it reaches past them.
-    Flag-only: it never touches the prose. A flag whose quote is not in the section is
-    dropped -- which also keeps out the "…" placeholders a weak model emits."""
+def _clip(s: str, n: int) -> str:
+    """Trim to a length, but at a sentence or word boundary so a flag never ends
+    mid-word."""
+    s = " ".join((s or "").split())
+    if len(s) <= n:
+        return s
+    cut = s[:n]
+    for sep in (". ", "; ", ", ", " "):
+        i = cut.rfind(sep)
+        if i > n // 2:
+            return cut[: i + (1 if sep == " " else len(sep))].rstrip() + "…"
+    return cut.rstrip() + "…"
+
+
+async def _review(
+    client, model, heading: str, body: str, context: str, brief: str = ""
+) -> list[dict]:
+    """Read a finished section against its passages and flag where it reaches past them or
+    misses the brief's question. Flag-only: it never touches the prose. A flag whose quote is
+    not in the section is dropped -- which also keeps out the "…" placeholders."""
     if len(body.strip()) < 120 or not context.strip():
         return []
     try:
         out = await client.structured(
             model,
-            REVIEW_PROMPT.format(heading=heading, body=body[:6000], context=context),
+            REVIEW_PROMPT.format(
+                brief=brief or "(none given)", heading=heading, body=body[:6000], context=context
+            ),
             REVIEW_SCHEMA,
             system=REVIEW_SYSTEM,
             temperature=0.2,
             think=False,
-            num_predict=700,
+            num_predict=1100,
         )
     except Exception:
         log.warning("review failed for %r", heading, exc_info=True)
@@ -449,9 +491,9 @@ async def _review(client, model, heading: str, body: str, context: str) -> list[
         if quote and issue and not is_placeholder(quote) and _anchored(quote, body):
             flags.append(
                 {
-                    "quote": quote[:300],
-                    "issue": issue[:400],
-                    "condition": " ".join(str(f.get("condition") or "").split())[:400],
+                    "quote": _clip(quote, 300),
+                    "issue": _clip(issue, 500),
+                    "condition": _clip(str(f.get("condition") or ""), 500),
                 }
             )
     return flags
@@ -792,7 +834,7 @@ async def compose(
             takeaway = await _takeaway(client, model, comp.title, sec["heading"], cleaned)
             # Review the section against its own passages; flag where it reaches past them.
             flags = (
-                await _review(client, model, sec["heading"], cleaned, context)
+                await _review(client, model, sec["heading"], cleaned, context, brief=brief)
                 if review and section_hits
                 else []
             )

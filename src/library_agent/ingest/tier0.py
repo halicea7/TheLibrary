@@ -76,7 +76,10 @@ async def ingest(
     original_filename: str | None = None,
     client: Ollama | None = None,
     force: bool = False,
+    extracted=None,
 ) -> IngestResult:
+    """`extracted`: use this instead of reading the file (the OCR job passes the text it
+    transcribed, so a scanned PDF goes through the same pipeline as a digital one)."""
     chash = content_hash(path)
     filename = original_filename or path.name
 
@@ -91,7 +94,7 @@ async def ingest(
             duplicate_of=existing.id,
         )
 
-    ex = extract(path)
+    ex = extracted or extract(path)
     title = ex.title or Path(filename).stem
     sections = build_sections(ex)
     chunks = chunk_document(ex, sections, title)

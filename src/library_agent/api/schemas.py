@@ -43,7 +43,7 @@ class DocumentDetail(DocumentOut):
 
 
 class UploadResult(BaseModel):
-    document_id: uuid.UUID
+    document_id: uuid.UUID | None = None  # absent while a scanned PDF is queued for OCR
     title: str
     status: str
     sections: int

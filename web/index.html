@@ -1927,7 +1927,7 @@ async function accession(files) {
   files = files.filter(f => !/\.zip$/i.test(f.name));
   if (!files.length) { if (skipMsg) say(skipMsg.trim(), true); loadShelf(); holdings(); loadSubjects(); return; }
   const many = files.length > 1;
-  let shelved = 0, dupes = 0, failed = 0; const reasons = [];
+  let shelved = 0, dupes = 0, failed = 0, ocring = 0; const reasons = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     say(many ? `Reading ${i + 1} of ${files.length} — ${file.name}` : `Reading ${file.name}…`);
@@ -1937,16 +1937,17 @@ async function accession(files) {
       const j = await r.json();
       if (!r.ok) { failed++; reasons.push(`${file.name}: ${j.detail || 'unreadable'}`); if (!many) say(j.detail || 'That file could not be read.', true); continue; }
       if (j.status === 'duplicate') { dupes++; if (!many) say(`${file.name} is already on the shelf.`); }
+      else if (j.status === 'ocr') { ocring++; if (!many) say(`${file.name} is scanned — no text layer. Transcribing it with the vision model in the background (${j.pages} pages); it appears on the shelf when done.`); }
       else {
         shelved++;
-        if (!many) say(`${j.title} — ${j.sections} sections, ${j.chunks} passages, ${j.elapsed_seconds}s`
-          + (j.needs_ocr ? ' · little text layer, may need OCR' : ''));
+        if (!many) say(`${j.title} — ${j.sections} sections, ${j.chunks} passages, ${j.elapsed_seconds}s`);
       }
     } catch (e) { failed++; reasons.push(`${file.name}: ${String(e)}`); if (!many) say(String(e), true); }
     if (many && i % 5 === 4) { loadShelf(); holdings(); }
   }
   if (many) {
     const parts = [`${shelved} shelved`];
+    if (ocring) parts.push(`${ocring} transcribing (OCR)`);
     if (dupes) parts.push(`${dupes} already there`);
     if (failed) parts.push(`${failed} unreadable`);
     // Name what failed and why, not just a count — a silent "unreadable" hides a scanned PDF.
@@ -1993,7 +1994,7 @@ async function loadJobs() {
     const paused = j.state === 'yielded';
     return `<div class="job ${paused ? 'paused' : ''}">
       ${j.document_title ? esc(j.document_title.slice(0,30)) + '<br>' : ''}
-      ${paused ? (j.yielded_reason === 'paused' ? 'paused' : 'paused — you are talking') : j.kind === 'library' ? `rebuilding threads · ${esc(j.yielded_reason || '')}${j.progress_total > 1 ? ` ${j.progress_current} of ${j.progress_total}` : ''}` : j.kind === 'reshelve' ? `shelving · ${j.progress_current} of ${j.progress_total}` : `${j.kind === 'tier2' ? 'annotating' : 'reading'} · section ${j.progress_current} of ${j.progress_total}`}
+      ${paused ? (j.yielded_reason === 'paused' ? 'paused' : 'paused — you are talking') : j.kind === 'library' ? `rebuilding threads · ${esc(j.yielded_reason || '')}${j.progress_total > 1 ? ` ${j.progress_current} of ${j.progress_total}` : ''}` : j.kind === 'reshelve' ? `shelving · ${j.progress_current} of ${j.progress_total}` : j.kind === 'ocr' ? `transcribing (OCR) · page ${j.progress_current} of ${j.progress_total}` : j.kind === 'figures' ? `reading figures · ${j.progress_current} of ${j.progress_total}` : `${j.kind === 'tier2' ? 'annotating' : 'reading'} · section ${j.progress_current} of ${j.progress_total}`}
       <span class="bar"><i style="width:${pct}%"></i></span>
     </div>`;
   }).join('') + (waiting ? `<div class="job">${waiting} waiting</div>` : '');

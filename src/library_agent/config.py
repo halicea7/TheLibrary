@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     chunk_min_tokens: int = 80  # merge trailing runts into the previous chunk
     # Below this many characters of text layer per page, treat the PDF as scanned.
     ocr_char_per_page_threshold: int = 120
+    # A scanned PDF (little or no text layer) is transcribed by the vision model, page by
+    # page, in the background. Off (empty vision model) falls back to refusing it.
+    ocr_enabled: bool = True
+    ocr_max_pages: int = 800  # a guard against a runaway job
+    ocr_dpi: int = 200  # render resolution for the pages sent to the vision model
 
     # --- retrieval ---
     router_top_documents: int = 15

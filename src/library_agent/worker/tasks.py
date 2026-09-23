@@ -335,6 +335,65 @@ async def describe_figures_job(ctx: dict, document_id: str, job_id: str) -> dict
         raise
 
 
+async def ocr_document_job(
+    ctx: dict, job_id: str, stored_path: str, filename: str
+) -> dict[str, Any]:
+    """Transcribe a scanned PDF with the vision model, page by page, then ingest the text
+    like any other document. Slow -- a page is a model call -- so it lives on the queue."""
+    from pathlib import Path
+
+    from library_agent.ingest.ocr import ocr_pdf
+    from library_agent.ingest.tier0 import ingest
+    from library_agent.llm import providers
+
+    jid = uuid.UUID(job_id)
+    model = providers.model_for("vision")
+    if not model:
+        await _set_job(jid, state=JobState.ERROR, error="no vision model is set for OCR")
+        return {"skipped": "no vision model"}
+    await _set_job(jid, state=JobState.RUNNING)
+    await _make_gate(jid)()
+
+    async def progress(current: int, total: int) -> None:
+        await _set_job(jid, progress_current=current, progress_total=total)
+
+    try:
+        async with LLM() as client:
+            ex = await ocr_pdf(
+                Path(stored_path),
+                client,
+                model,
+                gate=_make_gate(jid),
+                progress=progress,
+                max_pages=settings().ocr_max_pages,
+            )
+        if not ex.text.strip():
+            await _set_job(jid, state=JobState.ERROR, error="OCR produced no readable text")
+            return {"skipped": "no text"}
+        async with session_scope() as db:
+            result = await ingest(db, Path(stored_path), original_filename=filename, extracted=ex)
+            await db.commit()
+        await _set_job(
+            jid, state=JobState.DONE, document_id=result.document_id, yielded_reason=None
+        )
+        return {"document_id": str(result.document_id), "pages": ex.page_count}
+    except Exception as exc:
+        await record_exception(exc, source="worker", context={"job": "ocr", "file": filename})
+        log.exception("OCR failed for %s", filename)
+        await _set_job(jid, state=JobState.ERROR, error=str(exc)[:2000])
+        raise
+
+
+async def enqueue_ocr(redis, stored_path: str, filename: str) -> uuid.UUID:
+    async with session_scope() as db:
+        job = Job(kind="ocr", state=JobState.QUEUED)
+        db.add(job)
+        await db.flush()
+        job_id = job.id
+    await redis.enqueue_job("ocr_document_job", str(job_id), stored_path, filename)
+    return job_id
+
+
 async def enqueue_figures(redis, document_id: uuid.UUID) -> uuid.UUID:
     async with session_scope() as db:
         job = Job(kind="figures", document_id=document_id, state=JobState.QUEUED)
@@ -388,6 +447,7 @@ class WorkerSettings:
         arq_func(build_library_layer, timeout=LIBRARY_TIMEOUT),
         arq_func(reshelve_library, timeout=LIBRARY_TIMEOUT),
         describe_figures_job,
+        arq_func(ocr_document_job, timeout=LIBRARY_TIMEOUT),
     ]
     on_startup = _startup
     redis_settings = RedisSettings.from_dsn(settings().redis_url)

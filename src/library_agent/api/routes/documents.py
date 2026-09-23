@@ -13,12 +13,15 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
 
+from arq import create_pool
+from arq.connections import RedisSettings
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from library_agent.api.schemas import DocumentDetail, DocumentOut, SectionOut, UploadResult
+from library_agent.config import settings
 from library_agent.db.models import (
     Artifact,
     ArtifactKind,
@@ -32,9 +35,13 @@ from library_agent.db.models import (
 from library_agent.db.purge import delete_document
 from library_agent.db.session import SessionDep
 from library_agent.ingest import figures
-from library_agent.ingest.extract import SUPPORTED
+from library_agent.ingest.dedup import find_exact
+from library_agent.ingest.extract import SUPPORTED, content_hash, extract
+from library_agent.ingest.tier0 import _store as store_file
 from library_agent.ingest.tier0 import ingest
 from library_agent.library.cartridge import cartridge_provenance
+from library_agent.llm import providers
+from library_agent.worker.tasks import enqueue_ocr
 
 log = logging.getLogger(__name__)
 
@@ -140,7 +147,51 @@ async def upload_document(
         shutil.copyfileobj(file.file, tmp)
         tmp_path = Path(tmp.name)
     try:
-        result = await ingest(db, tmp_path, original_filename=name, force=force)
+        # A scanned PDF has no text layer; rather than refuse it, transcribe it with the
+        # vision model in the background. The upload returns at once, the document appears
+        # on the shelf when the transcription finishes.
+        ex = None
+        try:
+            ex = extract(tmp_path)
+        except Exception:  # noqa: BLE001 -- let ingest() raise the precise error below
+            ex = None
+        cfg = settings()
+        if (
+            ex is not None
+            and ex.needs_ocr
+            and Path(name).suffix.lower() == ".pdf"
+            and cfg.ocr_enabled
+            and providers.model_for("vision")
+        ):
+            chash = content_hash(tmp_path)
+            if not force and (existing := await find_exact(db, chash)):
+                return UploadResult(
+                    document_id=existing.id,
+                    title=existing.title,
+                    status="duplicate",
+                    sections=0,
+                    chunks=0,
+                    pages=existing.page_count or 0,
+                    duplicate_of=existing.id,
+                    elapsed_seconds=round(time.time() - started, 2),
+                )
+            stored = store_file(tmp_path, chash)
+            redis = await create_pool(RedisSettings.from_dsn(cfg.redis_url))
+            try:
+                await enqueue_ocr(redis, str(stored), name)
+            finally:
+                await redis.aclose()
+            return UploadResult(
+                document_id=None,
+                title=Path(name).stem,
+                status="ocr",
+                sections=0,
+                chunks=0,
+                pages=ex.page_count,
+                needs_ocr=True,
+                elapsed_seconds=round(time.time() - started, 2),
+            )
+        result = await ingest(db, tmp_path, original_filename=name, force=force, extracted=ex)
         await db.commit()
     except ValueError as exc:
         await db.rollback()

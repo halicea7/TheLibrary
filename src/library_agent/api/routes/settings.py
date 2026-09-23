@@ -320,3 +320,93 @@ async def raise_test_incident() -> dict:
             exc, source="api", context={"route": "/api/settings/incidents/test"}
         )
     return {"ok": True}
+
+
+# --- modules: lines to live sources -------------------------------------------------
+
+
+class ModulePut(BaseModel):
+    base_url: str | None = None
+    token: str | None = None  # kept if omitted, so the UI never has to re-send it
+    seated: bool | None = None
+
+
+def _module_public(mod, cfg) -> dict:
+    return {
+        "id": mod.id,
+        "name": mod.name,
+        "kind": mod.kind,
+        "colour": mod.colour,
+        "description": mod.description,
+        "local_only": mod.local_only,
+        "auth_scheme": mod.auth_scheme,
+        "operations": [
+            {
+                "id": o.id,
+                "summary": o.summary,
+                "ask_when": o.ask_when,
+                "params": list((o.params.get("properties") or {}).keys()),
+            }
+            for o in mod.operations
+        ],
+        **cfg.public(),
+    }
+
+
+@router.get("/modules")
+async def list_modules() -> dict:
+    from library_agent.modules import store as mod_store
+    from library_agent.modules.builtin import BUILTIN
+
+    cfgs = mod_store.load()
+    mods = [
+        _module_public(mod, cfgs.get(mid) or mod_store.ModuleConfig(id=mid))
+        for mid, mod in BUILTIN.items()
+    ]
+    return {"modules": mods}
+
+
+@router.put("/modules/{mid}")
+async def put_module(mid: str, body: ModulePut) -> dict:
+    from library_agent.modules import store as mod_store
+    from library_agent.modules.builtin import BUILTIN
+
+    if mid not in BUILTIN:
+        raise HTTPException(404, f"no module {mid!r}")
+    cfgs = mod_store.load()
+    cfg = cfgs.get(mid) or mod_store.ModuleConfig(id=mid)
+    if body.base_url is not None:
+        cfg.base_url = body.base_url.strip().rstrip("/")
+    if body.token is not None and body.token != "":
+        cfg.token = body.token.strip()
+    if body.seated is not None:
+        cfg.seated = body.seated
+    cfgs[mid] = cfg
+    mod_store.save(cfgs)
+    return _module_public(BUILTIN[mid], cfg)
+
+
+@router.post("/modules/{mid}/test")
+async def test_module(mid: str) -> dict:
+    """Reach the module with its configured base URL and token, running its first
+    operation with an obviously-harmless value, so a wrong URL or token shows at once."""
+    from library_agent.modules import store as mod_store
+    from library_agent.modules.builtin import BUILTIN
+    from library_agent.modules.execute import ModuleError, call
+
+    if mid not in BUILTIN:
+        raise HTTPException(404, f"no module {mid!r}")
+    mod = BUILTIN[mid]
+    cfg = mod_store.config_for(mid)
+    if not (cfg.base_url and cfg.token):
+        return {"ok": False, "error": "set a base URL and a token first"}
+    op = mod.operations[0]
+    probe = {
+        k: "CVE-0000-0000" if "cve" in k else "___probe___"
+        for k in (op.params.get("properties") or {})
+    }
+    try:
+        res = await call(mod, cfg, op, probe)
+        return {"ok": True, "reached": True, "count": res["count"]}
+    except ModuleError as exc:
+        return {"ok": False, "error": str(exc)}

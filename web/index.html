@@ -393,6 +393,25 @@ select, .toggle {
 }
 .mark.lit { background:color-mix(in srgb,var(--rubric) 20%,transparent); border-radius:2px; }
 .note .rd { font-style:italic; font-family:var(--serif); margin-right:5px; color:var(--faint); }
+.note.live { border-left-color:var(--c); }
+.note.live .who { color:var(--c); }
+.note.live .arg { display:block; font:10px/1.3 var(--mono); color:var(--dim); }
+.note.live.down .who { text-decoration:line-through; }
+.mark.live { color:var(--c); }
+.mark.live.lit { background:color-mix(in srgb, var(--c) 22%, transparent); }
+.module { border:1px solid var(--rule); border-left:2px solid var(--c); border-radius:4px; padding:10px 12px; margin:0 0 10px; }
+.module-h { display:flex; align-items:center; gap:10px; }
+.module-h .m { font:10.5px/1 var(--mono); color:var(--faint); }
+.module-h .seat { margin-left:auto; font:11px/1 var(--sans); color:var(--dim); display:inline-flex; gap:5px; align-items:center; cursor:pointer; }
+.module-h .seat input { accent-color:var(--c); }
+.module-d { font:11.5px/1.5 var(--sans); color:var(--dim); margin:4px 0 6px; }
+.module-ops { display:flex; flex-wrap:wrap; gap:5px; margin:0 0 8px; }
+.module-ops span { font:10px/1 var(--mono); color:var(--dim); border:1px solid var(--rule); border-radius:99px; padding:3px 8px; }
+.module-cfg { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.module-cfg input { flex:1; min-width:180px; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; color:var(--fg); font:11px/1.5 var(--mono); padding:4px 8px; }
+.module-cfg input:focus { border-color:var(--c); outline:none; }
+.mod-msg { font:10.5px/1.4 var(--mono); }
+.mod-msg.ok { color:var(--verdigris); } .mod-msg.bad { color:var(--amber); }
 .note {
   display:block; font:10.5px/1.45 var(--mono); color:var(--dim);
   padding:3px 0 3px 9px; border-left:1px solid var(--rubric); margin-bottom:6px;
@@ -2139,6 +2158,12 @@ function renderAnswer(el, text) {
     const notes = uniq.map(n => {
       const s = sources.find(x => x.n === n);
       if (!s) return '';
+      // A live module result wears the module's own colour and reads module · op · time,
+      // so it is visibly not from the shelf.
+      if (s.kind === 'live' && s.live) {
+        const lv = s.live;
+        return `<span class="note live${lv.error ? ' down' : ''}" data-n="${n}" style="--c:${esc(lv.colour || '#e0564b')}"><span class="who">${esc(lv.module)}${lv.error ? ' · unreachable' : ''}</span><b>${esc(lv.op)}</b>${lv.arg ? `<span class="arg">${esc(String(lv.arg).slice(0, 30))}</span>` : ''}<span class="pg">live ${esc(lv.when_label || '')}</span></span>`;
+      }
       const short = shortTitle(s.title);
       const where = (s.section || '').split(' › ').slice(1).join(' › ');
       const c = s.cartridge;
@@ -2159,6 +2184,11 @@ function renderAnswer(el, text) {
     const ns = m.dataset.n.split(' ');
     m.onmouseenter = () => ns.forEach(n => link(m, `.note[data-n="${n}"]`, true));
     m.onmouseleave = () => ns.forEach(n => link(m, `.note[data-n="${n}"]`, false));
+  }
+  // A marker that resolves to a live result takes the module's colour, so a live claim
+  // is visible in the prose, not only in the margin.
+  for (const s of sources) if (s.kind === 'live' && s.live) {
+    for (const m of el.querySelectorAll(`.mark[data-n~="${s.n}"]`)) { m.classList.add('live'); m.style.setProperty('--c', s.live.colour || '#e0564b'); }
   }
   for (const nt of el.querySelectorAll('.note')) {
     const n = nt.dataset.n;
@@ -2216,11 +2246,19 @@ async function ask(text) {
           desk('<span class="working">thinking</span>');
           if (m.retrieving) web.scan(true);
         }
+        else if (ev === 'consulted') {
+          const cs = JSON.parse(raw);
+          for (const r of (cs.results || [])) {
+            desk(`<span class="working" style="color:${esc(r.colour || 'var(--rubric)')}">${r.error ? `${esc(r.module)} unreachable` : `consulting ${esc(r.module)} · ${esc(r.op)}`}</span>`);
+          }
+          for (const h of (cs.held_back || [])) say(`${h.module} not consulted — ${h.reason}.`, true);
+        }
         else if (ev === 'sources') {
           sources = JSON.parse(raw);
           web.scan(false); web.light([...new Set(sources.map(s => s.document_id))]);
-          const nr = sources.filter(s => s.kind === 'reading').length, np = sources.length - nr;
-          desk(`<span class="working">${np} passage${np === 1 ? '' : 's'}${nr ? ` and ${nr} reading${nr === 1 ? '' : 's'}` : ''} in hand</span>`);
+          const live = sources.filter(s => s.kind === 'live').length;
+          const nr = sources.filter(s => s.kind === 'reading').length, np = sources.length - nr - live;
+          desk(`<span class="working">${np} passage${np === 1 ? '' : 's'}${nr ? ` and ${nr} reading${nr === 1 ? '' : 's'}` : ''}${live ? ` and ${live} live result${live === 1 ? '' : 's'}` : ''} in hand</span>`);
         }
         else if (ev === 'thinking') {
           if (!thought) murmur.start(asked);
@@ -2948,6 +2986,42 @@ async function viewSaved(file) {
 let showResolved = false;
 const fmtWhen = iso => { if (!iso) return ''; const d = new Date(iso), m = (Date.now() - d) / 60000;
   return m < 1 ? 'just now' : m < 60 ? `${Math.round(m)}m ago` : m < 1440 ? `${Math.round(m/60)}h ago` : d.toLocaleDateString(); };
+async function loadModules() {
+  const el = $('#modules-sect'); if (!el) return;
+  let d; try { d = await (await fetch('/api/settings/modules')).json(); } catch { return; }
+  el.innerHTML = `<p class="label">Modules</p><p class="empty" style="padding:0 0 8px">A module is a read-only line to a live source the librarian can consult during a question — its result appears beside the passages, cited and marked live. Seat it (like a cartridge) to turn it on; the token stays on this machine and is never sent to a model.</p>` + d.modules.map(m => `
+    <div class="module" data-id="${m.id}" style="--c:${esc(m.colour)}">
+      <div class="module-h"><b style="color:var(--c)">${esc(m.name)}</b> <span class="m">${esc(m.kind)}${m.local_only ? ' · local models only' : ''}</span>
+        <label class="seat"><input type="checkbox" ${m.seated ? 'checked' : ''} ${m.configured ? '' : 'disabled'} onchange="seatModule('${m.id}', this.checked)"> seated</label></div>
+      <p class="module-d">${esc(m.description)}</p>
+      <div class="module-ops">${m.operations.map(o => `<span title="${esc(o.ask_when)}">${esc(o.id)}</span>`).join('')}</div>
+      <div class="module-cfg">
+        <input id="mod-url-${m.id}" placeholder="base URL, e.g. https://your-tenant.sentinelone.net" value="${esc(m.base_url)}">
+        <input id="mod-tok-${m.id}" type="password" placeholder="${m.has_token ? '•••• ' + esc(m.token_tail) + ' (leave blank to keep)' : 'API token'}">
+        <button class="linkish" onclick="saveModule('${m.id}')">save</button>
+        <button class="linkish" onclick="testModule('${m.id}', this)">test</button>
+        <span class="mod-msg" id="mod-msg-${m.id}"></span>
+      </div>
+    </div>`).join('');
+}
+async function saveModule(id) {
+  const body = { base_url: $('#mod-url-' + id).value.trim() };
+  const tok = $('#mod-tok-' + id).value; if (tok) body.token = tok;
+  try { await fetch('/api/settings/modules/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); $('#mod-tok-' + id).value = ''; say('Module saved.'); loadModules(); }
+  catch (e) { say('Could not save: ' + e.message, true); }
+}
+async function seatModule(id, seated) {
+  try { const r = await (await fetch('/api/settings/modules/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seated }) })).json();
+    say(seated ? `${r.name} seated — it will be consulted on your questions.` : `${r.name} unseated.`); }
+  catch (e) { say('Could not change it: ' + e.message, true); }
+}
+async function testModule(id, btn) {
+  const msg = $('#mod-msg-' + id); btn.disabled = true; msg.textContent = 'reaching…'; msg.className = 'mod-msg';
+  try { const r = await (await fetch('/api/settings/modules/' + id + '/test', { method: 'POST' })).json();
+    msg.textContent = r.ok ? `reached (${r.count} rows from the probe)` : `✗ ${r.error}`; msg.className = 'mod-msg ' + (r.ok ? 'ok' : 'bad'); }
+  catch (e) { msg.textContent = String(e); msg.className = 'mod-msg bad'; }
+  btn.disabled = false;
+}
 async function loadAbout() {
   const t = $('#about'); if (!t) return;
   try {
@@ -3001,6 +3075,7 @@ async function loadSettings() {
     </div>
     <div class="sect" id="prov-sect"><p class="label">Providers</p><div class="empty">Looking…</div></div>
     <div class="sect" id="roles-sect"><p class="label">Models</p><div class="empty">Looking…</div></div>
+    <div class="sect" id="modules-sect"><p class="label">Modules</p><div class="empty">Looking…</div></div>
     <div class="sect"><p class="label">Fixed</p>${kv(s.models)}</div>
     <div class="sect"><p class="label">Retrieval</p>${kv(s.retrieval)}</div>
     <div class="sect"><p class="label">Library</p>${kv(s.library)}
@@ -3029,6 +3104,7 @@ async function loadSettings() {
   $('#inc-badge').hidden = !s.incidents_open; $('#inc-badge').textContent = s.incidents_open;
   loadProviders();
   loadAbout();
+  loadModules();
 }
 // Providers and roles. Ollama is the default and needs no entry; a provider is any
 // OpenAI-protocol endpoint, named once and then addressed by prefix. Each role picks

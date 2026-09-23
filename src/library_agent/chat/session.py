@@ -36,6 +36,46 @@ from library_agent.retrieval.readings import named_documents, retrieve_readings
 
 log = logging.getLogger(__name__)
 
+_MODULE_NS = uuid.uuid5(uuid.NAMESPACE_URL, "library-agent:module")
+
+
+def _live_hit(lr) -> SearchHit:
+    """A module's live result as a passage, so it numbers, cites, holds and verifies like
+    any other -- but marked live, in the module's own colour."""
+    from datetime import UTC, datetime
+
+    when_label = datetime.fromtimestamp(lr.when, UTC).strftime("%H:%M")
+    arg = str(next(iter(lr.args.values()), "")) if lr.args else ""
+    if lr.error:
+        body = (
+            f"{lr.module.name} could not be reached just now ({lr.error}). Its live answer is "
+            "unavailable; say the source was unreachable rather than guessing."
+        )
+    else:
+        body = f"{lr.module.name} · {lr.op.summary}\n{lr.text}"
+    return SearchHit(
+        chunk_id=lr.chunk_id,
+        document_id=uuid.uuid5(_MODULE_NS, lr.module.id),
+        document_title=lr.module.name,
+        section_path=lr.op.id,
+        page=None,
+        text=body,
+        score=1.0,
+        dense_rank=None,
+        lexical_rank=None,
+        kind="live",
+        live={
+            "module": lr.module.name,
+            "colour": lr.module.colour,
+            "op": lr.op.id,
+            "when": lr.when,
+            "when_label": when_label,
+            "arg": arg,
+            "error": lr.error,
+            "count": lr.count,
+        },
+    )
+
 
 @dataclass
 class TurnState:
@@ -158,6 +198,36 @@ async def run_turn(
             },
         }
 
+        # The consult step: a seated module may answer part of this question live, its
+        # result joining the passage pool to be cited and verified like any other. Refused
+        # when chat is on a remote provider and the module is local-only; the desk says so.
+        live_hits: list[SearchHit] = []
+        if needs_retrieval:
+            from library_agent.modules import store as mod_store
+            from library_agent.modules.consult import consult as consult_modules
+
+            remote_chat = providers.is_remote(model)
+            usable, held_back = [], []
+            for mod, mcfg in mod_store.seated_modules():
+                (held_back if (mod.local_only and remote_chat) else usable).append((mod, mcfg))
+            if usable:
+                for lr in await consult_modules(client, model, query, usable):
+                    live_hits.append(_live_hit(lr))
+            if usable or held_back:
+                yield {
+                    "event": "consulted",
+                    "data": {
+                        "results": [h.live for h in live_hits],
+                        "held_back": [
+                            {
+                                "module": m.name,
+                                "reason": "local models only; chat is on a remote provider",
+                            }
+                            for m, _ in held_back
+                        ],
+                    },
+                }
+
         pinned = list(pinned_chunk_ids or [])
         if needs_retrieval or pinned:
             async with session_scope() as db:
@@ -206,7 +276,9 @@ async def run_turn(
                         if (h.document_id, h.section_path) not in sections:
                             sections.add((h.document_id, h.section_path))
                             readings.append(h)
-                state.hits = held_hits + merged[:room] + readings[: lvl.readings]
+                # Live results lead the pool: they apply or they do not, and are not ranked
+                # against passages or counted against the passage budget.
+                state.hits = live_hits + held_hits + merged[:room] + readings[: lvl.readings]
                 if document_ids:
                     state.hits = [h for h in state.hits if h.document_id in set(document_ids)]
                 state.sources = build_sources(state.hits, {h.chunk_id for h in held_hits})
@@ -243,6 +315,7 @@ async def run_turn(
                     "cartridge": s.cartridge,
                     "held": s.held,
                     "kind": s.kind,
+                    "live": s.live,
                 }
                 for s in state.sources
             ],
@@ -312,6 +385,7 @@ async def run_turn(
                                 "document_id": s.document_id,
                                 "section": plain_label(s.section_path),
                                 "kind": s.kind,
+                                "live": s.live,
                             }
                             for s in used
                         ],

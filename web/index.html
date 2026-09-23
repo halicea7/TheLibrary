@@ -2723,13 +2723,38 @@ function renderComposition(el, markdown, opts = {}) {
   const rm = body.match(/\n#{2,3}\s+References\s*\n([\s\S]*)$/);
   if (rm) { refs = parseRefs(rm[1]); body = body.slice(0, rm.index); }
   sources = refs;  // the apparatus reads the global, as in a live turn
-  const bodyEl = document.createElement('div');
-  renderAnswer(bodyEl, body.trim());
-  for (const bq of bodyEl.querySelectorAll('blockquote')) {
-    if (/^\s*⚠/.test(bq.textContent)) { const d = document.createElement('div'); d.className = 'caveat'; d.innerHTML = bq.innerHTML; bq.replaceWith(d); }
-  }
+  // The document title, rendered once as its own heading (callers do not add it).
+  const tm = body.match(/^\s*#\s+(.+)$/m);
+  const docTitle = tm ? tm[1].trim() : (opts.title || '');
+  if (tm) body = body.slice(0, tm.index) + body.slice(tm.index + tm[0].length);
   el.innerHTML = '';
-  el.appendChild(bodyEl);
+  if (docTitle) { const h = document.createElement('h1'); h.className = 't'; h.textContent = docTitle; el.appendChild(h); }
+  // Split into sections exactly as the live view builds them: the heading outside, the
+  // body in a `.said` grid so the citation notes sit in the right column, not stacked
+  // below. `##` is a chapter only when the document also has `###` sections under it.
+  const nested = /^###\s/m.test(body);
+  const flush = (heading, level, buf) => {
+    if (heading != null) {
+      const h = document.createElement(level === 3 ? 'h3' : 'h2');
+      if (level === 2 && nested) h.className = 'chap';
+      h.textContent = heading; el.appendChild(h);
+    }
+    const md = buf.join('\n').trim();
+    if (!md) return;
+    const said = document.createElement('div'); said.className = 'said md';
+    renderAnswer(said, md);
+    for (const bq of said.querySelectorAll('blockquote')) {
+      if (/^\s*⚠/.test(bq.textContent)) { const d = document.createElement('div'); d.className = 'caveat'; d.innerHTML = bq.innerHTML; bq.replaceWith(d); }
+    }
+    el.appendChild(said);
+  };
+  let heading = null, level = 2, buf = [];
+  for (const ln of body.split('\n')) {
+    const h3 = ln.match(/^###\s+(.+)$/), h2 = !h3 && ln.match(/^##\s+(.+)$/);
+    if (h2 || h3) { flush(heading, level, buf); buf = []; heading = (h3 ? h3[1] : h2[1]).trim(); level = h3 ? 3 : 2; continue; }
+    buf.push(ln);
+  }
+  flush(heading, level, buf);
   if (refs.length) {
     const r = document.createElement('div'); r.className = 'refs';
     r.innerHTML = `<h3>References</h3>` + refs.map(x =>
@@ -2825,10 +2850,8 @@ async function composeDoc() {
           write.last.seal = sealSvg;
           try { localStorage.setItem('write.lastdoc', JSON.stringify({ title: result.title, markdown: result.markdown, seal: sealSvg, id: result.id })); } catch {}
           // Settle the watched populate into the one canonical render, so it is identical
-          // to opening the saved document later. The title stays above it.
-          const title = doc.querySelector('h1.t')?.outerHTML || `<h1 class="t">${esc(result.title)}</h1>`;
-          renderComposition(doc, result.markdown, { id: result.id, seal: sealSvg });
-          doc.insertAdjacentHTML('afterbegin', title);
+          // to opening the saved document later.
+          renderComposition(doc, result.markdown, { id: result.id, seal: sealSvg, title: result.title });
           doc.insertAdjacentHTML('beforeend', `<div class="acts">
               <button class="go" onclick="saveDoc()">save .md</button>
               <button class="go" onclick="window.print()">print / PDF</button>

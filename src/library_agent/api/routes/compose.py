@@ -30,6 +30,7 @@ class ComposeIn(BaseModel):
     cartridge_ids: list[uuid.UUID] = Field(default_factory=list)
     scope_label: str = ""
     review: bool = True
+    force: bool = False
 
 
 class DocIn(BaseModel):
@@ -53,6 +54,7 @@ async def compose_stream(req: ComposeIn, db: SessionDep) -> EventSourceResponse:
             cartridge_ids=req.cartridge_ids or None,
             scope_label=req.scope_label,
             review=req.review,
+            force=req.force,
         ):
             payload = ev["data"]
             yield {

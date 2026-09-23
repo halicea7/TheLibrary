@@ -41,6 +41,7 @@ from library_agent.llm import providers
 from library_agent.llm.client import LLM
 from library_agent.llm.lease import mark_chat_active, mark_chat_done, redis_client
 from library_agent.llm.liveness import Busy, gate, liveness
+from library_agent.llm.ollama import is_placeholder
 from library_agent.reading.prompts import SYSTEM_LIBRARIAN
 from library_agent.retrieval.hybrid import SearchHit
 from library_agent.retrieval.pipeline import RetrievalConfig, retrieve
@@ -68,6 +69,9 @@ NESTED = {"thesis"}
 COMPOSE_PASSAGES = 10
 COMPOSE_READINGS = 6
 COMPOSE_CONFIG = RetrievalConfig(name="compose", use_reranker=True, rerank_depth=40, per_document=3)
+# The coverage probe wants a relevance sample, not a ranked answer, so it skips the
+# reranker -- cheaper, and one fewer heavy call before the document even begins.
+COVERAGE_PROBE = RetrievalConfig(name="coverage", use_reranker=False, per_document=2)
 # The thread block plus a section's passages and readings are a large prompt; the compose
 # model is chosen to have the room. A section still writes into a modest reply.
 COMPOSE_NUM_CTX = 65536
@@ -103,7 +107,7 @@ Brief:
 {brief}
 
 {scope}
-{threads}
+{threads}{coverage}
 Plan it: a title, and {n_sections}. For each section give the heading, what it should
 cover (one or two sentences), and the search query that would find the right passages in
 the library for it (concrete terms, not a question). Sections should not overlap; order
@@ -172,6 +176,44 @@ sections established, in order:
 
 State, as `claim`, what the chapter as a whole establishes in one sentence — the
 through-line later chapters can rely on. No preamble."""
+
+# The coverage check: before planning, ask whether the shelf can actually answer the brief,
+# or whether answering would mean substituting adjacent material. A thin verdict stops the
+# compose rather than letting it derail into a confident document about the wrong thing.
+COVERAGE_SYSTEM = """You judge whether a research library holds enough to write a document on a
+brief, from a sample of its most relevant passages and readings.
+
+The line that matters is domain, not completeness. If the material is ABOUT the brief's
+subject — even partially, even with gaps — it is at least "partial". Reserve "thin" for
+when the material is about a DIFFERENT subject and would only reach the brief by analogy or
+substitution (web-security passages for a thesis on an AI model's context window; ML papers
+for a brief on Arctic tern ecology). Do not call material thin merely because coverage is
+imperfect — a brief on how authentication fails is well within a library of authentication,
+session and password material even if no single passage states the thesis."""
+
+COVERAGE_PROMPT = """Brief:
+{brief}
+
+The most relevant material the library holds for it:
+{sample}
+
+Judge coverage as `verdict`:
+- "strong": the material directly addresses the brief's subject; a document can be written.
+- "partial": the material is on the brief's subject but leaves real gaps; a document can be
+  written if it scopes to what is here and says where the library is short.
+- "thin": the material is about a different subject; a document would have to substitute
+  adjacent topics and reach conclusions the evidence does not support.
+In `note`, one sentence a reader sees. In `missing`, what the library would need to do it well."""
+
+COVERAGE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["strong", "partial", "thin"]},
+        "note": {"type": "string", "maxLength": 300},
+        "missing": {"type": "string", "maxLength": 300},
+    },
+    "required": ["verdict", "note"],
+}
 
 # The review pass: after a section is written, read it back against the passages it was
 # given and flag where it reaches past them. It does not rewrite -- the argument stays as
@@ -325,9 +367,64 @@ async def _chapter_thesis(client, model, title: str, chapter: str, takeaways: li
         return kept[-1]
 
 
+def _norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def _anchored(quote: str, body: str) -> bool:
+    """A flag's quote must actually be in the section -- so a placeholder ("…") or a
+    hallucinated sentence is dropped rather than shown beside real prose."""
+    q, b = _norm(quote), _norm(body)
+    words = q.split()
+    if len(words) < 3:
+        return False
+    if q in b or " ".join(words[:6]) in b:
+        return True
+    qset = set(words)
+    return len(qset & set(b.split())) / len(qset) >= 0.75
+
+
+async def _coverage(client, model, brief: str, hits: list[SearchHit]) -> dict:
+    """Can the shelf answer the brief, or only something adjacent to it? Judged from the
+    most relevant passages and readings before a line is written."""
+    if not hits:
+        return {
+            "verdict": "thin",
+            "note": "The library returned nothing for this brief.",
+            "missing": "material on the subject",
+            "documents": [],
+        }
+    sample = "\n".join(
+        f"- {plain_label(h.document_title)}"
+        f"{f' — {plain_label(h.section_path)}' if h.section_path else ''}: {h.text.strip()[:280]}"
+        for h in hits[:16]
+    )
+    try:
+        out = await client.structured(
+            model,
+            COVERAGE_PROMPT.format(brief=brief, sample=sample),
+            COVERAGE_SCHEMA,
+            system=COVERAGE_SYSTEM,
+            temperature=0.1,
+            think=False,
+            num_predict=300,
+        )
+    except Exception:
+        log.warning("coverage check failed", exc_info=True)
+        return {"verdict": "partial", "note": "", "missing": "", "documents": []}
+    v = out.get("verdict")
+    return {
+        "verdict": v if v in ("strong", "partial", "thin") else "partial",
+        "note": " ".join(str(out.get("note") or "").split())[:300],
+        "missing": " ".join(str(out.get("missing") or "").split())[:300],
+        "documents": sorted({plain_label(h.document_title) for h in hits[:16]}),
+    }
+
+
 async def _review(client, model, heading: str, body: str, context: str) -> list[dict]:
     """Read a finished section against its passages and flag where it reaches past them.
-    Flag-only: it never touches the prose."""
+    Flag-only: it never touches the prose. A flag whose quote is not in the section is
+    dropped -- which also keeps out the "…" placeholders a weak model emits."""
     if len(body.strip()) < 120 or not context.strip():
         return []
     try:
@@ -347,7 +444,7 @@ async def _review(client, model, heading: str, body: str, context: str) -> list[
     for f in out.get("flags") or []:
         quote = " ".join(str(f.get("quote") or "").split())
         issue = " ".join(str(f.get("issue") or "").split())
-        if quote and issue:
+        if quote and issue and not is_placeholder(quote) and _anchored(quote, body):
             flags.append(
                 {
                     "quote": quote[:300],
@@ -397,6 +494,7 @@ async def compose(
     cartridge_ids: list[uuid.UUID] | None = None,
     scope_label: str = "",
     review: bool = True,
+    force: bool = False,
     caller: str = "ui",
 ) -> AsyncIterator[dict]:
     """Yields SSE-shaped events: plan → for each section (section, sources, token*,
@@ -452,6 +550,50 @@ async def compose(
                 "labels": [t["label"] for t in threads],
             },
         }
+        # Before a line is written: can the shelf actually answer this, or only something
+        # next to it? A thin verdict stops here rather than composing a confident document
+        # about the wrong subject -- unless the person asked to write it anyway.
+        async with session_scope() as db:
+            probe = await retrieve(
+                db,
+                brief,
+                config=COVERAGE_PROBE,
+                client=client,
+                limit=12,
+                category_ids=category_ids,
+                cartridge_ids=cartridge_ids,
+                favour=named,
+            )
+            probe += await retrieve_readings(
+                db,
+                brief,
+                client=client,
+                limit=6,
+                category_ids=category_ids,
+                cartridge_ids=cartridge_ids,
+                favour=named,
+            )
+        cover = await _coverage(client, model, brief, probe)
+        yield {"event": "coverage", "data": cover}
+        if cover["verdict"] == "thin" and not force:
+            yield {
+                "event": "error",
+                "data": (
+                    f"The library has little on this: {cover['note']} "
+                    "A document here would substitute adjacent material. "
+                    "Narrow the brief to what the shelf holds, add sources, or write it anyway."
+                ),
+                "code": 422,
+            }
+            return
+        cover_text = (
+            f"\nCoverage of this brief is {cover['verdict']}: {cover['note']}"
+            + (f" The library is thin on: {cover['missing']}." if cover.get("missing") else "")
+            + " Scope the document to what the library actually holds; where it lacks the"
+            " material for a claim, say so rather than reaching for an adjacent topic.\n"
+            if cover["verdict"] != "strong"
+            else ""
+        )
         nested = length in NESTED
         nesting = (
             "Group the sections into chapters: give every section a `chapter` (the title of "
@@ -466,6 +608,7 @@ async def compose(
                 brief=brief,
                 scope=scope,
                 threads=thread_text,
+                coverage=cover_text,
                 n_sections=n_sections,
                 nesting=nesting,
             ),

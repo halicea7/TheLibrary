@@ -652,6 +652,8 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .doc h1.t { font:600 26px/1.25 var(--serif); margin:0 0 6px; max-width:68ch; }
 .doc .plan { font:12px/1.6 var(--mono); color:var(--faint); margin:0 0 18px; max-width:68ch; }
 .doc .plan.wove { font-family:var(--sans); color:var(--dim); border-left:2px solid var(--verdigris); padding-left:10px; }
+.doc .plan.cover { font-family:var(--sans); color:var(--dim); border-left:2px solid var(--verdigris); padding-left:10px; margin-bottom:6px; }
+.doc .plan.cover .miss { color:var(--faint); }
 .doc h2.chap { font:600 15px/1.3 var(--serif); color:var(--verdigris); margin:26px 0 2px; padding-bottom:3px; border-bottom:1px solid var(--rule); letter-spacing:.01em; }
 .outline b.chap { display:block; width:100%; margin:6px 0 2px; font:600 10px/1.4 var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--verdigris); }
 .doc .outline { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 22px; }
@@ -2561,7 +2563,7 @@ async function openVolume(id) {
 }
 
 /* ── write ────────────────────────────────────────────────────────────── */
-const write = { brief: '', length: 'medium', review: true, busy: false, last: null };
+const write = { brief: '', length: 'medium', review: true, force: false, busy: false, last: null };
 function renderWrite() {
   const el = $('#view-write');
   if (el.dataset.ready) { loadSaved(); return; }
@@ -2639,7 +2641,7 @@ async function composeDoc() {
   const room = roomName();
   // No model here: Write runs on the compose role (its own, larger model), not the chat
   // selector. The model actually used comes back on the plan event.
-  const body = { brief, length: write.length, review: write.review,
+  const body = { brief, length: write.length, review: write.review, force: !!write.force,
     category_ids: [...subjects], cartridge_ids: [...cartridges],
     scope_label: [room ? room + "'s shelf" : '', subjects.size ? `${subjects.size} subjects` : ''].filter(Boolean).join(' and ') };
   let secSources = [], secEl = null, said = null, buf = '', ev = null, text = '', result = null, wove = '', lastCh = null;
@@ -2658,7 +2660,12 @@ async function composeDoc() {
         if (!line.startsWith('data:')) continue;
         const rawFull = line.slice(5).replace(/^ /, '').replace(/\r$/, '');
         const raw = (ev === 'token' || ev === 'thinking') ? rawFull : rawFull.trim();
-        if (ev === 'threads') {
+        if (ev === 'coverage') {
+          const cv = JSON.parse(raw);
+          const tone = cv.verdict === 'strong' ? 'verdigris' : (cv.verdict === 'thin' ? 'amber' : 'amber');
+          wove = `<div class="plan cover" style="border-color:var(--${tone})"><b style="color:var(--${tone})">Coverage: ${esc(cv.verdict)}</b>${cv.note ? ' — ' + esc(cv.note) : ''}${cv.missing && cv.verdict !== 'strong' ? ` <span class="miss">Thin on: ${esc(cv.missing)}</span>` : ''}</div>` + wove;
+          if (wove) doc.innerHTML = wove;
+        } else if (ev === 'threads') {
           const t = JSON.parse(raw);
           wove = t.count
             ? `<div class="plan wove">Woven from <b>${t.count}</b> thread${t.count === 1 ? '' : 's'} the library already found${t.disputed ? `, <b>${t.disputed}</b> with a disagreement` : ''}: ${t.labels.slice(0, 8).map(esc).join(' · ')}${t.labels.length > 8 ? ' …' : ''}</div>`
@@ -2718,13 +2725,16 @@ async function composeDoc() {
               <span class="tally">${result.sections} sections · ${result.references.length} passages cited · ${result.markers_resolved} of ${result.markers_emitted} citations verified${result.flags ? ` · <b style="color:var(--amber)">${result.flags} claim${result.flags === 1 ? '' : 's'} flagged</b>` : ''}${usingModel ? ' · ' + esc(usingModel) : ''}</span>
             </div>`);
         } else if (ev === 'error') {
-          doc.insertAdjacentHTML('beforeend', `<p style="color:var(--amber)">${esc(raw)}</p>`);
+          const anyway = /little on this/i.test(raw) && !write.force
+            ? ` <button class="linkish" onclick="composeAnyway()">write it anyway</button>` : '';
+          doc.insertAdjacentHTML('beforeend', `<p style="color:var(--amber)">${esc(raw)}${anyway}</p>`);
         }
       }
     }
   } catch (e) { doc.insertAdjacentHTML('beforeend', `<p style="color:var(--amber)">${esc(String(e))}</p>`); }
   finally { murmur.stop(); write.busy = false; $('#wr-go').disabled = false; $('#wr-go').textContent = 'draft it'; loadSaved(); }
 }
+function composeAnyway() { write.force = true; composeDoc().finally(() => { write.force = false; }); }
 async function saveDoc() {
   if (!write.last) return;
   // The saved copy carries the seal as inline SVG (renders on GitHub and in print); the

@@ -187,13 +187,15 @@ class TestReviewFlags:
     async def test_review_flags_only_genuine_overreach(self, scratch_db):
         from library_agent.chat.compose import _review
 
+        body = "Breaking the cipher is impossible for any attacker. " * 5
+
         class Client:
             async def structured(self, model, prompt, schema, **kw):
-                # a model that finds one overreach
+                # a model that finds one overreach (its quote is really in the section)
                 return {
                     "flags": [
                         {
-                            "quote": "X is impossible",
+                            "quote": "Breaking the cipher is impossible for any attacker",
                             "issue": "sources say hard, not impossible",
                             "condition": "a weak key is used",
                         },
@@ -201,8 +203,81 @@ class TestReviewFlags:
                     ]
                 }
 
-        flags = await _review(Client(), "m", "H", "A" * 200, "[1] passage text")
-        assert len(flags) == 1 and flags[0]["quote"] == "X is impossible"
+        flags = await _review(Client(), "m", "H", body, "[1] passage text")
+        assert len(flags) == 1 and flags[0]["quote"].startswith("Breaking the cipher")
         assert flags[0]["condition"] == "a weak key is used"
         # too-short a body is not reviewed at all
         assert await _review(Client(), "m", "H", "tiny", "[1] x") == []
+
+
+class TestReviewAnchor:
+    def test_a_flag_must_quote_the_section(self):
+        from library_agent.chat.compose import _anchored
+
+        body = "Salting defends the stored hashes but not the login flow itself."
+        assert _anchored("Salting defends the stored hashes", body)
+        assert _anchored("salting  defends the STORED hashes but not", body)  # norm + run
+        assert not _anchored("…", body)  # a placeholder
+        assert not _anchored("The moon is made of cheese entirely", body)  # hallucinated
+        assert not _anchored("ab", body)  # too short
+
+    async def test_review_drops_unanchored_and_placeholder_quotes(self, scratch_db):
+        from library_agent.chat.compose import _review
+
+        body = "Salting the passwords protects the stored hashes from precomputed tables. " * 3
+
+        class Client:
+            async def structured(self, model, prompt, schema, **kw):
+                return {
+                    "flags": [
+                        {
+                            "quote": "Salting the passwords protects the stored hashes",
+                            "issue": "true of storage, not the login path",
+                            "condition": "injectable login",
+                        },
+                        {"quote": "...", "issue": "placeholder should be dropped"},
+                        {
+                            "quote": "This document proves total security",
+                            "issue": "not in the section",
+                        },
+                    ]
+                }
+
+        flags = await _review(Client(), "m", "H", body, "[1] passage")
+        assert len(flags) == 1 and flags[0]["quote"].startswith("Salting the passwords")
+
+
+class TestCoverage:
+    async def test_thin_coverage_names_its_verdict(self, scratch_db):
+        from conftest import make_document
+
+        from library_agent.chat.compose import _coverage
+        from library_agent.retrieval.hybrid import SearchHit
+
+        d = await make_document(scratch_db, title="Web Attacks", body="xss " * 40)
+
+        class Client:
+            async def structured(self, model, prompt, schema, **kw):
+                assert "Web Attacks" in prompt  # the sample reached the judge
+                return {
+                    "verdict": "thin",
+                    "note": "The shelf is about web security, not the brief.",
+                    "missing": "material on the actual subject",
+                }
+
+        hit = SearchHit(
+            chunk_id=d.id,
+            document_id=d.id,
+            document_title="Web Attacks",
+            section_path="",
+            page=1,
+            text="xss things",
+            score=0.4,
+            dense_rank=1,
+            lexical_rank=None,
+        )
+        out = await _coverage(Client(), "m", "an unrelated brief", [hit])
+        assert out["verdict"] == "thin" and "web security" in out["note"]
+        # no material at all is thin without a call
+        empty = await _coverage(Client(), "m", "brief", [])
+        assert empty["verdict"] == "thin"

@@ -308,6 +308,7 @@ class ComposeIn(BaseModel):
     model: str | None = None
     length: str = Field(default="medium", description="short | medium | long | report | thesis")
     review: bool = Field(default=True, description="flag claims that reach past their evidence")
+    force: bool = Field(default=False, description="write even when coverage is thin")
     shelve: bool = Field(default=False, description="also add the document to the library")
 
 
@@ -333,6 +334,7 @@ async def compose_json(req: ComposeIn, request: Request) -> dict:
         cartridge_ids=[room] if room else None,
         scope_label=req.room or ", ".join(req.subjects),
         review=req.review,
+        force=req.force,
         caller=_caller(request),
     ):
         if ev["event"] == "done":

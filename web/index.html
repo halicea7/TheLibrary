@@ -669,6 +669,20 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .saved .row .t { flex:1; text-align:left; color:var(--fg); }
 .saved .row .t:hover { color:var(--verdigris); }
 .restored { font:11.5px/1.5 var(--sans); color:var(--dim); margin:0 0 12px; padding:7px 10px; border-left:2px solid var(--verdigris); background:color-mix(in srgb, var(--verdigris) 7%, transparent); border-radius:0 3px 3px 0; }
+.cockpit { position:sticky; top:0; z-index:5; display:flex; gap:18px; align-items:stretch; margin:0 0 20px; padding:14px 0; background:var(--panel); border-bottom:1px solid var(--rule); }
+.cockpit .prog { position:relative; width:120px; height:120px; flex:0 0 120px; }
+.cockpit .ring { width:120px; height:120px; transform:rotate(-90deg); }
+.cockpit .ring-bg { fill:none; stroke:var(--rule); stroke-width:7; }
+.cockpit .ring-fg { fill:none; stroke:var(--verdigris); stroke-width:7; stroke-linecap:round; transition:stroke-dashoffset .5s ease; }
+.cockpit .ring-c { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:1px; }
+.cockpit .ring-c .pct { font:600 24px/1 var(--serif); color:var(--fg); }
+.cockpit .ring-c .sec-n { font:10px/1.2 var(--mono); color:var(--verdigris); letter-spacing:.04em; }
+.cockpit .ring-c .sec-h { font:9.5px/1.2 var(--sans); color:var(--faint); max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cockpit .think-wrap { flex:1; min-width:0; display:flex; flex-direction:column; }
+.cockpit .think-wrap .label { margin:0 0 4px; }
+.cockpit .think-win { flex:1; max-height:110px; overflow:hidden; font:11px/1.5 var(--serif); font-style:italic; color:var(--faint); white-space:pre-wrap; word-break:break-word;
+  -webkit-mask-image:linear-gradient(to bottom, transparent, #000 22px, #000 80%, transparent); mask-image:linear-gradient(to bottom, transparent, #000 22px, #000 80%, transparent); }
+@media (max-width:640px){ .cockpit{ flex-direction:column; align-items:center; } .cockpit .think-win{ max-height:80px; width:100%; } }
 .caveat q { color:var(--fg); font-style:italic; }
 .caveat q::before { content:"\201C"; } .caveat q::after { content:"\201D"; }
 .write .bar .rev { display:inline-flex; align-items:center; gap:5px; font:11px/1 var(--sans); color:var(--dim); cursor:pointer; }
@@ -2589,7 +2603,7 @@ function renderWrite() {
     const stash = JSON.parse(localStorage.getItem('write.lastdoc') || 'null');
     if (stash && stash.markdown) {
       write.last = { title: stash.title, markdown: stash.markdown, seal: stash.seal || '', id: stash.id };
-      renderDocMarkdown(stash.markdown + (stash.seal ? `\n<p align="center">${stash.seal}</p>` : ''), $('#wr-doc'));
+      renderComposition($('#wr-doc'), stash.markdown, { id: stash.id, seal: stash.seal });
       $('#wr-doc').insertAdjacentHTML('afterbegin', `<div class="restored">Your last draft, brought back after a refresh. <button class="go" onclick="saveDoc()">save .md</button> <button class="go" onclick="window.print()">print / PDF</button></div>`);
     }
   } catch {}
@@ -2646,6 +2660,84 @@ function buildSeal(id, docs, edges) {
     <text font-family="var(--mono, monospace)" font-size="9" letter-spacing="2" fill="${faint}" text-anchor="middle"><textPath href="#sealBot" startOffset="50%">${esc(short)} · ${date}</textPath></text>
   </svg>`;
 }
+// While a document writes: a ring that fills as sections finish, its centre the percentage
+// and which section is in hand, and a window to its right where the model's reasoning for
+// that section cascades — the same murmur Ask shows, given a place to be watched.
+const RING_R = 52, RING_C = 2 * Math.PI * RING_R;
+function cockpitHtml() {
+  return `<div class="cockpit" id="wr-cockpit">
+    <div class="prog">
+      <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="ring-bg" cx="60" cy="60" r="${RING_R}"/>
+        <circle class="ring-fg" cx="60" cy="60" r="${RING_R}" style="stroke-dasharray:${RING_C.toFixed(1)};stroke-dashoffset:${RING_C.toFixed(1)}"/>
+      </svg>
+      <div class="ring-c"><b class="pct">0%</b><span class="sec-n">planning…</span><span class="sec-h"></span></div>
+    </div>
+    <div class="think-wrap"><p class="label">Thinking</p><div class="think-win" id="wr-think"></div></div>
+  </div>`;
+}
+function setRing(pct, cur, total, heading) {
+  const ck = $('#wr-cockpit'); if (!ck) return;
+  pct = Math.max(0, Math.min(1, pct));
+  ck.querySelector('.ring-fg').style.strokeDashoffset = (RING_C * (1 - pct)).toFixed(1);
+  ck.querySelector('.pct').textContent = Math.round(pct * 100) + '%';
+  ck.querySelector('.sec-n').textContent = total ? `Section ${cur}/${total}` : '';
+  ck.querySelector('.sec-h').textContent = heading || '';
+}
+function thinkHead(h) {
+  const w = $('#wr-think'); if (!w) return;
+  w.textContent += (w.textContent ? '\n\n' : '') + '· ' + h + '\n';
+  w.scrollTop = w.scrollHeight;
+}
+function thinkPush(s) {
+  const w = $('#wr-think'); if (!w) return;
+  w.textContent += s;
+  if (w.textContent.length > 8000) w.textContent = w.textContent.slice(-8000);
+  w.scrollTop = w.scrollHeight;
+}
+// One reference line: "[3] Title, p.12 — A › B (Ops)" back to its parts.
+function parseRefs(block) {
+  const out = [];
+  for (const ln of block.split('\n')) {
+    const m = ln.match(/^\s*\[(\d+)\]\s+(.+)$/); if (!m) continue;
+    let rest = m[2].trim(), page = null, section = '';
+    const cm = rest.match(/\s\(([^()]+)\)\s*$/); if (cm) rest = rest.slice(0, cm.index).trim();
+    const sm = rest.match(/\s—\s(.+)$/); if (sm) { section = sm[1].trim(); rest = rest.slice(0, sm.index).trim(); }
+    const pm = rest.match(/,\s*p\.(\d+)\s*$/); if (pm) { page = parseInt(pm[1]); rest = rest.slice(0, pm.index).trim(); }
+    out.push({ n: parseInt(m[1]), title: rest, page, section });
+  }
+  return out;
+}
+// The one canonical render of a finished document, so viewing a saved one looks exactly
+// like the result you watched populate: the prose with its citation apparatus rebuilt from
+// the references, the caveats in amber, the references block, and the sealed stamp.
+function renderComposition(el, markdown, opts = {}) {
+  const sm = markdown.match(/\n<p align="center">([\s\S]*?)<\/p>\s*$/);
+  let body = sm ? markdown.slice(0, sm.index) : markdown;
+  const seal = sanitizeSvg(sm ? sm[1] : (opts.seal || ''));
+  let id = opts.id || '';
+  const im = body.match(/\n`The Library · ([0-9a-f-]{8,})`/);
+  if (im) { id = id || im[1]; body = body.slice(0, im.index); }
+  body = body.replace(/\n\*Composed by The Library[^\n]*\*\s*$/, '');
+  let refs = [];
+  const rm = body.match(/\n#{2,3}\s+References\s*\n([\s\S]*)$/);
+  if (rm) { refs = parseRefs(rm[1]); body = body.slice(0, rm.index); }
+  sources = refs;  // the apparatus reads the global, as in a live turn
+  const bodyEl = document.createElement('div');
+  renderAnswer(bodyEl, body.trim());
+  for (const bq of bodyEl.querySelectorAll('blockquote')) {
+    if (/^\s*⚠/.test(bq.textContent)) { const d = document.createElement('div'); d.className = 'caveat'; d.innerHTML = bq.innerHTML; bq.replaceWith(d); }
+  }
+  el.innerHTML = '';
+  el.appendChild(bodyEl);
+  if (refs.length) {
+    const r = document.createElement('div'); r.className = 'refs';
+    r.innerHTML = `<h3>References</h3>` + refs.map(x =>
+      `<div><b>[${x.n}]</b>${esc(x.title)}${x.page ? `, p.${x.page}` : ''}${x.section ? ' — ' + esc((x.section.split(' › ').slice(1).join(' › ')) || x.section) : ''}</div>`).join('');
+    el.appendChild(r);
+  }
+  if (seal) { const f = document.createElement('figure'); f.className = 'seal'; f.innerHTML = seal + (id ? `<figcaption>The Library · <code>${esc(id)}</code></figcaption>` : ''); el.appendChild(f); }
+}
 async function composeDoc() {
   const brief = ($('#wr-brief').value || '').trim();
   if (brief.length < 4 || write.busy) return;
@@ -2659,9 +2751,8 @@ async function composeDoc() {
     category_ids: [...subjects], cartridge_ids: [...cartridges],
     scope_label: [room ? room + "'s shelf" : '', subjects.size ? `${subjects.size} subjects` : ''].filter(Boolean).join(' and ') };
   let secSources = [], secEl = null, said = null, buf = '', ev = null, text = '', result = null, wove = '', lastCh = null;
-  let usingModel = '';
+  let usingModel = '', total = 0;
   const seal = { docs: new Map(), edges: [] };  // the little nebula of what was synthesised
-  murmur.start(doc);
   try {
     const res = await fetch('/api/compose', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const reader = res.body.getReader(), dec = new TextDecoder();
@@ -2686,30 +2777,33 @@ async function composeDoc() {
             : '';
           if (wove) doc.innerHTML = wove;
         } else if (ev === 'plan') {
-          const p = JSON.parse(raw); usingModel = p.model || '';
-          doc.innerHTML = wove + `<h1 class="t">${esc(p.title)}</h1><div class="plan">${esc(p.notes || '')}</div>
+          const p = JSON.parse(raw); usingModel = p.model || ''; total = p.sections.length;
+          doc.innerHTML = cockpitHtml() + wove + `<h1 class="t">${esc(p.title)}</h1><div class="plan">${esc(p.notes || '')}</div>
             <div class="outline">${p.sections.map((s, i) => {
               const head = s.chapter && s.chapter !== (p.sections[i - 1] || {}).chapter ? `<b class="chap">${esc(s.chapter)}</b>` : '';
               return head + `<span id="wr-o${i}">${esc(s.heading)}</span>`;
             }).join('')}</div>`;
+          setRing(0, 0, total, '');
           $('#wr-go').textContent = 'writing…';
         } else if (ev === 'sources') {
           const s = JSON.parse(raw); secSources = s.sources;
         } else if (ev === 'section') {
           const s = JSON.parse(raw);
           document.getElementById('wr-o' + s.index)?.setAttribute('data-state', 'writing');
+          setRing(s.index / (total || 1), s.index + 1, total, s.heading);
+          thinkHead(s.heading);
           if (s.chapter && s.chapter !== lastCh) { lastCh = s.chapter; const ch = document.createElement('h2'); ch.className = 'chap'; ch.textContent = s.chapter; doc.appendChild(ch); }
           secEl = document.createElement('div'); secEl.className = 'sec';
           secEl.innerHTML = `<${s.chapter ? 'h3' : 'h2'}>${esc(s.heading)}</${s.chapter ? 'h3' : 'h2'}><div class="said md"><p></p></div>`;
           doc.appendChild(secEl); said = secEl.querySelector('.said'); text = '';
-          murmur.stop(); murmur.start(secEl);
         } else if (ev === 'thinking') {
-          murmur.add(raw);
+          thinkPush(raw);
         } else if (ev === 'token') {
           text += raw; said.innerHTML = mdBlocks(text).join('');
         } else if (ev === 'section_done') {
           const s = JSON.parse(raw);
           document.getElementById('wr-o' + s.index)?.setAttribute('data-state', 'done');
+          setRing((s.index + 1) / (total || 1), s.index + 1, total, s.heading);
           sources = secSources; renderAnswer(said, s.body);  // the apparatus reads the global
           for (const fl of (s.flags || [])) {
             const c = document.createElement('div'); c.className = 'caveat';
@@ -2730,10 +2824,12 @@ async function composeDoc() {
           const sealSvg = buildSeal(result.id, seal.docs, seal.edges);
           write.last.seal = sealSvg;
           try { localStorage.setItem('write.lastdoc', JSON.stringify({ title: result.title, markdown: result.markdown, seal: sealSvg, id: result.id })); } catch {}
-          doc.insertAdjacentHTML('beforeend', `<div class="refs"><h3>References</h3>${result.references.map(r =>
-            `<div><b>[${r.n}]</b>${esc(r.title)}${r.page ? `, p.${r.page}` : ''}${r.section ? ' — ' + esc((r.section || '').split(' › ').slice(1).join(' › ')) : ''}${r.cartridge ? ' (' + esc(r.cartridge.name) + ')' : ''}</div>`).join('')}</div>
-            <figure class="seal">${sealSvg}<figcaption>The Library · <code>${esc(result.id)}</code></figcaption></figure>
-            <div class="acts">
+          // Settle the watched populate into the one canonical render, so it is identical
+          // to opening the saved document later. The title stays above it.
+          const title = doc.querySelector('h1.t')?.outerHTML || `<h1 class="t">${esc(result.title)}</h1>`;
+          renderComposition(doc, result.markdown, { id: result.id, seal: sealSvg });
+          doc.insertAdjacentHTML('afterbegin', title);
+          doc.insertAdjacentHTML('beforeend', `<div class="acts">
               <button class="go" onclick="saveDoc()">save .md</button>
               <button class="go" onclick="window.print()">print / PDF</button>
               <button class="go" onclick="shelveDoc(this)">shelve it in the library</button>
@@ -2803,20 +2899,12 @@ function sanitizeSvg(markup) {
     return svg.outerHTML;
   } catch { return ''; }
 }
-// A saved document, or a restored draft, has a seal as inline SVG at its foot; render the
-// prose as escaped markdown and the seal as a sanitised <svg>.
-function renderDocMarkdown(text, into) {
-  const m = text.match(/\n<p align="center">([\s\S]*?)<\/p>\s*$/);
-  const body = m ? text.slice(0, m.index) : text;
-  const seal = m ? sanitizeSvg(m[1]) : '';
-  into.innerHTML = `<div class="md">${mdBlocks(body).join('')}</div>${seal ? `<figure class="seal">${seal}</figure>` : ''}`;
-}
 async function viewSaved(file) {
   const doc = $('#wr-doc'); if (!doc) return;
   doc.innerHTML = '<div class="empty">Opening…</div>';
   let text; try { text = await (await fetch('/api/compose/saved/' + file)).text(); }
   catch { doc.innerHTML = '<div class="empty">Could not open it.</div>'; return; }
-  renderDocMarkdown(text, doc);
+  renderComposition(doc, text);
   doc.insertAdjacentHTML('afterbegin', `<div class="acts" style="margin:0 0 10px"><button class="go" onclick="window.print()">print / PDF</button><a class="go" href="/api/compose/saved/${file}" download>download .md</a></div>`);
   doc.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }

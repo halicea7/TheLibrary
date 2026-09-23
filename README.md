@@ -20,6 +20,52 @@
 
 ---
 
+## Getting started
+
+Runs on macOS or Linux, entirely on your own hardware. You need four things installed:
+
+- **[Postgres 16](https://www.postgresql.org/)** with the `pgvector` and `pg_trgm` extensions (bootstrap builds pgvector for you)
+- **[Redis](https://redis.io/)** — the background-job queue
+- **[Ollama](https://ollama.com)** — the models run here; local, or on another box over an SSH tunnel
+- **[uv](https://docs.astral.sh/uv/)** — the Python runner
+
+Plus about **20 GB of RAM wherever Ollama runs**. On a Mac: `brew install postgresql@16 redis uv ollama` and `brew services start postgresql@16 redis`.
+
+**1. Pull the models.** Two are required; two are optional but recommended.
+
+```sh
+ollama pull qwen3:30b-a3b bge-m3                                  # required: reader/chat, embeddings
+ollama pull qwen2.5vl huihui_ai/qwen3-coder-abliterated          # optional: figures + OCR, technical chat
+```
+
+If Ollama runs on another machine, forward it and point the library at it — no other config needed:
+
+```sh
+ssh -N -L 11434:localhost:11434 you@gpu-box &   # tunnel; or set LIBRARY_OLLAMA_URL=http://host:11434
+```
+
+**2. Set it up, once.** From the repo root:
+
+```sh
+./scripts/bootstrap.sh     # builds pgvector, creates the database + extensions, runs migrations
+```
+
+**3. Start it.**
+
+```sh
+./library                  # checks services, migrates, starts the worker + API, opens the browser
+```
+
+It opens at `http://localhost:8077`. `./library stop`, `restart` and `status` do what they say; Ctrl-C closes everything.
+
+**4. Use it.** Drop a PDF (or Markdown, HTML, text) onto the shelf. It's **searchable within seconds**; click *have it read* for summaries and subjects, then *annotate it* for marginalia. Ask a question in the **Ask** tab — every claim from the shelf carries a citation you can check. The first visit is walked by a short tour.
+
+To check everything works end to end: `uv run python scripts/verify.py` exercises every surface against the running instance and reports pass/fail per check.
+
+Nothing leaves your machine: no cloud, no API keys, no telemetry. Other models and live connectors are opt-in under **Settings** (see [Models](#models) and Modules).
+
+---
+
 ## What it is
 
 Most "chat with your documents" tools are a search box with a language model bolted on: embed the chunks, retrieve the nearest ones, hope the answer is in there. The Library does that too — but it also **reads**. Every document goes through a background pass that writes a summary of each section, extracts the claims it makes, and tags its subjects. Documents you care about get a deeper pass that writes **marginalia**: what a thoughtful reader thinks while reading each passage, not a restatement of it.
@@ -33,15 +79,6 @@ And when you ask it something, the answer is a reading column with an apparatus:
 </p>
 
 ## Using it
-
-You need Postgres 16, Redis, [Ollama](https://ollama.com), and [uv](https://docs.astral.sh/uv/) on the machine, and about 20 GB of RAM wherever Ollama runs — a second box over an SSH tunnel is fine.
-
-```sh
-./scripts/bootstrap.sh          # once: pgvector, extensions, models, migrations
-./library                        # checks services, migrates, starts worker + API, opens the browser
-```
-
-`./library stop`, `restart`, and `status` do what they say. `uv run python scripts/verify.py` exercises every surface against the running instance — ingest, read, annotate, search, chat on both models, the library layer, delete — and reports pass/fail per check. Ctrl-C in the foreground closes everything.
 
 Drop PDFs, Markdown, HTML, or text onto the shelf — folders are walked. An HTML page is read as the Markdown it converts to: the page body found (Confluence's `#main-content`, MediaWiki's, `<article>`, `<main>`), breadcrumbs, metadata and footers dropped, headings, lists, code blocks and tables kept, the page title as its H1 — so a **Confluence space export** drops straight in, one volume per page. A document is **searchable within seconds**. Click *have it read* for section summaries and subjects (a couple of minutes), then *annotate it* for marginalia — or use the buttons under the shelf header: *read the N unread* and *annotate the N read* queue everything in view (the whole shelf, a subject, or a seated cartridge), skip what is already queued, and say how long it will take first; *re-shelve these N* appears when one shelf is chosen and places its volumes again from what they say rather than where they sit. For a first load from the terminal:
 

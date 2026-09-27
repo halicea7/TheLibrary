@@ -11,8 +11,8 @@ from fastapi import APIRouter, Query
 from library_agent.api.schemas import SearchHitOut, SearchResponse
 from library_agent.db.session import SessionDep
 from library_agent.library.shelving import expand_category_ids
-from library_agent.retrieval.lift import lift, lift_kind, sentences
-from library_agent.retrieval.literal import contains_all, exact_first, literal_hits, literal_terms
+from library_agent.retrieval.lift import holding_sentence, lift, lift_kind
+from library_agent.retrieval.literal import exact_first, literal_hits, literal_terms
 from library_agent.retrieval.pipeline import RetrievalConfig, retrieve
 
 router = APIRouter(prefix="/api", tags=["search"])
@@ -63,7 +63,7 @@ async def search(
         holding = None
         if h.chunk_id in exact:
             # The sentence that holds the name, not the one nearest in meaning.
-            holding = next((x for x in sentences(h.text) if contains_all(x, terms)), None)
+            holding = holding_sentence(h.text, terms)
         if holding:
             lifts[i] = holding
             kinds.append("exact")

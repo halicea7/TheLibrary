@@ -15,8 +15,10 @@ volume, at which point the collection can read what it wrote."""
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -514,6 +516,68 @@ async def _section_hits(
     return passages + readings[:COMPOSE_READINGS]
 
 
+class _Clock:
+    """Seconds spent per step of a composition, for the whole document and for the section
+    in hand. A step is timed with `with clock("review"):`, or `start`/`stop` around code
+    that yields; totals go out with the plan, each section, and the finished document, and
+    one line per document is appended to compositions/timings.jsonl."""
+
+    def __init__(self) -> None:
+        self.t0 = time.monotonic()
+        self.total: dict[str, float] = {}
+        self.sec: dict[str, float] = {}
+
+    def start(self, step: str) -> tuple[str, float]:
+        return step, time.monotonic()
+
+    def stop(self, token: tuple[str, float]) -> None:
+        step, t = token
+        dt = time.monotonic() - t
+        self.total[step] = self.total.get(step, 0.0) + dt
+        self.sec[step] = self.sec.get(step, 0.0) + dt
+
+    def __call__(self, step: str):
+        clock = self
+
+        class _Span:
+            def __enter__(self):
+                self.token = clock.start(step)
+
+            def __exit__(self, *exc):
+                clock.stop(self.token)
+                return False
+
+        return _Span()
+
+    def section(self) -> None:
+        self.sec = {}
+
+    def this_section(self) -> dict[str, float]:
+        return {k: round(v, 1) for k, v in self.sec.items()}
+
+    def totals(self) -> dict[str, float]:
+        out = {k: round(v, 1) for k, v in self.total.items()}
+        out["elapsed"] = round(time.monotonic() - self.t0, 1)
+        return out
+
+    def log(self, comp_id: str, **info) -> None:
+        try:
+            with (compositions_dir() / "timings.jsonl").open("a", encoding="utf-8") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "id": comp_id,
+                            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                            **info,
+                            "timings": self.totals(),
+                        }
+                    )
+                    + "\n"
+                )
+        except OSError:
+            log.warning("could not log composition timings", exc_info=True)
+
+
 def _numbered(h: SearchHit, by_key: dict, comp: Composition, docs: dict, provenance: dict):
     """The document-wide source for a hit: the one already numbered if this same source was
     used before, otherwise a new number."""
@@ -629,7 +693,11 @@ async def compose(
     section_done) → done. The lease is held throughout: this is one long piece of work
     and background reading yields to it like it would to a chat."""
     model = model or providers.model_for("compose")
+    # The checking steps -- splitting a need into searches, reviewing a section, distilling
+    # what it settled -- may run on a smaller model than the one that plans and writes.
+    helper = providers.model_for("compose_check") or model
     n_sections, words = LENGTHS.get(length, LENGTHS["medium"])
+    clock = _Clock()
     redis = redis_client()
     client = LLM()
     comp = Composition(brief=brief)
@@ -655,10 +723,13 @@ async def compose(
         # The brief's parts first (a writer call), then every search the probe needs embedded
         # in one batch: on a GPU that cannot hold the embedder beside a large writer, each
         # switch between them reloads the writer, so the switches are batched, not interleaved.
-        facets = await _facets(client, model, brief)
+        with clock("facets"):
+            facets = await _facets(client, helper, brief)
         yield {"event": "facets", "data": {"facets": [f["facet"] for f in facets]}}
-        await prime_queries([brief] + [f["query"] for f in facets], client)
+        with clock("embed"):
+            await prime_queries([brief] + [f["query"] for f in facets], client)
         named = []
+        t_threads = clock.start("threads")
         async with session_scope() as db:
             named = await named_documents(db, brief)
             threads = await relevant_threads(
@@ -669,6 +740,7 @@ async def compose(
                 category_ids=category_ids,
                 cartridge_ids=cartridge_ids,
             )
+        clock.stop(t_threads)
         thread_block = render_threads(threads)
         thread_text = (
             f"\nThe library has already connected these across several volumes:\n{thread_block}\n"
@@ -689,6 +761,7 @@ async def compose(
         # The probe searches each part of the brief, not the brief as one string -- which
         # found whichever part the shelf held most of and judged the rest by it.
         per_facet: list[list[SearchHit]] = []
+        t_probe = clock.start("retrieve")
         async with session_scope() as db:
             for f in facets:
                 found = await retrieve(
@@ -711,6 +784,7 @@ async def compose(
                     favour=named,
                 )
                 per_facet.append(found)
+        clock.stop(t_probe)
         # Interleaved by facet, so the judge's sample holds every part, not the first one's.
         probe: list[SearchHit] = []
         seen_p: set = set()
@@ -719,7 +793,8 @@ async def compose(
                 if h is not None and (h.kind, h.chunk_id) not in seen_p:
                     seen_p.add((h.kind, h.chunk_id))
                     probe.append(h)
-        cover = await _coverage(client, model, brief, probe)
+        with clock("coverage"):
+            cover = await _coverage(client, helper, brief, probe)
         yield {"event": "coverage", "data": cover}
         if cover["verdict"] == "thin" and not force:
             yield {
@@ -748,6 +823,7 @@ async def compose(
             if nested
             else ""
         )
+        t_plan = clock.start("plan")
         plan = await client.structured(
             model,
             PLAN_PROMPT.format(
@@ -767,6 +843,7 @@ async def compose(
             num_ctx=COMPOSE_NUM_CTX,
             num_predict=2500,
         )
+        clock.stop(t_plan)
         comp.title = (plan.get("title") or brief[:80]).strip()
         outline = [
             {
@@ -785,20 +862,28 @@ async def compose(
                 "notes": plan.get("notes", ""),
                 "sections": outline,
                 "model": model,
+                "helper": helper,
                 "id": comp.id,
+                "timings": clock.totals(),
             },
         }
         chapter_theses: dict[str, str] = {}
         # Every section's searches, planned and embedded before the first is written, so the
         # writer is not swapped out for the embedder between sections.
-        section_queries = [await _section_queries(client, model, brief, sec) for sec in outline]
-        await prime_queries([q for qs in section_queries for q in qs], client)
+        with clock("split"):
+            section_queries = [
+                await _section_queries(client, helper, brief, sec) for sec in outline
+            ]
+        with clock("embed"):
+            await prime_queries([q for qs in section_queries for q in qs], client)
 
         # Keyed by what each source is (Source.key): a reading is its summary artifact, not
         # the first passage of its section, so the two never share a number.
         by_key: dict[str, Source] = {}
         for i, sec in enumerate(outline):
             await mark_chat_active(redis)
+            clock.section()
+            t_ret = clock.start("retrieve")
             async with session_scope() as db:
                 searches = section_queries[i]
                 hits = await _section_hits(
@@ -820,6 +905,7 @@ async def compose(
                     ).scalars()
                 }
                 provenance = await cartridge_provenance(db, list(docs))
+            clock.stop(t_ret)
             # Global numbering: a passage seen before keeps its number.
             section_sources: list[Source] = []
             section_hits: list[SearchHit] = []
@@ -853,13 +939,15 @@ async def compose(
             if nested and i > 0 and sec["chapter"] != outline[i - 1]["chapter"]:
                 prev = outline[i - 1]["chapter"]
                 if prev and prev not in chapter_theses:
+                    t_ch = clock.start("chapter")
                     chapter_theses[prev] = await _chapter_thesis(
                         client,
-                        model,
+                        helper,
                         comp.title,
                         prev,
                         [s["takeaway"] for s in comp.sections if s.get("chapter") == prev],
                     )
+                    clock.stop(t_ch)
             established = _established(comp.sections, chapter_theses, sec["chapter"])
             context = (
                 render_context(section_hits, section_sources, max_chars=COMPOSE_PASSAGE_CHARS)
@@ -891,6 +979,7 @@ async def compose(
                 },
             }
             buf: list[str] = []
+            t_write = clock.start("write")
             async for kind, piece in client.chat_stream(
                 model, messages, temperature=0.5, num_ctx=COMPOSE_NUM_CTX
             ):
@@ -899,6 +988,7 @@ async def compose(
                     continue
                 buf.append(piece)
                 yield {"event": "token", "data": piece}
+            clock.stop(t_write)
             raw = "".join(buf)
             # Told not to, the model still often opens with the heading. Drop it.
             first, _, rest = raw.lstrip().partition("\n")
@@ -909,16 +999,18 @@ async def compose(
             comp.emitted += m["markers_emitted"]
             comp.resolved += m["markers_resolved"]
             # Review the section against its own passages; flag where it reaches past them.
-            flags = (
-                await _review(client, model, sec["heading"], cleaned, context, brief=brief)
-                if review and section_hits
-                else []
-            )
+            with clock("review"):
+                flags = (
+                    await _review(client, helper, sec["heading"], cleaned, context, brief=brief)
+                    if review and section_hits
+                    else []
+                )
             # Distil what this section settled, for the sections that follow -- after the
             # review, so a flagged claim is not carried forward as a premise.
-            takeaway = await _takeaway(
-                client, model, comp.title, sec["heading"], cleaned, flags=flags
-            )
+            with clock("takeaway"):
+                takeaway = await _takeaway(
+                    client, helper, comp.title, sec["heading"], cleaned, flags=flags
+                )
             comp.flags += len(flags)
             comp.sections.append(
                 {
@@ -940,6 +1032,7 @@ async def compose(
                     "chapter": sec["chapter"],
                     "takeaway": takeaway,
                     "flags": flags,
+                    "timings": clock.this_section(),
                     **m,
                 },
             }
@@ -953,6 +1046,7 @@ async def compose(
                 log.warning("incremental save failed", exc_info=True)
 
         md = comp.markdown()
+        clock.log(comp.id, length=length, model=model, helper=helper, sections=len(comp.sections))
         yield {
             "event": "done",
             "data": {
@@ -964,6 +1058,7 @@ async def compose(
                 "flags": comp.flags,
                 "markers_emitted": comp.emitted,
                 "markers_resolved": comp.resolved,
+                "timings": clock.totals(),
                 "references": [
                     {
                         "n": s.n,

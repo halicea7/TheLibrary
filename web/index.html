@@ -699,6 +699,8 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .caveat { font:11.5px/1.5 var(--sans); color:var(--dim); margin:8px 0 0; padding:6px 10px; border-left:2px solid var(--amber); background:color-mix(in srgb, var(--amber) 7%, transparent); border-radius:0 3px 3px 0; }
 .caveat b { color:var(--amber); font-weight:600; }
 .turn > .caveat { max-width:68ch; }
+.doc .sec .timed, .doc .timed { font:10px/1.5 var(--mono); color:var(--faint); margin:6px 0 0; }
+.doc .timed .of { opacity:.7; }
 .doc .sec .searched { font:10.5px/1.5 var(--mono); color:var(--faint); margin:-4px 0 8px; }
 .saved .row .t { flex:1; text-align:left; color:var(--fg); }
 .saved .row .t:hover { color:var(--verdigris); }
@@ -2329,6 +2331,13 @@ async function ask(text) {
   busy = false;
 }
 
+// Where a composition's time went: "write 3m 12s · review 1m 05s · …", largest first.
+function timingLine(t) {
+  const fmt = x => x >= 60 ? `${Math.floor(x / 60)}m ${String(Math.round(x % 60)).padStart(2, '0')}s` : `${Math.round(x)}s`;
+  return Object.entries(t).filter(([k, v]) => k !== 'elapsed' && v >= 1).sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${esc(k)} ${fmt(v)}`).join(' · ') + (t.elapsed ? ` <span class="of">of ${fmt(t.elapsed)}</span>` : '');
+}
+
 /* ── conversations ────────────────────────────────────────────────────── */
 const INVITATION = `<div class="empty invitation"><b>Ask the library something.</b>
 <span>It answers from what it has read, and marks in the margin exactly which page each claim
@@ -2961,6 +2970,7 @@ async function composeDoc() {
             c.innerHTML = `<b>⚠ Review</b> <q>${esc(fl.quote)}</q> — ${esc(fl.issue)}${fl.condition ? ` <em>Could fail if ${esc(fl.condition)}.</em>` : ''}`;
             secEl.appendChild(c);
           }
+          if (s.timings) secEl.insertAdjacentHTML('beforeend', `<div class="timed">${timingLine(s.timings)}</div>`);
           const here = [];
           for (const n of (s.cited || [])) {
             const src = secSources.find(x => x.n === n); if (!src) continue;
@@ -2982,7 +2992,7 @@ async function composeDoc() {
               <button class="go" onclick="saveDoc()">save .md</button>
               <button class="go" onclick="window.print()">print / PDF</button>
               <button class="go" onclick="shelveDoc(this)">shelve it in the library</button>
-              <span class="tally">${result.sections} sections · ${result.references.length} passages cited · ${result.markers_resolved} of ${result.markers_emitted} citations verified${result.flags ? ` · <b style="color:var(--amber)">${result.flags} claim${result.flags === 1 ? '' : 's'} flagged</b>` : ''}${usingModel ? ' · ' + esc(usingModel) : ''}</span>
+              <span class="tally">${result.sections} sections · ${result.references.length} passages cited · ${result.markers_resolved} of ${result.markers_emitted} citations verified${result.flags ? ` · <b style="color:var(--amber)">${result.flags} claim${result.flags === 1 ? '' : 's'} flagged</b>` : ''}${usingModel ? ' · ' + esc(usingModel) : ''}${result.timings ? `<span class="timed" style="display:block">${timingLine(result.timings)}</span>` : ''}</span>
             </div>`);
         } else if (ev === 'error') {
           const anyway = /little on this/i.test(raw) && !write.force

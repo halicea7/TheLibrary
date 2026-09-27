@@ -46,6 +46,10 @@ ROLES: dict[str, dict[str, str]] = {
         "label": "Compose (long-form)",
         "note": "writes documents from the whole shelf; a background job, so a larger, slower model earns its keep here without slowing chat",
     },
+    "compose_check": {
+        "label": "Compose (checking)",
+        "note": "splits each section into searches, reviews it against its passages and distils what it settled; empty uses the compose model",
+    },
     "vision": {"label": "Vision", "note": "reads a PDF's figures; empty turns it off"},
     "troubleshoot": {"label": "Troubleshooting", "note": "reads an incident against the docs"},
 }
@@ -187,6 +191,10 @@ def default_for(role: str) -> str:
     if role == "compose":
         # Long-form writing wants the deepest model on offer; by default the chat model.
         return cfg.chat_model_options.get("general", cfg.chat_model)
+    if role == "compose_check":
+        # Empty: the compose model does its own checking. Set to a smaller model to trade
+        # a model swap per section for faster reviews.
+        return ""
     if role == "vision":
         return cfg.vision_model
     if role == "troubleshoot":

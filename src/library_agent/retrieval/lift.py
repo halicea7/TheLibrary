@@ -112,3 +112,15 @@ def lift_kind(query: str, sentence: str | None) -> str | None:
     words = {w for w in re.findall(r"[a-z0-9]{3,}", query.lower()) if w not in _STOP}
     low = sentence.lower()
     return "words" if any(w in low for w in words) else "meaning"
+
+
+def holding_sentence(text: str, terms: list[str]) -> str | None:
+    """The first sentence anywhere in the passage that holds every term (the highlighter's
+    own sentence list stops at twelve); failing that, one that holds any of them."""
+    every = [s for s in _SPLIT.split(" ".join(text.split())) if s.strip()]
+    low = [s.lower() for s in every]
+    for want in (all, any):
+        for s, lo in zip(every, low, strict=True):
+            if want(t.lower() in lo for t in terms):
+                return s.strip()[:400]
+    return None

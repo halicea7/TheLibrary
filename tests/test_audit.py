@@ -322,3 +322,33 @@ async def test_parts_reconcile_into_one_reading():
 
     fallback = await reconcile_parts(Down(), "m", "Raft", "Elections", outs)
     assert fallback["summary"] == "Raft elects a leader. Under a partition the minority stalls."
+
+
+def test_the_clock_times_steps_per_section_and_in_total(tmp_path, monkeypatch):
+    import json
+
+    from library_agent.chat import compose
+
+    monkeypatch.setattr(compose, "compositions_dir", lambda: tmp_path)
+    t = iter([0.0, 0.0, 2.0, 2.0, 5.0, 5.0, 6.0, 9.0])
+    monkeypatch.setattr(compose.time, "monotonic", lambda: next(t))
+    c = compose._Clock()  # t0 = 0
+    with c("plan"):  # 0 -> 2
+        pass
+    c.section()
+    tok = c.start("write")  # 2 -> 5
+    c.stop(tok)
+    with c("review"):  # 5 -> 6
+        pass
+    assert c.this_section() == {"write": 3.0, "review": 1.0}
+    c.log("abc", model="big", helper="small")  # elapsed read at 9
+    line = json.loads((tmp_path / "timings.jsonl").read_text())
+    assert line["timings"] == {"plan": 2.0, "write": 3.0, "review": 1.0, "elapsed": 9.0}
+    assert line["helper"] == "small"
+
+
+def test_the_checking_role_defaults_to_the_compose_model():
+    from library_agent.llm import providers
+
+    assert providers.default_for("compose_check") == ""  # empty: compose checks its own work
+    assert "compose_check" in providers.ROLES

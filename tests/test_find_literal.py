@@ -72,3 +72,12 @@ def test_a_sentence_chosen_by_meaning_says_so():
     assert lift_kind("leader election timeout", "Raft randomises election timeouts.") == "words"
     assert lift_kind("leader election timeout", "A node waits, then asks for votes.") == "meaning"
     assert lift_kind("q", None) is None
+
+
+def test_an_exact_hit_lights_the_sentence_holding_the_name_wherever_it_is():
+    from library_agent.retrieval.lift import holding_sentence
+
+    text = " ".join(f"Sentence number {i} says nothing much at all." for i in range(20))
+    text += " Opening with O_DIRECT bypasses the page cache."
+    assert holding_sentence(text, ["O_DIRECT"]) == "Opening with O_DIRECT bypasses the page cache."
+    assert holding_sentence("nothing here at all.", ["O_DIRECT"]) is None

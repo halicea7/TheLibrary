@@ -50,6 +50,9 @@ button.act:disabled { opacity:.45; cursor:default; }
 .marks button { font:11px var(--mono); padding:3px 8px; border-radius:2px; border:1px solid var(--rule); background:transparent; color:var(--dim); cursor:pointer; }
 .marks button[aria-pressed="true"].s { background:var(--verdigris); border-color:var(--verdigris); color:var(--bg); }
 .marks button[aria-pressed="true"].d { background:var(--amber); border-color:var(--amber); color:var(--bg); }
+.p[data-sugg] .p-h::after { content:"suggested"; font:10px var(--mono); color:var(--faint); border:1px dashed var(--faint); border-radius:2px; padding:0 4px; }
+.why { font:11.5px/1.5 var(--sans); color:var(--dim); margin:0 0 6px; font-style:italic; }
+.case small .m { color:var(--amber); }
 .status { font:12px/1.5 var(--mono); color:var(--dim); margin:8px 0; min-height:1.5em; }
 table { border-collapse:collapse; font:12px/1.5 var(--mono); margin:8px 0 18px; }
 th, td { padding:4px 10px; border-bottom:1px solid var(--rule-soft); text-align:right; }
@@ -82,6 +85,7 @@ th { color:var(--faint); font-weight:500; }
     <div class="row">
       <select id="type" aria-label="Question type"></select>
       <button class="act" id="pool">Gather passages</button>
+      <button class="act" id="suggest" disabled title="The model marks each passage; you confirm or correct">Suggest</button>
       <button class="act primary" id="save" disabled>Save judgement</button>
       <button class="act" id="nothing" title="The library does not hold an answer">Unanswerable</button>
       <button class="act" id="clear">New</button>
@@ -89,6 +93,12 @@ th { color:var(--faint); font-weight:500; }
     <p class="hint">Gather pulls the top passages from four retrieval setups plus an exact-name search, in one list sorted by volume, so you can't tell which setup found which. Mark each passage that <b>supports</b> an answer, and each that <b>looks relevant but doesn't</b>. Leave the rest unmarked. This uses the embedding model, so it's slower while a long Write is running.</p>
     <div class="status" id="status"></div>
     <div id="passages"></div>
+    <h2>Does the model judge like you?</h2>
+    <p class="hint">Only measured on questions you saved after asking for a suggestion: your marks against the model's, passage by passage, across everything gathered. Kappa discounts the agreement chance alone would give. Where it's high, model-judged cases for that type can be trusted; where it's low, judge those yourself.</p>
+    <div id="agree"></div>
+    <div class="row">
+      <button class="act" id="auto" title="Pool and judge the next ten asked questions with no one watching. Saved as model-judged and scored apart from yours.">Let the model judge 10</button>
+    </div>
     <h2>Runs</h2>
     <div class="row">
       <button class="act" id="run-tune">Score the tune split</button>
@@ -100,17 +110,25 @@ th { color:var(--faint); font-weight:500; }
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let state = { id: null, source: 'typed', marks: new Map(), passages: [] };
+let state = { id: null, source: 'typed', marks: new Map(), passages: [], model: {}, confirmed: new Set() };
 
 async function refresh() {
   const r = await (await fetch('/api/eval/cases')).json();
   if (!$('#type').options.length) $('#type').innerHTML = r.types.map(t => `<option value="${t}">${t.replace('_', ' ')}</option>`).join('');
   const bt = Object.entries(r.by_type).filter(([, n]) => n).map(([t, n]) => `${t} ${n}`).join(' · ');
-  $('#tally').textContent = `${r.judged} judged · tune ${r.by_split.tune} / test ${r.by_split.test}${bt ? ' · ' + bt : ''}`;
+  $('#tally').textContent = `${r.by_judge.human} judged by you · ${r.by_judge.model} by the model · tune ${r.by_split.tune} / test ${r.by_split.test}${bt ? ' · ' + bt : ''}`;
   $('#cases').innerHTML = r.cases.filter(c => c.judged_at).reverse().map(c =>
-    `<button class="case" data-id="${esc(c.id)}">${esc(c.question.slice(0, 120))}<small>${esc(c.type)} · ${c.supporting.length} supporting · ${esc(c.split)}</small></button>`).join('')
+    `<button class="case" data-id="${esc(c.id)}">${esc(c.question.slice(0, 120))}<small>${c.judge === 'model' ? '<span class="m">model-judged, check it</span> · ' : ''}${esc(c.type)} · ${c.supporting.length} supporting · ${esc(c.split)}</small></button>`).join('')
     || '<div class="hint">None yet. Aim for 50 to 100, across the types.</div>';
   state.all = r.cases;
+  loadAgreement();
+}
+async function loadAgreement() {
+  const a = await (await fetch('/api/eval/agreement')).json();
+  const rows = Object.entries(a).filter(([, m]) => m.passages);
+  $('#agree').innerHTML = rows.length
+    ? `<table><tr><th>type</th><th>cases</th><th>agreement</th><th>kappa</th><th>precision</th><th>recall</th></tr>${rows.map(([t, m]) => `<tr><td>${esc(t)}</td><td>${m.cases}</td><td>${m.agreement}</td><td>${m.kappa}</td><td>${m.precision ?? '–'}</td><td>${m.recall ?? '–'}</td></tr>`).join('')}</table>`
+    : '<div class="hint">Nothing to compare yet: ask for a suggestion, correct it, save.</div>';
 }
 async function loadSeeds() {
   const s = await (await fetch('/api/eval/seeds')).json();
@@ -121,15 +139,36 @@ async function loadSeeds() {
 function renderPassages() {
   $('#passages').innerHTML = state.passages.map(p => {
     const m = state.marks.get(p.chunk_id) || '';
-    return `<div class="p" data-mark="${m}">
+    const sugg = !state.confirmed.has(p.chunk_id) && state.model.reasons && m ? ' data-sugg' : '';
+    const why = state.model.reasons?.[p.chunk_id];
+    return `<div class="p" data-mark="${m}"${sugg}>
       <div class="p-h"><b>${esc(p.title)}</b>${p.page ? `<span>p.${p.page}</span>` : ''}<span>${esc((p.section || '').split(' › ').slice(-2).join(' › '))}</span></div>
       <div class="p-x">${esc(p.text)}</div>
+      ${why ? `<div class="why">model: ${esc(why)}</div>` : ''}
       <div class="marks">
         <button class="s" aria-pressed="${m === 'support'}" data-c="${p.chunk_id}" data-m="support">supports</button>
         <button class="d" aria-pressed="${m === 'distract'}" data-c="${p.chunk_id}" data-m="distract">looks relevant, doesn't</button>
       </div></div>`;
   }).join('');
   $('#save').disabled = !state.passages.length;
+  $('#suggest').disabled = !state.passages.length;
+}
+async function suggest() {
+  const q = $('#q').value.trim(); if (!q || !state.passages.length) return;
+  $('#status').textContent = 'the model is reading each passage…'; $('#suggest').disabled = true;
+  try {
+    const r = await fetch('/api/eval/suggest', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ question: q, chunk_ids: state.passages.map(p => p.chunk_id) }) });
+    const m = await r.json();
+    if (!r.ok) throw new Error(m.detail || r.status);
+    state.model = m; state.confirmed = new Set();
+    // Suggestions fill only what you have not marked yourself.
+    for (const c of m.supporting) if (!state.marks.has(c)) state.marks.set(c, 'support');
+    for (const c of m.distractors) if (!state.marks.has(c)) state.marks.set(c, 'distract');
+    $('#status').textContent = `suggested: ${m.supporting.length} supporting, ${m.distractors.length} look relevant but don't. Correct anything wrong, then save.`;
+    renderPassages();
+  } catch (e) { $('#status').textContent = 'no suggestion: ' + e.message; }
+  finally { $('#suggest').disabled = false; }
 }
 async function gather() {
   const q = $('#q').value.trim(); if (q.length < 3) return;
@@ -148,29 +187,33 @@ async function save(unanswerable = false) {
   const supporting = unanswerable ? [] : [...state.marks].filter(([, m]) => m === 'support').map(([c]) => c);
   const distractors = [...state.marks].filter(([, m]) => m === 'distract').map(([c]) => c);
   if (!unanswerable && !supporting.length) { $('#status').textContent = 'mark at least one supporting passage, or call it unanswerable'; return; }
-  const body = { question: q, type: unanswerable ? 'unanswerable' : $('#type').value, supporting, distractors, source: state.source, id: state.id };
+  const body = { question: q, type: unanswerable ? 'unanswerable' : $('#type').value, supporting, distractors, source: state.source, id: state.id,
+    pooled: state.passages.map(p => p.chunk_id),
+    model_marks: state.model.model ? { supporting: state.model.supporting, distractors: state.model.distractors, model: state.model.model, reasons: state.model.reasons } : {} };
   const r = await fetch('/api/eval/cases', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
   const c = await r.json();
   if (!r.ok) { $('#status').textContent = c.detail || 'not saved'; return; }
   $('#status').textContent = `saved · ${c.split} split`;
   fresh(); refresh(); loadSeeds();
 }
-function fresh() { state = { ...state, id: null, source: 'typed', marks: new Map(), passages: [] }; $('#q').value = ''; renderPassages(); }
+function fresh() { state = { ...state, id: null, source: 'typed', marks: new Map(), passages: [], model: {}, confirmed: new Set() }; $('#q').value = ''; $('#status').textContent = ''; renderPassages(); }
 async function runSplit(split) {
   $('#run').innerHTML = '<div class="status">scoring…</div>';
   const r = await fetch('/api/eval/run?split=' + split, { method: 'POST' });
   const o = await r.json();
   if (!r.ok) { $('#run').innerHTML = `<div class="status">${esc(o.detail || 'failed')}</div>`; return; }
   const cols = ['n', 'mrr', 'hit@1', 'hit@5', 'recall@10', 'distractors@5'];
-  $('#run').innerHTML = `<div class="status">${o.cases} cases · ${o.seconds}s · ${esc(o.snapshot.volumes)} volumes · saved to ${esc(o.file)}</div>` +
-    Object.entries(o.summary).map(([setup, groups]) => `<table><tr><th>${esc(setup)}</th>${cols.map(c => `<th>${c}</th>`).join('')}</tr>` +
+  const tables = (summary, who) => Object.entries(summary).map(([setup, groups]) => `<table><tr><th>${esc(setup)}${who}</th>${cols.map(c => `<th>${c}</th>`).join('')}</tr>` +
       Object.entries(groups).map(([g, m]) => `<tr><td>${esc(g)}</td>${cols.map(c => `<td>${m[c] ?? '–'}</td>`).join('')}</tr>`).join('') + '</table>').join('');
+  $('#run').innerHTML = `<div class="status">${o.cases} judged by you · ${o.model_cases} by the model · ${o.seconds}s · ${esc(o.snapshot.volumes)} volumes · saved to ${esc(o.file)}</div>` +
+    tables(o.summary, '') + (o.model_cases ? `<h2>Model-judged cases, scored apart</h2>` + tables(o.summary_model_judged, ' · model-judged') : '');
 }
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.m) {
     const cur = state.marks.get(b.dataset.c);
     if (cur === b.dataset.m) state.marks.delete(b.dataset.c); else state.marks.set(b.dataset.c, b.dataset.m);
+    state.confirmed.add(b.dataset.c);
     renderPassages();
   } else if (b.classList.contains('seed')) {
     const s = state.seeds[+b.dataset.i]; fresh(); $('#q').value = s.question; state.source = s.source; gather();
@@ -178,10 +221,19 @@ document.addEventListener('click', e => {
     const c = state.all.find(x => x.id === b.dataset.id); fresh();
     state.id = c.id; state.source = c.source; $('#q').value = c.question; $('#type').value = c.type === 'unanswerable' ? 'concept' : c.type;
     c.supporting.forEach(x => state.marks.set(x, 'support')); c.distractors.forEach(x => state.marks.set(x, 'distract'));
+    if (c.model_marks && c.model_marks.model) state.model = c.model_marks;  // a model-judged case opens as its suggestions
     gather();
   }
 });
 $('#pool').onclick = gather;
+$('#suggest').onclick = suggest;
+$('#auto').onclick = async () => {
+  const b = $('#auto'); b.disabled = true; b.textContent = 'judging… (a few minutes)';
+  try {
+    const r = await fetch('/api/eval/auto?n=10', { method: 'POST' }); const o = await r.json();
+    $('#status').textContent = r.ok ? `the model judged ${o.judged} (${o.unanswerable} it found unanswerable). They're in the list marked model-judged: open one to check it.` : (o.detail || 'failed');
+  } finally { b.disabled = false; b.textContent = 'Let the model judge 10'; refresh(); loadSeeds(); }
+};
 $('#save').onclick = () => save(false);
 $('#nothing').onclick = () => save(true);
 $('#clear').onclick = fresh;

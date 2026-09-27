@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -34,6 +35,8 @@ from library_agent.db.models import Chunk, Document
 from library_agent.db.session import session_scope
 from library_agent.retrieval.literal import exact_first, literal_hits, literal_terms
 from library_agent.retrieval.pipeline import LADDER, RetrievalConfig, retrieve
+
+log = logging.getLogger(__name__)
 
 TYPES = (
     "exact",  # names something exactly: an identifier, a command, a number
@@ -81,6 +84,13 @@ class Case:
     notes: str = ""
     split: str = ""  # "tune" or "test", by the volumes of its evidence
     judged_at: str = ""
+    # "human" or "model": who made the marks above. Model-judged cases are scored apart.
+    judge: str = "human"
+    # Every passage the judge was shown, so agreement can count the ones left unmarked.
+    pooled: list[str] = field(default_factory=list)
+    # What the model suggested for this case, kept beside a human's marks for agreement:
+    # {"supporting": [...], "distractors": [...], "model": "...", "reasons": {id: "..."}}
+    model_marks: dict = field(default_factory=dict)
 
     @property
     def judged(self) -> bool:
@@ -245,26 +255,23 @@ async def run(split: str | None = "tune", setups: list[str] | None = None) -> di
             "prompt_versions": settings().prompt_versions,
         }
     summary: dict[str, dict] = {}
+    by_model: dict[str, dict] = {}
     for name in names:
-        for group in ["all", *sorted({c.type for c in cases})]:
-            rows = [per_case[c.id][name] for c in cases if group == "all" or c.type == group]
-            if not rows:
-                continue
-            recalls = [r["recall@10"] for r in rows if r["recall@10"] is not None]
-            summary.setdefault(name, {})[group] = {
-                "n": len(rows),
-                "mrr": round(sum(r["rr"] for r in rows) / len(rows), 3),
-                **{f"hit@{k}": round(sum(r[f"hit@{k}"] for r in rows) / len(rows), 3) for k in KS},
-                "recall@10": round(sum(recalls) / len(recalls), 3) if recalls else None,
-                "distractors@5": round(sum(r["distractors@5"] for r in rows) / len(rows), 2),
-            }
+        for judge_, into in (("human", summary), ("model", by_model)):
+            mine = [c for c in cases if c.judge == judge_]
+            for group, rows in _groups(mine, per_case, name):
+                into.setdefault(name, {})[group] = _summarise(rows)
     out = {
         "at": datetime.now(UTC).isoformat(timespec="seconds"),
         "split": split or "all",
-        "cases": len(cases),
+        "cases": sum(c.judge == "human" for c in cases),
+        "model_cases": sum(c.judge == "model" for c in cases),
         "seconds": round(time.time() - started, 1),
         "snapshot": snapshot,
+        # The owner's cases; the model's are scored apart until agreement earns them a place.
         "summary": summary,
+        "summary_model_judged": by_model,
+        "agreement": agreement(),
         "per_case": per_case,
     }
     path = eval_dir() / "runs" / f"{out['at'].replace(':', '')}-{out['split']}.json"
@@ -272,6 +279,24 @@ async def run(split: str | None = "tune", setups: list[str] | None = None) -> di
     path.chmod(0o600)
     out["file"] = str(path)
     return out
+
+
+def _groups(cases: list[Case], per_case: dict, name: str):
+    for group in ["all", *sorted({c.type for c in cases})]:
+        rows = [per_case[c.id][name] for c in cases if group == "all" or c.type == group]
+        if rows:
+            yield group, rows
+
+
+def _summarise(rows: list[dict]) -> dict:
+    recalls = [r["recall@10"] for r in rows if r["recall@10"] is not None]
+    return {
+        "n": len(rows),
+        "mrr": round(sum(r["rr"] for r in rows) / len(rows), 3),
+        **{f"hit@{k}": round(sum(r[f"hit@{k}"] for r in rows) / len(rows), 3) for k in KS},
+        "recall@10": round(sum(recalls) / len(recalls), 3) if recalls else None,
+        "distractors@5": round(sum(r["distractors@5"] for r in rows) / len(rows), 2),
+    }
 
 
 def main() -> None:
@@ -288,6 +313,180 @@ def main() -> None:
         print(
             f"  {setup:24} mrr {g.get('mrr')}  hit@5 {g.get('hit@5')}  recall@10 {g.get('recall@10')}"
         )
+
+
+# ----------------------------------------------------------------- the model as judge
+
+SUGGEST_SYSTEM = """You judge passages for a research library's evaluation set. For a question
+and a numbered list of passages, decide for EACH passage whether it supports an answer.
+
+- "supports": the passage itself states something that answers the question, or a
+  necessary part of it. Partial support of a multi-part question counts; a passage that
+  only shares words or the general topic does not.
+- "looks_relevant": on the same topic or sharing the question's terms, but it does not
+  answer it -- a neighbouring mechanism, a different protocol, product or version, the
+  general case when the question asks a specific one, or a control working as intended
+  where the question asks about a failure.
+- "unrelated": neither.
+
+Judge only from the passage text. Do not reward a passage for what it might say elsewhere.
+Give each verdict a short reason."""
+
+SUGGEST_PROMPT = """Question: {question}
+
+Passages:
+{passages}
+
+Return `verdicts`: one per passage, by its number."""
+
+SUGGEST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdicts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "n": {"type": "integer"},
+                    "verdict": {
+                        "type": "string",
+                        "enum": ["supports", "looks_relevant", "unrelated"],
+                    },
+                    "reason": {"type": "string", "maxLength": 240},
+                },
+                "required": ["n", "verdict"],
+            },
+        }
+    },
+    "required": ["verdicts"],
+}
+
+SUGGEST_BATCH = 8  # passages per call: enough context, short enough to judge each one
+SUGGEST_CHARS = 1400
+
+
+def judge_model() -> str:
+    from library_agent.llm import providers
+
+    return providers.model_for("chat_general")
+
+
+def _listed(k: int, p: dict) -> str:
+    where = f", p.{p['page']}" if p.get("page") else ""
+    body = " ".join(str(p.get("text", "")).split())[:SUGGEST_CHARS]
+    return f"[{k}] {p.get('title', '')}{where}\n{body}"
+
+
+async def suggest(client, question: str, passages: list[dict], model: str | None = None) -> dict:
+    """The model's marks for a pooled list: supporting and distractor chunk ids, and a
+    reason for each passage it marked. Passages it could not judge are left unmarked."""
+    model = model or judge_model()
+    marks: dict = {"supporting": [], "distractors": [], "reasons": {}, "model": model}
+    for i in range(0, len(passages), SUGGEST_BATCH):
+        batch = passages[i : i + SUGGEST_BATCH]
+        listing = "\n\n".join(_listed(k, p) for k, p in enumerate(batch, start=1))
+        try:
+            out = await client.structured(
+                model,
+                SUGGEST_PROMPT.format(question=question, passages=listing),
+                SUGGEST_SCHEMA,
+                system=SUGGEST_SYSTEM,
+                temperature=0.0,
+                seed=1,
+                think=True,
+                num_predict=4000,
+            )
+        except Exception:
+            log.warning("suggest: a batch of %d went unjudged", len(batch), exc_info=True)
+            continue
+        for v in out.get("verdicts") or []:
+            k = v.get("n")
+            if not isinstance(k, int) or not 1 <= k <= len(batch):
+                continue
+            cid = batch[k - 1]["chunk_id"]
+            verdict = v.get("verdict")
+            if verdict == "supports":
+                marks["supporting"].append(cid)
+            elif verdict == "looks_relevant":
+                marks["distractors"].append(cid)
+            else:
+                continue
+            reason = " ".join(str(v.get("reason") or "").split())[:240]
+            if reason:
+                marks["reasons"][cid] = reason
+    marks["supporting"] = list(dict.fromkeys(marks["supporting"]))
+    marks["distractors"] = [
+        x for x in dict.fromkeys(marks["distractors"]) if x not in marks["supporting"]
+    ]
+    return marks
+
+
+async def auto_judge(n: int = 10, *, type_: str = "concept") -> list[Case]:
+    """Judge the next `n` seed questions with no one watching: pool, suggest, save as
+    judge="model". Their type is a default the owner can correct; they are scored apart
+    from the owner's cases until agreement says they can be trusted."""
+    from library_agent.llm.client import LLM
+
+    made: list[Case] = []
+    todo = (await seeds(limit=400))[:n]
+    async with LLM() as client:
+        for sd in todo:
+            passages = await pool(sd["question"])
+            marks = await suggest(client, sd["question"], passages)
+            case = Case(
+                question=sd["question"],
+                type=type_ if marks["supporting"] else "unanswerable",
+                supporting=marks["supporting"],
+                distractors=marks["distractors"],
+                source=sd["source"],
+                judge="model",
+                pooled=[p["chunk_id"] for p in passages],
+                model_marks=marks,
+                notes="judged by the model, unattended",
+            )
+            made.append(await judge(case))
+    return made
+
+
+def agreement(cases: list[Case] | None = None) -> dict:
+    """How often the model agrees with the owner, on cases the owner judged and the model
+    also marked, per question type. Per passage, over everything that was pooled:
+    agreement, and the model's precision and recall on "supports", with Cohen's kappa so
+    agreement a coin would reach does not count."""
+    cases = [
+        c
+        for c in (cases if cases is not None else load())
+        if c.judge == "human" and c.judged and c.model_marks and c.pooled
+    ]
+
+    def stats(group: list[Case]) -> dict:
+        tp = fp = fn = tn = 0
+        for c in group:
+            human, model = set(c.supporting), set(c.model_marks.get("supporting") or [])
+            for cid in c.pooled:
+                h, m = cid in human, cid in model
+                tp += h and m
+                fp += m and not h
+                fn += h and not m
+                tn += not h and not m
+        total = tp + fp + fn + tn
+        if not total:
+            return {"cases": len(group), "passages": 0}
+        po = (tp + tn) / total
+        pe = ((tp + fp) * (tp + fn) + (fn + tn) * (fp + tn)) / (total * total)
+        return {
+            "cases": len(group),
+            "passages": total,
+            "agreement": round(po, 3),
+            "kappa": round((po - pe) / (1 - pe), 3) if pe < 1 else 1.0,
+            "precision": round(tp / (tp + fp), 3) if tp + fp else None,
+            "recall": round(tp / (tp + fn), 3) if tp + fn else None,
+        }
+
+    out = {"all": stats(cases)}
+    for t in sorted({c.type for c in cases}):
+        out[t] = stats([c for c in cases if c.type == t])
+    return out
 
 
 if __name__ == "__main__":

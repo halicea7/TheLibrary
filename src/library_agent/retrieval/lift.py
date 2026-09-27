@@ -47,3 +47,68 @@ async def lift(query: str, texts: list[str], client: Ollama | None = None) -> li
         out.append(ss[int(np.argmax(block))])
         i += len(ss)
     return out
+
+
+_STOP = frozenset(
+    [
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "to",
+        "in",
+        "on",
+        "for",
+        "with",
+        "by",
+        "from",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "how",
+        "what",
+        "why",
+        "when",
+        "which",
+        "who",
+        "does",
+        "do",
+        "did",
+        "can",
+        "could",
+        "should",
+        "would",
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "its",
+        "as",
+        "at",
+        "about",
+        "into",
+        "than",
+        "then",
+        "there",
+        "their",
+        "them",
+        "they",
+        "not",
+        "no",
+    ]
+)
+
+
+def lift_kind(query: str, sentence: str | None) -> str | None:
+    """ "words" when the lifted sentence shares a content word with the query; "meaning"
+    when it was chosen by embedding alone and shares none."""
+    if not sentence:
+        return None
+    words = {w for w in re.findall(r"[a-z0-9]{3,}", query.lower()) if w not in _STOP}
+    low = sentence.lower()
+    return "words" if any(w in low for w in words) else "meaning"

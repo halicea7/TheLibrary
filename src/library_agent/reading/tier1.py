@@ -213,9 +213,11 @@ async def reconcile_parts(c, model, title: str, section: str, outs: list[dict]) 
         seen: dict[str, None] = {}
         for o in outs:
             for x in o.get(key) or []:
-                if isinstance(x, str) and x.strip() and x.strip().lower() not in {
-                    k.lower() for k in seen
-                }:
+                if (
+                    isinstance(x, str)
+                    and x.strip()
+                    and x.strip().lower() not in {k.lower() for k in seen}
+                ):
                     seen[x.strip()] = None
         return list(seen)
 

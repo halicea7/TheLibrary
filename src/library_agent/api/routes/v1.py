@@ -23,6 +23,7 @@ from library_agent.db.models import Cartridge, CartridgeDocument, Category, Docu
 from library_agent.db.session import SessionDep, session_scope
 from library_agent.library.shelving import expand_category_ids
 from library_agent.llm import providers
+from library_agent.retrieval.literal import exact_first, literal_hits, literal_terms
 from library_agent.retrieval.pipeline import RetrievalConfig, retrieve
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
@@ -218,14 +219,22 @@ async def search(
         raise HTTPException(422, "q is too short")
     rid = await _room_id(db, room)
     sids = await _subject_ids(db, [s for s in (subjects or "").split(",") if s.strip()])
+    n = max(1, min(50, limit))
+    terms = literal_terms(q)
     hits = await retrieve(
         db,
         q,
-        limit=max(1, min(50, limit)),
+        limit=n + 10 if terms else n,
         category_ids=sids or None,
         cartridge_ids=[rid] if rid else None,
         config=RetrievalConfig(name="v1", use_reranker=True, use_router=False),
     )
+    exact: set = set()
+    if terms:  # a query that names something exactly: passages holding it first
+        found = await literal_hits(
+            db, terms, limit=n, category_ids=sids or None, cartridge_ids=[rid] if rid else None
+        )
+        hits, exact = exact_first(hits, found, terms, n)
     return {
         "query": q,
         "room": room,
@@ -237,6 +246,7 @@ async def search(
                 "section": h.section_path,
                 "text": h.text,
                 "score": h.score,
+                "exact": h.chunk_id in exact,
             }
             for h in hits
         ],

@@ -66,6 +66,10 @@ class SearchHitOut(BaseModel):
     dense_rank: int | None
     lexical_rank: int | None
     lift: str | None = None  # the sentence nearest the query, for the highlighter
+    # Why that sentence: "exact" holds the name the query gave; "words" shares its words;
+    # "meaning" was chosen by embedding and shares none -- a related excerpt, not proof.
+    lift_kind: str | None = None
+    exact: bool = False  # the passage contains every exact term in the query
 
 
 class SearchResponse(BaseModel):

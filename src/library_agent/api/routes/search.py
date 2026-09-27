@@ -11,7 +11,8 @@ from fastapi import APIRouter, Query
 from library_agent.api.schemas import SearchHitOut, SearchResponse
 from library_agent.db.session import SessionDep
 from library_agent.library.shelving import expand_category_ids
-from library_agent.retrieval.lift import lift
+from library_agent.retrieval.lift import lift, lift_kind, sentences
+from library_agent.retrieval.literal import contains_all, exact_first, literal_hits, literal_terms
 from library_agent.retrieval.pipeline import RetrievalConfig, retrieve
 
 router = APIRouter(prefix="/api", tags=["search"])
@@ -34,16 +35,40 @@ async def search(
         cat_ids = await expand_category_ids(db, cat_ids)
     cart_ids = [uuid.UUID(x) for x in cartridges.split(",") if x.strip()] if cartridges else None
     doc_ids = [uuid.UUID(x) for x in documents.split(",") if x.strip()] if documents else None
+    terms = literal_terms(q)
     hits = await retrieve(
         db,
         q,
-        limit=limit,
+        limit=limit + 10 if terms else limit,
         category_ids=cat_ids,
         cartridge_ids=cart_ids,
         document_ids=doc_ids,
         config=RetrievalConfig(name="api", use_reranker=rerank, use_router=router),
     )
+    exact: set = set()
+    if terms:
+        # A query that names something exactly: passages holding the name come first.
+        literal = await literal_hits(
+            db,
+            terms,
+            limit=limit,
+            category_ids=cat_ids,
+            cartridge_ids=cart_ids,
+            document_ids=doc_ids,
+        )
+        hits, exact = exact_first(hits, literal, terms, limit)
     lifts = await lift(q, [h.text for h in hits]) if hits else []
+    kinds: list[str | None] = []
+    for i, h in enumerate(hits):
+        holding = None
+        if h.chunk_id in exact:
+            # The sentence that holds the name, not the one nearest in meaning.
+            holding = next((x for x in sentences(h.text) if contains_all(x, terms)), None)
+        if holding:
+            lifts[i] = holding
+            kinds.append("exact")
+        else:
+            kinds.append(lift_kind(q, lifts[i]))
     return SearchResponse(
         query=q,
         hits=[
@@ -58,8 +83,10 @@ async def search(
                 dense_rank=h.dense_rank,
                 lexical_rank=h.lexical_rank,
                 lift=lifted,
+                lift_kind=kind,
+                exact=h.chunk_id in exact,
             )
-            for h, lifted in zip(hits, lifts, strict=True)
+            for h, lifted, kind in zip(hits, lifts, kinds, strict=True)
         ],
         elapsed_seconds=round(time.time() - started, 3),
     )

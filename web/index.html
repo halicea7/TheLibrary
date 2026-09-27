@@ -591,6 +591,8 @@ select, .toggle {
 
 /* The highlighter: a marker-pen wash in amber (attention), never a box. */
 mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:inherit; padding:0 1px; border-radius:2px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+.badge.exact { color:var(--verdigris); border-color:var(--verdigris); margin-left:6px; }
+.lift-why { font:10px/1.4 var(--mono); color:var(--faint); margin-top:4px; letter-spacing:.02em; }
 .hit-x .lift { color:var(--fg); opacity:1; font-weight:500; background:linear-gradient(transparent 62%, color-mix(in srgb, var(--amber) 22%, transparent) 62%); }
 /* Threads: the reach of a thread decides how much room it gets. */
 .tfilter { display:flex; align-items:center; gap:10px; margin:2px 0 12px; }
@@ -2503,12 +2505,14 @@ async function runFind(q) {
       <div class="hit-h">
         <span class="hit-t">${hl(esc(h.document_title), words)}</span>
         ${h.page ? `<span class="hit-pg">p.${h.page}</span>` : ''}
+        ${h.exact ? `<span class="badge exact" title="Contains exactly what you typed">exact</span>` : ''}
         <span class="hit-rk">dense ${h.dense_rank ?? '–'} · lexical ${h.lexical_rank ?? '–'}</span>
         <button type="button" class="hold" aria-pressed="${held.has(h.chunk_id)}" data-id="${h.chunk_id}" data-title="${esc(h.document_title)}" data-page="${h.page ?? ''}" data-doc="${h.document_id}" onclick="event.stopPropagation(); holdFrom(this)" title="Hold this passage: the next answer starts from it">hold</button>
       </div>
       <div class="hit-path">${esc((h.section_path || '').split(' › ').slice(1).join(' › ') || '—')}</div>
       <div class="hit-x">${hl(esc(excerpt(plain(h.text), h.lift && plain(h.lift))), words, h.lift && plain(h.lift))}</div>
-    </div>`).join('') + `<div class="empty">${r.hits.length} passages · ${r.elapsed_seconds}s · <mark class="hl">your words</mark>, <span class="lift">the sentence nearest your question</span></div>`
+      ${h.lift_kind === 'meaning' ? `<div class="lift-why" title="Chosen by meaning; it shares none of your words. A lead, not proof the passage answers you.">related excerpt, by meaning</div>` : ''}
+    </div>`).join('') + `<div class="empty">${r.hits.length} passages · ${r.elapsed_seconds}s · <mark class="hl">your words</mark>, <span class="lift">the sentence nearest your question</span>${r.hits.some(h => h.exact) ? ' · <span class="badge exact">exact</span> holds what you typed, first' : ''}</div>`
     : `<div class="empty"><b>No passage matches that.</b>Try fewer words, or the exact term you are after.</div>`;
   desk(`${r.hits.length} passages · ${r.elapsed_seconds}s`);
 }

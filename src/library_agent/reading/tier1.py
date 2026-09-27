@@ -168,6 +168,87 @@ async def _digest_stretches(c, model, title, one_liner, summaries, gate=None) ->
     return "\n\n".join(out)
 
 
+def section_parts(pieces: list[str], limit: int) -> list[str]:
+    """A section's passages grouped, in order, into parts of at most `limit` characters --
+    split between passages, never inside one (a passage longer than the limit is its own
+    part, cut to it)."""
+    parts: list[str] = []
+    buf: list[str] = []
+    size = 0
+    for p in pieces:
+        if buf and size + len(p) + 2 > limit:
+            parts.append("\n\n".join(buf))
+            buf, size = [], 0
+        buf.append(p[:limit])
+        size += len(buf[-1]) + 2
+    if buf:
+        parts.append("\n\n".join(buf))
+    return parts or [""]
+
+
+_RECONCILE_SCHEMA = {
+    "type": "object",
+    "properties": {"summary": {"type": "string"}},
+    "required": ["summary"],
+}
+
+RECONCILE_PROMPT = """Document: "{title}"
+Section: {section}
+
+This section was long, so it was read in consecutive parts. What each part says:
+{parts}
+
+Write the section's summary, 2-4 sentences, as one reading of the whole section: what it
+actually says, specific -- methods, numbers, conclusions. Keep any exception, condition
+or qualification a later part adds to an earlier one; do not let the opening stand for
+the whole."""
+
+
+async def reconcile_parts(c, model, title: str, section: str, outs: list[dict]) -> dict:
+    """One section reading from its parts' readings: a reconciled summary, and the parts'
+    claims, entities and categories pooled in order (duplicates dropped; categories by
+    how many parts named them)."""
+
+    def pooled(key: str) -> list[str]:
+        seen: dict[str, None] = {}
+        for o in outs:
+            for x in o.get(key) or []:
+                if isinstance(x, str) and x.strip() and x.strip().lower() not in {
+                    k.lower() for k in seen
+                }:
+                    seen[x.strip()] = None
+        return list(seen)
+
+    votes: dict[str, int] = {}
+    for o in outs:
+        for x in o.get("categories") or []:
+            if isinstance(x, str) and x.strip():
+                votes[x.strip()] = votes.get(x.strip(), 0) + 1
+    summaries = [str(o.get("summary") or "").strip() for o in outs]
+    try:
+        merged = await c.structured(
+            model,
+            RECONCILE_PROMPT.format(
+                title=title,
+                section=section,
+                parts="\n".join(f"{k}. {x}" for k, x in enumerate(summaries, 1) if x),
+            ),
+            _RECONCILE_SCHEMA,
+            system=prompts.SYSTEM_LIBRARIAN,
+        )
+        summary = str(merged.get("summary") or "").strip()
+    except Exception:
+        log.warning("reconciling %s failed; joining its parts", section, exc_info=True)
+        summary = ""
+    return {
+        "summary": summary or " ".join(x for x in summaries if x),
+        "entities": pooled("entities"),
+        "claims": pooled("claims"),
+        "categories": sorted(votes, key=lambda k: -votes[k])[:3],
+        "parts": len(outs),
+    }
+
+
 async def run_tier1(
     db: AsyncSession,
     document_id: uuid.UUID,
@@ -247,16 +328,18 @@ async def run_tier1(
         skipped = 0
         previous = ""
         bodies: dict[uuid.UUID, str] = {}
+        pieces: dict[uuid.UUID, list[str]] = {}
         for s in sections:
-            bodies[s.id] = "\n\n".join(
+            pieces[s.id] = list(
                 (
                     await db.execute(
                         select(Chunk.text)
-                        .where(Chunk.section_id == s.id)
+                        .where(Chunk.section_id == s.id, Chunk.kind == "text")
                         .order_by(Chunk.order_index)
                     )
                 ).scalars()
             )
+            bodies[s.id] = "\n\n".join(pieces[s.id])
         # A section too short to summarise on its own is skipped -- but a short note
         # whose every section is short must still get read. Fold it into one section.
         min_chars = 200
@@ -278,22 +361,39 @@ async def run_tier1(
                 skipped += 1
                 continue
             try:
-                out = await c.structured(
-                    model,
-                    prompts.SECTION_PROMPT.format(
-                        title=doc.title,
-                        orientation=one_liner,
-                        previous=f"Previous section covered: {previous}\n" if previous else "",
-                        section_path=s.path or s.title or "(untitled)",
-                        text=body[:SECTION_CHARS],
-                        claims_guidance=genre_mod.CLAIMS_BY_GENRE.get(
-                            genre, genre_mod.CLAIMS_BY_GENRE["other"]
+
+                async def read(text_: str, where: str, _prev: str = previous) -> dict:
+                    return await c.structured(
+                        model,
+                        prompts.SECTION_PROMPT.format(
+                            title=doc.title,
+                            orientation=one_liner,
+                            previous=f"Previous section covered: {_prev}\n" if _prev else "",
+                            section_path=where,
+                            text=text_,
+                            claims_guidance=genre_mod.CLAIMS_BY_GENRE.get(
+                                genre, genre_mod.CLAIMS_BY_GENRE["other"]
+                            ),
+                            category_guidance=guidance,
                         ),
-                        category_guidance=guidance,
-                    ),
-                    prompts.SECTION_SCHEMA,
-                    system=prompts.SYSTEM_LIBRARIAN,
-                )
+                        prompts.SECTION_SCHEMA,
+                        system=prompts.SYSTEM_LIBRARIAN,
+                    )
+
+                where = s.path or s.title or "(untitled)"
+                parts = section_parts(pieces.get(s.id) or [body], SECTION_CHARS)
+                if len(parts) == 1:
+                    out = await read(parts[0], where)
+                else:
+                    # A long section is read whole, in parts, and the parts reconciled --
+                    # the exception or the decisive example is often at the end, where a
+                    # first-6,000-characters read never looked.
+                    outs = []
+                    for k, part in enumerate(parts, start=1):
+                        if gate:
+                            await gate()
+                        outs.append(await read(part, f"{where} (part {k} of {len(parts)})"))
+                    out = await reconcile_parts(c, model, doc.title, where, outs)
             except Exception:
                 log.warning("section pass failed for %s", s.id, exc_info=True)
                 skipped += 1

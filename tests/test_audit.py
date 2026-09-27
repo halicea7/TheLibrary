@@ -272,3 +272,53 @@ def test_build_sources_carries_a_readings_span():
     assert srcs[0].key() != srcs[1].key()
     assert srcs[1].artifact_id == str(art) and srcs[1].page_end == 4
     assert srcs[0].artifact_id is None
+
+
+def test_a_long_section_is_read_in_parts_between_passages():
+    from library_agent.reading.tier1 import section_parts
+
+    pieces = [f"passage {i} " + "x" * 2500 for i in range(7)]  # ~17.5k chars
+    parts = section_parts(pieces, 6000)
+    assert len(parts) == 4
+    assert all(len(p) <= 6000 for p in parts)
+    assert "".join(parts).replace("\n\n", "") == "".join(pieces)  # nothing dropped
+    assert section_parts(["short"], 6000) == ["short"]
+    assert section_parts(["y" * 9000], 6000) == ["y" * 6000]  # one oversized passage: cut
+
+
+async def test_parts_reconcile_into_one_reading():
+    from library_agent.reading.tier1 import reconcile_parts
+
+    seen = {}
+
+    class Client:
+        async def structured(self, model, prompt, schema, **kw):
+            seen["prompt"] = prompt
+            return {"summary": "Raft elects a leader, except under a partition, where it stalls."}
+
+    outs = [
+        {
+            "summary": "Raft elects a leader.",
+            "claims": ["Leaders are elected."],
+            "entities": ["Raft"],
+            "categories": ["Consensus", "Leader Election"],
+        },
+        {
+            "summary": "Under a partition the minority stalls.",
+            "claims": ["leaders are elected.", "A minority partition cannot commit."],
+            "entities": ["Raft", "Partition"],
+            "categories": ["Consensus"],
+        },
+    ]
+    out = await reconcile_parts(Client(), "m", "Raft", "Elections", outs)
+    assert "except under a partition" in out["summary"]
+    assert "Under a partition the minority stalls." in seen["prompt"]
+    assert out["claims"] == ["Leaders are elected.", "A minority partition cannot commit."]
+    assert out["categories"][0] == "Consensus" and out["parts"] == 2
+
+    class Down:
+        async def structured(self, *a, **k):
+            raise RuntimeError("down")
+
+    fallback = await reconcile_parts(Down(), "m", "Raft", "Elections", outs)
+    assert fallback["summary"] == "Raft elects a leader. Under a partition the minority stalls."

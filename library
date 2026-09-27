@@ -9,6 +9,7 @@
 #   ./library export --name "…" [--level readings] --subject "…"   make a cartridge
 #   ./library insert <cartridge.zip>          put a cartridge on the rack
 #   ./library mcp [--http PORT]               an MCP server other agents can use (stdio by default)
+#   ./library eval [tune|test|all]           score the hand-judged set (judge it at /eval)
 #   ./library spans [--repair]                check each passage opens on its own text; fix the ones that don't
 #
 # Ctrl-C in the foreground stops everything.
@@ -37,6 +38,7 @@ case "${1:-start}" in
   import) shift; exec uv run python -m library_agent.ingest.bulk "$@" ;;
   export|insert) exec uv run python -m library_agent.library.cartridge_cli "$@" ;;
   mcp) shift; exec uv run python -m library_agent.mcp_server "$@" ;;
+  eval) shift; exec uv run python -m library_agent.eval.judged "$@" ;;
   spans) shift; exec uv run python -m library_agent.ingest.spans "$@" ;;
   *) echo "usage: ./library [start|stop|restart|status|import <paths>... [--read]|export …|insert <zip>]"; exit 2 ;;
 esac

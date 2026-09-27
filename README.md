@@ -259,6 +259,8 @@ Providers and assignments live in `~/.library-agent/providers.json`, readable by
 
 ## What was measured
 
+**Your own questions, judged by you.** A generated set only asks whether the passage a question was written from comes back; it can't say whether the results support a real question. So there is a second set: open **Settings › judge the library** (`/eval`), pick a question you have actually asked (Ask history and Write briefs are listed) or type one, and *gather*. The top passages from four retrieval setups, plus an exact-name search, arrive as one list sorted by volume, with no hint of which setup found which. Mark the passages that **support** an answer and the ones that **look relevant but don't**, or call the question unanswerable, and tag its type (exact, concept, mechanism, multi-hop, synthesis, negation, conflict). Each volume is fixed to *tune* or *test*, and a case is *tune* only when all its volumes are, so nothing tuned on the tune split has seen a test volume. `./library eval tune` scores every setup per question type and per case: MRR, hit@k, recall of the supporting passages, and distractors in the top five. Each run is saved with the volume count, embedding model and prompt versions. The set and its runs stay in `~/.library-agent/eval/`, outside the repository, since they quote your library. Aim for 50 to 100 cases before trusting a difference.
+
 Retrieval is evaluated on a generated question set (a question per gold passage, the answer known) with a ladder of configurations, so every stage earns its place. Re-run on the current corpus — 1,219 volumes, 57 questions, most of them from the security material:
 
 | config | recall@1 | recall@5 | recall@10 | MRR | s/query |

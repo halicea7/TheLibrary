@@ -18,6 +18,7 @@ from library_agent.api.routes import (
     chat,
     compose,
     documents,
+    evaluation,
     library,
     reading,
     search,
@@ -87,6 +88,7 @@ app.include_router(cartridges.router)
 app.include_router(settings_routes.router)
 app.include_router(v1.router)
 app.include_router(compose.router)
+app.include_router(evaluation.router)
 
 
 @app.get("/api/health", response_model=HealthOut)
@@ -149,6 +151,12 @@ async def demo_js() -> FileResponse:
 @app.get("/", include_in_schema=False)
 async def index() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/eval", include_in_schema=False)
+async def eval_page() -> FileResponse:
+    """Judging the evaluation set: its own page, since it is used rarely and at length."""
+    return FileResponse(WEB_DIR / "eval.html")
 
 
 async def _warmup() -> None:

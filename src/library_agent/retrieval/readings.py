@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from library_agent.config import settings
 from library_agent.llm.embed import embed_query
 from library_agent.retrieval.hybrid import SearchHit
+from library_agent.retrieval.pipeline import is_apparatus
 
 # A title shorter than this is too likely to occur in a question by accident ("Notes",
 # "Kernel"); one that is mostly a filename is not how anyone names a book.
@@ -119,7 +120,7 @@ async def retrieve_readings(
                 kind="reading",
             )
             for r in rows
-            if r.chunk_id is not None
+            if r.chunk_id is not None and not is_apparatus(r.path)
         ]
 
     named = [d for d in (favour or []) if not document_ids or d in set(document_ids)]

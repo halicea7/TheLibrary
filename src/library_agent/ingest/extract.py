@@ -270,13 +270,25 @@ _PLACEHOLDER_TITLE = re.compile(
 )
 
 
+# Names no person gave a work: an upload's temporary file ("tmpr6wwfid4"), a bare hash, a
+# file name with its extension. A title like this falls back to the name it was shelved under.
+_MACHINE_TITLE = re.compile(
+    r"^(tmp[a-z0-9_]{4,}|[0-9a-f]{8,}|[0-9a-f-]{32,36}|.+\.(pdf|docx?|tex|dvi|ps|md|txt|html?))$",
+    re.IGNORECASE,
+)
+
+
+def is_machine_title(title: str | None) -> bool:
+    return bool(title) and bool(_MACHINE_TITLE.match(title.strip()))
+
+
 def _usable_metadata_title(title: str | None) -> str | None:
     """Reject template junk like 'Transaction / Regular Paper Title' so the layout-based
     extractor gets a chance at the real title."""
     if not title:
         return None
     cleaned = normalize(title).strip()
-    if len(cleaned) < 6 or _PLACEHOLDER_TITLE.match(cleaned):
+    if len(cleaned) < 6 or _PLACEHOLDER_TITLE.match(cleaned) or is_machine_title(cleaned):
         return None
     return cleaned[:300]
 

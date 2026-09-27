@@ -14,12 +14,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from library_agent.chat.audit import EVIDENCE_RULES
 from library_agent.chat.citations import Source, render_context
 from library_agent.config import settings
 from library_agent.llm import providers
 from library_agent.retrieval.hybrid import SearchHit
 
-SYSTEM = """You are the librarian of a personal research library, in conversation with its
+SYSTEM = (
+    """You are the librarian of a personal research library, in conversation with its
 owner. You have read the collection and you think about it, rather than merely searching it.
 
 You will be given numbered passages retrieved from the library. Use them as context, not as
@@ -41,7 +43,11 @@ a cage:
 
 Write in clear prose. Be concrete and specific — name methods, numbers, and conclusions.
 Do not pad, do not restate the question, and do not describe what the passages "discuss";
-say what they say."""
+say what they say.
+
+"""
+    + EVIDENCE_RULES
+)
 
 # A stance loosens the librarian's default reserve. The citation contract holds either
 # way -- claims drawn from the shelf still carry [n] -- but the librarian is invited to

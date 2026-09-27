@@ -21,11 +21,13 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
 
+from library_agent.chat import audit
 from library_agent.chat.citations import (
     Source,
     citation_validity,
@@ -33,18 +35,20 @@ from library_agent.chat.citations import (
     render_context,
     validate,
 )
+from library_agent.chat.effort import split_question
 from library_agent.config import settings
 from library_agent.db.models import Document
 from library_agent.db.session import session_scope
 from library_agent.library.cartridge import cartridge_provenance
 from library_agent.llm import providers
 from library_agent.llm.client import LLM
+from library_agent.llm.embed import prime_queries
 from library_agent.llm.lease import mark_chat_active, mark_chat_done, redis_client
 from library_agent.llm.liveness import Busy, gate, liveness
 from library_agent.llm.ollama import is_placeholder
 from library_agent.reading.prompts import SYSTEM_LIBRARIAN
 from library_agent.retrieval.hybrid import SearchHit
-from library_agent.retrieval.pipeline import RetrievalConfig, retrieve
+from library_agent.retrieval.pipeline import RetrievalConfig, diversify, retrieve
 from library_agent.retrieval.readings import named_documents, retrieve_readings
 from library_agent.retrieval.threads import relevant_threads, render_threads
 
@@ -66,8 +70,14 @@ NESTED = {"thesis"}
 # document is only as good as what each section is given. Passages carry the exact words;
 # readings (the library's Tier 1 summary of a section) carry a whole work's argument, so a
 # section that surveys a theme is not built from five stray paragraphs.
-COMPOSE_PASSAGES = 10
-COMPOSE_READINGS = 6
+# Each section retrieves the way a deep Ask does: its need is split into several searches,
+# each run, and the union cut to sixteen passages beside eight readings. A single query per
+# section missed whole facets of a brief (a thesis on Raft vs Paxos that never retrieved
+# Raft's own performance section) and then told the reader the library lacked them.
+COMPOSE_PASSAGES = 16
+COMPOSE_READINGS = 8
+COMPOSE_PER_DOCUMENT = 4
+COMPOSE_PASSAGE_CHARS = 1400  # as a deep Ask gives each passage
 COMPOSE_CONFIG = RetrievalConfig(name="compose", use_reranker=True, rerank_depth=40, per_document=3)
 # The coverage probe wants a relevance sample, not a ranked answer, so it skips the
 # reranker -- cheaper, and one fewer heavy call before the document even begins.
@@ -107,22 +117,33 @@ Brief:
 {brief}
 
 {scope}
-{threads}{coverage}
+{facets}{threads}{coverage}
 Plan it: a title, and {n_sections}. For each section give the heading, what it should
 cover (one or two sentences), and the search query that would find the right passages in
 the library for it (concrete terms, not a question). Sections should not overlap; order
 them so the document reads front to back.
 {nesting}
 
-The threads above are connections the library has already found across several volumes —
-use them as the backbone of the plan, not an afterthought: a section should usually
-develop a thread, drawing the works it spans together. Where the library marked a
+The threads above are connections the library has already found across several volumes.
+Where one bears on a part of the brief, build on it: a section should usually develop a
+thread, drawing the works it spans together. Where a thread and the holdings listed for a
+part disagree, the holdings are what the library has. Where the library marked a
 disagreement (⚡), give it its due — a section, or a clearly argued paragraph within one —
 rather than smoothing it over. In `notes`, say briefly what shape you chose and why.
 Do not write the document.
+
+Every part of the brief listed above must be developed by at least one section, under its
+own name. Never substitute a neighbouring subject for one the brief names — a different
+protocol, product or attack is not the one asked about. Where the library is short on a
+part, that section says so; it does not change the subject.
+
+Every section is about the subject. Do not plan a section on the document's own scope or
+purpose, or on what the library lacks: the reader is told the coverage separately, and a
+gap is named inside the section that needed the material.
 """
 
-WRITE_SYSTEM = """You are the librarian of a personal research library, writing a document for its
+WRITE_SYSTEM = (
+    """You are the librarian of a personal research library, writing a document for its
 owner from what the library holds.
 
 You will be given numbered passages retrieved for THIS section. Use them as material:
@@ -157,7 +178,11 @@ Hold every example to the question before you use it:
 
 Write only this section's body in markdown: no title, no heading (it is added for you),
 no preamble, no summary of other sections. Use lists, code and tables where they belong.
-Be concrete and specific."""
+Be concrete and specific.
+
+"""
+    + audit.EVIDENCE_RULES
+)
 
 WRITE_PROMPT = """Document: {title}
 Brief: {brief}
@@ -178,10 +203,43 @@ Passages for this section:
 TAKEAWAY_PROMPT = """A section titled "{heading}" was just written for the document "{title}".
 
 {body}
-
+{flagged}
 State, as `claim`, the specific claim, result or distinction this section establishes that
 later sections should build on — one sentence, not what it is "about" but what it settles.
-No preamble, no reference to "this section"."""
+Build it only from what the section supports; a sentence the review flagged is not settled
+and must not be carried forward. No preamble, no reference to "this section"."""
+
+# Before the outline: the parts the brief cannot be answered without. Each becomes a
+# search for the coverage probe and a line the plan must honour, so a brief that names two
+# things gets both, rather than the one the shelf found first.
+FACET_PROMPT = """A document is to be written from a research library on this brief:
+
+{brief}
+
+List the distinct parts the brief requires — each thing it names, compares or asks to be
+evaluated — two to six of them. For each give `facet` (a short noun phrase, keeping the
+brief's own names for protocols, products and techniques) and `query` (concrete search terms,
+not a question)."""
+
+FACET_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "facets": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "facet": {"type": "string", "maxLength": 120},
+                    "query": {"type": "string", "maxLength": 160},
+                },
+                "required": ["facet", "query"],
+            },
+        }
+    },
+    "required": ["facets"],
+}
 
 CHAPTER_PROMPT = """A chapter titled "{chapter}" of the document "{title}" is complete. Its
 sections established, in order:
@@ -226,63 +284,6 @@ COVERAGE_SCHEMA: dict[str, Any] = {
         "missing": {"type": "string", "maxLength": 300},
     },
     "required": ["verdict", "note"],
-}
-
-# The review pass: after a section is written, read it back against the passages it was
-# given and flag where it reaches past them. It does not rewrite -- the argument stays as
-# the librarian made it; the flags are for the reader to weigh. Amber, in the apparatus.
-REVIEW_SYSTEM = """You are a careful reviewer of a section written for a research library, and
-you are hard on it. You are given the document's brief, the section, and the numbered
-passages it was written from. Find only claims that reach past the evidence or miss the
-question — do not rewrite, do not praise, do not restate. A claim is a flaw when:
-- the passage it cites supports part of the statement but not the whole of it;
-- it is absolute (never, always, cannot, guarantees, impossible, no way) where the sources
-  are conditional, or hold only under assumptions the sources state;
-- it generalises from a single case, or asserts a cause the sources only correlate;
-- it is presented as established but no passage actually supports it;
-- it treats an intended rejection as a failure — an access correctly denied, a login that
-  failed by design, is the security control WORKING, not a vulnerability;
-- its mechanism does not bear on the brief's question — an example pulled in by a shared
-  word, not by the mechanism the brief asks about;
-- it merges two related protocols, tools, modes or identifiers that differ in mechanism;
-- it asserts prevalence, defaults or motivation ("widespread", "rarely changed", "vendors
-  cut corners") that no passage supports.
-A well-supported, on-question section has no flags. Do not invent problems to have something
-to say. Write each flag in full — never leave a sentence unfinished."""
-
-REVIEW_PROMPT = """The document's brief: {brief}
-
-Section: "{heading}"
-
-{body}
-
-Passages it was written from:
-{context}
-
-Return `flags`: each a claim that reaches past its evidence or misses the brief's question,
-quoting the exact sentence from the section as `quote`, saying in `issue` what is wrong (the
-evidence does not carry it, or it answers a different question, or it calls a control working
-a failure), and in `condition` the circumstance under which the claim is false or beside the
-point. Empty if the section is sound and on-question."""
-
-REVIEW_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "flags": {
-            "type": "array",
-            "maxItems": 6,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "quote": {"type": "string", "maxLength": 300},
-                    "issue": {"type": "string", "maxLength": 550},
-                    "condition": {"type": "string", "maxLength": 550},
-                },
-                "required": ["quote", "issue"],
-            },
-        }
-    },
-    "required": ["flags"],
 }
 
 
@@ -348,7 +349,9 @@ _TAKEAWAY_SCHEMA = {
 }
 
 
-async def _takeaway(client, model, title: str, heading: str, body: str) -> str:
+async def _takeaway(
+    client, model, title: str, heading: str, body: str, flags: list[dict] | None = None
+) -> str:
     """One sentence on what a finished section established. A structured call, so a chatty
     model cannot leak its preamble into the running memory; the memory is only as good as
     this is faithful."""
@@ -358,7 +361,18 @@ async def _takeaway(client, model, title: str, heading: str, body: str) -> str:
     try:
         out = await client.structured(
             model,
-            TAKEAWAY_PROMPT.format(title=title, heading=heading, body=body[:4000]),
+            TAKEAWAY_PROMPT.format(
+                title=title,
+                heading=heading,
+                body=body[:4000],
+                flagged=(
+                    "\nThe review flagged these sentences as reaching past their evidence:\n"
+                    + "\n".join(f"- {f['quote']}" for f in flags)
+                    + "\n"
+                    if flags
+                    else ""
+                ),
+            ),
             _TAKEAWAY_SCHEMA,
             temperature=0.2,
             think=False,
@@ -393,21 +407,109 @@ async def _chapter_thesis(client, model, title: str, chapter: str, takeaways: li
         return kept[-1]
 
 
-def _norm(s: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+_anchored = audit.anchored
+_clip = audit.clip
 
 
-def _anchored(quote: str, body: str) -> bool:
-    """A flag's quote must actually be in the section -- so a placeholder ("…") or a
-    hallucinated sentence is dropped rather than shown beside real prose."""
-    q, b = _norm(quote), _norm(body)
-    words = q.split()
-    if len(words) < 3:
-        return False
-    if q in b or " ".join(words[:6]) in b:
-        return True
-    qset = set(words)
-    return len(qset & set(b.split())) / len(qset) >= 0.75
+# The judge sees enough of each item to catch a qualifying condition, not only an opening.
+COVERAGE_ITEMS = 24
+COVERAGE_CHARS = 600
+
+
+async def _facets(client, model, brief: str) -> list[dict]:
+    """The parts of the brief, each with a search. Falls back to the brief itself."""
+    try:
+        out = await client.structured(
+            model, FACET_PROMPT.format(brief=brief), FACET_SCHEMA, temperature=0.2, num_predict=500
+        )
+        facets = [
+            {
+                "facet": " ".join(str(f.get("facet") or "").split())[:120],
+                "query": " ".join(str(f.get("query") or "").split())[:160],
+            }
+            for f in out.get("facets") or []
+        ]
+        facets = [f for f in facets if f["facet"] and f["query"] and not is_placeholder(f["query"])]
+        if facets:
+            return facets[:6]
+    except Exception:
+        log.warning("facet split failed; using the brief", exc_info=True)
+    return [{"facet": brief[:120], "query": brief[:160]}]
+
+
+def _facet_block(facets: list[dict], per_facet: list[list[SearchHit]]) -> str:
+    """The brief's parts, each with where the library actually answers it -- so the plan is
+    built on what the probe found, not on a thread's summary of a neighbouring subject."""
+    head = "The brief's parts, each to be developed, with what the library was found to hold:"
+    lines = [head]
+    for f, hits in zip(facets, per_facet, strict=False):
+        where: list[str] = []
+        for h in hits:
+            label = plain_label(h.document_title)
+            sec = plain_label(h.section_path).split(" › ")[-1] if h.section_path else ""
+            item = f"{label} ({sec})" if sec else label
+            if item not in where:
+                where.append(item)
+        found = "; ".join(where[:4]) or "nothing found"
+        lines.append(f"- {f['facet']} — {found}")
+    return "\n".join(lines) + "\n"
+
+
+async def _section_queries(client, model, brief: str, sec: dict) -> list[str]:
+    """The searches behind one section: the planner's query plus what the section's own
+    need splits into, as a deep Ask splits a question."""
+    # The section's own need, not the brief: split with the brief attached, every section
+    # searched for every part of it.
+    need = f"{sec['heading']}: {sec['covers']}"
+    return list(
+        dict.fromkeys(
+            [q for q in [sec["retrieve"] or sec["heading"]] if q]
+            + await split_question(client, model, need)
+        )
+    )[:5]
+
+
+async def _section_hits(
+    db, client, queries: list[str], *, category_ids, cartridge_ids, named
+) -> list[SearchHit]:
+    """A section's material, gathered as a deep Ask gathers it: each search retrieved, the
+    union ranked and capped per volume, then the library's readings of the nearest sections."""
+    per_q = max(4, COMPOSE_PASSAGES // len(queries) + 2)
+    merged: dict = {}
+    for q in queries:
+        for h in await retrieve(
+            db,
+            q,
+            config=COMPOSE_CONFIG,
+            client=client,
+            limit=per_q,
+            category_ids=category_ids,
+            cartridge_ids=cartridge_ids,
+            favour=named,
+        ):
+            if h.chunk_id not in merged or h.score > merged[h.chunk_id].score:
+                merged[h.chunk_id] = h
+    ranked = sorted(merged.values(), key=lambda h: -(h.rerank_score or h.score))
+    passages = diversify(
+        ranked, per_document=COMPOSE_PER_DOCUMENT, limit=COMPOSE_PASSAGES, exempt=set(named)
+    )
+    readings: list[SearchHit] = []
+    seen_r = {(h.document_id, h.section_path) for h in passages}
+    per_r = max(2, COMPOSE_READINGS // len(queries) + 1)
+    for q in queries:
+        for h in await retrieve_readings(
+            db,
+            q,
+            client=client,
+            limit=per_r,
+            category_ids=category_ids,
+            cartridge_ids=cartridge_ids,
+            favour=named,
+        ):
+            if (h.document_id, h.section_path) not in seen_r:
+                seen_r.add((h.document_id, h.section_path))
+                readings.append(h)
+    return passages + readings[:COMPOSE_READINGS]
 
 
 async def _coverage(client, model, brief: str, hits: list[SearchHit]) -> dict:
@@ -422,8 +524,9 @@ async def _coverage(client, model, brief: str, hits: list[SearchHit]) -> dict:
         }
     sample = "\n".join(
         f"- {plain_label(h.document_title)}"
-        f"{f' — {plain_label(h.section_path)}' if h.section_path else ''}: {h.text.strip()[:280]}"
-        for h in hits[:16]
+        f"{f' — {plain_label(h.section_path)}' if h.section_path else ''}: "
+        f"{' '.join(h.text.split())[:COVERAGE_CHARS]}"
+        for h in hits[:COVERAGE_ITEMS]
     )
     try:
         out = await client.structured(
@@ -443,60 +546,15 @@ async def _coverage(client, model, brief: str, hits: list[SearchHit]) -> dict:
         "verdict": v if v in ("strong", "partial", "thin") else "partial",
         "note": " ".join(str(out.get("note") or "").split())[:300],
         "missing": " ".join(str(out.get("missing") or "").split())[:300],
-        "documents": sorted({plain_label(h.document_title) for h in hits[:16]}),
+        "documents": sorted({plain_label(h.document_title) for h in hits[:COVERAGE_ITEMS]}),
     }
-
-
-def _clip(s: str, n: int) -> str:
-    """Trim to a length, but at a sentence or word boundary so a flag never ends
-    mid-word."""
-    s = " ".join((s or "").split())
-    if len(s) <= n:
-        return s
-    cut = s[:n]
-    for sep in (". ", "; ", ", ", " "):
-        i = cut.rfind(sep)
-        if i > n // 2:
-            return cut[: i + (1 if sep == " " else len(sep))].rstrip() + "…"
-    return cut.rstrip() + "…"
 
 
 async def _review(
     client, model, heading: str, body: str, context: str, brief: str = ""
 ) -> list[dict]:
-    """Read a finished section against its passages and flag where it reaches past them or
-    misses the brief's question. Flag-only: it never touches the prose. A flag whose quote is
-    not in the section is dropped -- which also keeps out the "…" placeholders."""
-    if len(body.strip()) < 120 or not context.strip():
-        return []
-    try:
-        out = await client.structured(
-            model,
-            REVIEW_PROMPT.format(
-                brief=brief or "(none given)", heading=heading, body=body[:6000], context=context
-            ),
-            REVIEW_SCHEMA,
-            system=REVIEW_SYSTEM,
-            temperature=0.2,
-            think=False,
-            num_predict=1100,
-        )
-    except Exception:
-        log.warning("review failed for %r", heading, exc_info=True)
-        return []
-    flags = []
-    for f in out.get("flags") or []:
-        quote = " ".join(str(f.get("quote") or "").split())
-        issue = " ".join(str(f.get("issue") or "").split())
-        if quote and issue and not is_placeholder(quote) and _anchored(quote, body):
-            flags.append(
-                {
-                    "quote": _clip(quote, 300),
-                    "issue": _clip(issue, 500),
-                    "condition": _clip(str(f.get("condition") or ""), 500),
-                }
-            )
-    return flags
+    """A finished section read back against its passages; see chat/audit.py."""
+    return await audit.review(client, model, body, context, brief=brief, heading=heading)
 
 
 def _established(sections: list[dict], chapter_theses: dict[str, str], current_chapter) -> str:
@@ -544,7 +602,6 @@ async def compose(
     """Yields SSE-shaped events: plan → for each section (section, sources, token*,
     section_done) → done. The lease is held throughout: this is one long piece of work
     and background reading yields to it like it would to a chat."""
-    cfg = settings()
     model = model or providers.model_for("compose")
     n_sections, words = LENGTHS.get(length, LENGTHS["medium"])
     redis = redis_client()
@@ -569,6 +626,12 @@ async def compose(
         scope = f"Scope: only {scope_label}." if scope_label else "Scope: the whole library."
         # What the library already connects across volumes, nearest this brief. The plan
         # is built on these; a volume the brief names is favoured throughout.
+        # The brief's parts first (a writer call), then every search the probe needs embedded
+        # in one batch: on a GPU that cannot hold the embedder beside a large writer, each
+        # switch between them reloads the writer, so the switches are batched, not interleaved.
+        facets = await _facets(client, model, brief)
+        yield {"event": "facets", "data": {"facets": [f["facet"] for f in facets]}}
+        await prime_queries([brief] + [f["query"] for f in facets], client)
         named = []
         async with session_scope() as db:
             named = await named_documents(db, brief)
@@ -597,26 +660,39 @@ async def compose(
         # Before a line is written: can the shelf actually answer this, or only something
         # next to it? A thin verdict stops here rather than composing a confident document
         # about the wrong subject -- unless the person asked to write it anyway.
+        # The probe searches each part of the brief, not the brief as one string -- which
+        # found whichever part the shelf held most of and judged the rest by it.
+        per_facet: list[list[SearchHit]] = []
         async with session_scope() as db:
-            probe = await retrieve(
-                db,
-                brief,
-                config=COVERAGE_PROBE,
-                client=client,
-                limit=12,
-                category_ids=category_ids,
-                cartridge_ids=cartridge_ids,
-                favour=named,
-            )
-            probe += await retrieve_readings(
-                db,
-                brief,
-                client=client,
-                limit=6,
-                category_ids=category_ids,
-                cartridge_ids=cartridge_ids,
-                favour=named,
-            )
+            for f in facets:
+                found = await retrieve(
+                    db,
+                    f["query"],
+                    config=COVERAGE_PROBE,
+                    client=client,
+                    limit=max(3, 12 // len(facets) + 1),
+                    category_ids=category_ids,
+                    cartridge_ids=cartridge_ids,
+                    favour=named,
+                )
+                found += await retrieve_readings(
+                    db,
+                    f["query"],
+                    client=client,
+                    limit=max(1, 6 // len(facets)),
+                    category_ids=category_ids,
+                    cartridge_ids=cartridge_ids,
+                    favour=named,
+                )
+                per_facet.append(found)
+        # Interleaved by facet, so the judge's sample holds every part, not the first one's.
+        probe: list[SearchHit] = []
+        seen_p: set = set()
+        for row in zip_longest(*per_facet):
+            for h in row:
+                if h is not None and (h.kind, h.chunk_id) not in seen_p:
+                    seen_p.add((h.kind, h.chunk_id))
+                    probe.append(h)
         cover = await _coverage(client, model, brief, probe)
         yield {"event": "coverage", "data": cover}
         if cover["verdict"] == "thin" and not force:
@@ -653,6 +729,7 @@ async def compose(
                 scope=scope,
                 threads=thread_text,
                 coverage=cover_text,
+                facets=_facet_block(facets, per_facet),
                 n_sections=n_sections,
                 nesting=nesting,
             ),
@@ -686,37 +763,26 @@ async def compose(
             },
         }
         chapter_theses: dict[str, str] = {}
+        # Every section's searches, planned and embedded before the first is written, so the
+        # writer is not swapped out for the embedder between sections.
+        section_queries = [await _section_queries(client, model, brief, sec) for sec in outline]
+        await prime_queries([q for qs in section_queries for q in qs], client)
 
+        # Keyed by kind as well as chunk: a reading is cited through its section's first
+        # chunk, and must not collide with that chunk cited as a passage.
         by_chunk: dict[str, Source] = {}
         for i, sec in enumerate(outline):
             await mark_chat_active(redis)
             async with session_scope() as db:
-                q = sec["retrieve"] or sec["heading"]
-                passages = await retrieve(
+                searches = section_queries[i]
+                hits = await _section_hits(
                     db,
-                    q,
-                    config=COMPOSE_CONFIG,
-                    client=client,
-                    limit=COMPOSE_PASSAGES,
+                    client,
+                    searches,
                     category_ids=category_ids,
                     cartridge_ids=cartridge_ids,
-                    favour=named,
+                    named=named,
                 )
-                readings = await retrieve_readings(
-                    db,
-                    q,
-                    client=client,
-                    limit=COMPOSE_READINGS,
-                    category_ids=category_ids,
-                    cartridge_ids=cartridge_ids,
-                    favour=named,
-                )
-                # Passages first (exact words), then readings (a work's argument), each
-                # section a page of the shelf and a page of what the library made of it.
-                seen_r = {(h.document_id, h.section_path) for h in passages}
-                hits = passages + [
-                    h for h in readings if (h.document_id, h.section_path) not in seen_r
-                ]
                 docs = {
                     d.id: d
                     for d in (
@@ -732,13 +798,13 @@ async def compose(
             section_sources: list[Source] = []
             section_hits: list[SearchHit] = []
             for h in hits:
-                key = str(h.chunk_id)
+                key = f"{getattr(h, 'kind', 'passage')}:{h.chunk_id}"
                 src = by_chunk.get(key)
                 if not src:
                     d = docs.get(h.document_id)
                     src = Source(
                         n=len(comp.sources) + 1,
-                        chunk_id=key,
+                        chunk_id=str(h.chunk_id),
                         document_id=str(h.document_id),
                         document_title=d.title if d else h.document_title,
                         section_path=h.section_path,
@@ -756,6 +822,7 @@ async def compose(
                 "event": "sources",
                 "data": {
                     "index": i,
+                    "searches": searches,
                     "sources": [
                         {
                             "n": s.n,
@@ -784,7 +851,7 @@ async def compose(
                     )
             established = _established(comp.sections, chapter_theses, sec["chapter"])
             context = (
-                render_context(section_hits, section_sources, max_chars=cfg.chat_passage_chars)
+                render_context(section_hits, section_sources, max_chars=COMPOSE_PASSAGE_CHARS)
                 if section_hits
                 else "(nothing relevant was found in the library for this section)"
             )
@@ -830,13 +897,16 @@ async def compose(
             m = citation_validity(raw, section_sources)
             comp.emitted += m["markers_emitted"]
             comp.resolved += m["markers_resolved"]
-            # Distil what this section settled, for the sections that follow.
-            takeaway = await _takeaway(client, model, comp.title, sec["heading"], cleaned)
             # Review the section against its own passages; flag where it reaches past them.
             flags = (
                 await _review(client, model, sec["heading"], cleaned, context, brief=brief)
                 if review and section_hits
                 else []
+            )
+            # Distil what this section settled, for the sections that follow -- after the
+            # review, so a flagged claim is not carried forward as a premise.
+            takeaway = await _takeaway(
+                client, model, comp.title, sec["heading"], cleaned, flags=flags
             )
             comp.flags += len(flags)
             comp.sections.append(

@@ -12,12 +12,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from library_agent.chat import answer as answer_mod
+from library_agent.chat import audit
 from library_agent.chat import effort as effort_mod
 from library_agent.chat.citations import (
     Source,
     build_sources,
     citation_validity,
     plain_label,
+    render_context,
     validate,
 )
 from library_agent.chat.rewrite import rewrite_query
@@ -372,6 +374,20 @@ async def run_turn(
         metrics = citation_validity(raw, state.sources)
         state.answer = cleaned
 
+        # Deep: the answer read back against the passages it was given, as Write reviews a
+        # section. Flag-only; the flags travel with the answer and are saved beside it.
+        flags: list[dict] = []
+        if lvl.audit and used:
+            yield {"event": "reviewing", "data": {}}
+            await mark_chat_active(redis)
+            flags = await audit.review(
+                client,
+                model,
+                cleaned,
+                render_context(state.hits, state.sources, max_chars=effort_mod.passage_chars(lvl)),
+                brief=question,
+            )
+
         async with session_scope() as db:
             db.add(
                 Message(
@@ -402,6 +418,7 @@ async def run_turn(
                         ],
                         "retrieved": len(state.sources),
                         "stance": stance,
+                        "flags": flags,
                         **metrics,
                     },
                 )
@@ -412,6 +429,7 @@ async def run_turn(
             "data": {
                 "answer": cleaned,
                 "cited": [s.n for s in used],
+                "flags": flags,
                 **metrics,
             },
         }

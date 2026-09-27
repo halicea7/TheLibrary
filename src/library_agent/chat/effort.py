@@ -11,7 +11,8 @@ around it -- and that is where answers actually change:
     deep     the question is first broken into two to four searches, each retrieved,
              the union reranked down to sixteen passages beside eight section readings,
              a larger context. For comparative and multi-part questions, and for "what
-             does this work say across its chapters".
+             does this work say across its chapters". The answer is then reviewed
+             against its passages, as a Write section is, and overreach flagged.
 
 A reading is the library's Tier 1 summary of a section: denser than a passage, and the
 only way a whole book fits in front of the model at once.
@@ -42,6 +43,10 @@ class Effort:
     num_ctx: int
     passage_chars: int
     readings: int = 0
+    # Read the finished answer back against its passages and flag what reaches past them
+    # (see chat/audit.py). Deep searches widest, so it is where an unattributed claim
+    # most needs catching.
+    audit: bool = False
 
 
 EFFORTS: dict[str, Effort] = {
@@ -74,6 +79,7 @@ EFFORTS: dict[str, Effort] = {
         num_ctx=32768,
         passage_chars=1400,
         readings=8,
+        audit=True,
     ),
 }
 DEFAULT = "normal"

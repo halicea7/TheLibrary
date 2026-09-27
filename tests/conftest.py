@@ -208,3 +208,13 @@ async def make_document(
     db.add(DocumentCategory(document_id=doc.id, category_id=cat.id))
     await db.flush()
     return doc
+
+
+@pytest.fixture(autouse=True)
+def _fresh_query_cache():
+    """Query vectors are cached per process; a test's fake embedder must not see another's."""
+    from library_agent.llm import embed
+
+    embed._QUERY_CACHE.clear()
+    yield
+    embed._QUERY_CACHE.clear()

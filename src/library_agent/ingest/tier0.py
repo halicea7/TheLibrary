@@ -31,7 +31,7 @@ from library_agent.db.models import (
 from library_agent.db.purge import delete_document
 from library_agent.ingest import dedup
 from library_agent.ingest.chunk import chunk_document
-from library_agent.ingest.extract import content_hash, extract
+from library_agent.ingest.extract import content_hash, extract, is_machine_title
 from library_agent.ingest.structure import build_sections
 from library_agent.llm.client import LLM
 from library_agent.llm.embed import embed_texts
@@ -95,7 +95,7 @@ async def ingest(
         )
 
     ex = extracted or extract(path)
-    title = ex.title or Path(filename).stem
+    title = ex.title if ex.title and not is_machine_title(ex.title) else Path(filename).stem
     sections = build_sections(ex)
     chunks = chunk_document(ex, sections, title)
     if not chunks:

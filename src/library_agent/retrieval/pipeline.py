@@ -5,6 +5,7 @@ component rather than to the pipeline as a whole."""
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 
@@ -108,6 +109,11 @@ async def retrieve(
             db, query, limit=pool, pool=pool, document_ids=document_ids, **common
         )
 
+    # An index entry or a bibliography line matches by shared words and is never the
+    # evidence -- unless the question is about the references themselves.
+    if not _ASKS_APPARATUS.search(query):
+        candidates = [h for h in candidates if not is_apparatus(h.section_path)]
+
     if rc.use_reranker and candidates and rerank_mod.available():
         # Score only the head. The cross-encoder costs ~65ms per pair on MPS, so
         # reranking the full pool would put an interactive query at ~6s for a result the
@@ -125,6 +131,26 @@ async def retrieve(
             candidates, per_document=rc.per_document, limit=top_k, exempt=set(favour or ())
         )
     return candidates[:top_k]
+
+
+# Back matter, matched on the last step of a section path ("Appendix A. Bibliography
+# (cont. 2)", "Index (cont. 4)").
+_APPARATUS = re.compile(
+    r"^(appendix\s+[a-z0-9]+\.?\s*)?(bibliography|references|works cited|index|"
+    r"(table of )?contents|acknowledg(e)?ments?)$",
+    re.IGNORECASE,
+)
+_ASKS_APPARATUS = re.compile(
+    r"\b(bibliograph\w*|references?|cited|citations?|index)\b", re.IGNORECASE
+)
+
+
+def is_apparatus(section_path: str | None) -> bool:
+    if not section_path:
+        return False
+    last = re.split(r"\s*[›>/]\s*", section_path)[-1]
+    last = re.sub(r"\s*\(cont\.?\s*\d*\)\s*$", "", last, flags=re.IGNORECASE).strip()
+    return bool(_APPARATUS.match(last))
 
 
 def diversify(hits: list, *, per_document: int, limit: int, exempt: set | None = None) -> list:

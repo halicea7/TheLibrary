@@ -691,6 +691,8 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .seal figcaption code { color:var(--dim); }
 .caveat { font:11.5px/1.5 var(--sans); color:var(--dim); margin:8px 0 0; padding:6px 10px; border-left:2px solid var(--amber); background:color-mix(in srgb, var(--amber) 7%, transparent); border-radius:0 3px 3px 0; }
 .caveat b { color:var(--amber); font-weight:600; }
+.turn > .caveat { max-width:68ch; }
+.doc .sec .searched { font:10.5px/1.5 var(--mono); color:var(--faint); margin:-4px 0 8px; }
 .saved .row .t { flex:1; text-align:left; color:var(--fg); }
 .saved .row .t:hover { color:var(--verdigris); }
 .restored { font:11.5px/1.5 var(--sans); color:var(--dim); margin:0 0 12px; padding:7px 10px; border-left:2px solid var(--verdigris); background:color-mix(in srgb, var(--verdigris) 7%, transparent); border-radius:0 3px 3px 0; }
@@ -2155,6 +2157,15 @@ function markup(text) {
   });
 }
 
+// A deep answer's review: each claim that reached past its passages, under the answer.
+function renderFlags(turn, flags) {
+  for (const fl of (flags || [])) {
+    const c = document.createElement('div'); c.className = 'caveat';
+    c.innerHTML = `<b>⚠ Review</b> <q>${esc(fl.quote)}</q> — ${esc(fl.issue)}${fl.condition ? ` <em>Could fail if ${esc(fl.condition)}.</em>` : ''}`;
+    turn.appendChild(c);
+  }
+}
+
 function renderAnswer(el, text) {
   // One markdown block per row of the apparatus grid: the notes for a block sit beside it.
   const blocks = mdBlocks(text);
@@ -2282,16 +2293,19 @@ async function ask(text) {
           said.innerHTML = mdBlocks(answer).join('');
           if (thought) desk('');
         }
+        else if (ev === 'reviewing') desk('<span class="working">reviewing the answer against its passages</span>');
         else if (ev === 'done') {
           murmur.stop();
           const d = JSON.parse(raw);
           renderAnswer(said, d.answer);
+          renderFlags(wrap, d.flags);
           const cited = (d.cited || []).length;
           if (!cited && sources.length) said.insertAdjacentHTML('beforeend',
             `<div class="unsourced">answered without drawing on the shelf</div>`);
-          desk(d.markers_emitted
+          const nf = (d.flags || []).length;
+          desk((d.markers_emitted
             ? `${d.markers_resolved} of ${d.markers_emitted} citations verified against the shelf`
-            : '');
+            : '') + (nf ? `${d.markers_emitted ? ' · ' : ''}<b style="color:var(--amber)">${nf} claim${nf === 1 ? '' : 's'} flagged</b>` : ''));
         }
         else if (ev === 'error') {
           murmur.stop(); web.scan(false);
@@ -2361,6 +2375,7 @@ async function openChat(id) {
     wrap.appendChild(said);
     sources = (m.sources?.cited || []).map(c => ({ n: c.n, title: c.title, page: c.page, document_id: c.document_id, section: c.section || '', kind: c.kind }));
     renderAnswer(said, m.content);
+    renderFlags(wrap, m.sources?.flags);
     asked = null;
   }
   const first = msgs.find(m => m.role === 'user');
@@ -2859,7 +2874,7 @@ async function composeDoc() {
   const body = { brief, length: write.length, review: write.review, force: !!write.force,
     category_ids: [...subjects], cartridge_ids: [...cartridges],
     scope_label: [room ? room + "'s shelf" : '', subjects.size ? `${subjects.size} subjects` : ''].filter(Boolean).join(' and ') };
-  let secSources = [], secEl = null, said = null, buf = '', ev = null, text = '', result = null, wove = '', lastCh = null;
+  let secSources = [], secSearches = [], secEl = null, said = null, buf = '', ev = null, text = '', result = null, wove = '', lastCh = null;
   let usingModel = '', total = 0;
   const seal = { docs: new Map(), edges: [] };  // the little nebula of what was synthesised
   try {
@@ -2879,6 +2894,9 @@ async function composeDoc() {
           const tone = cv.verdict === 'strong' ? 'verdigris' : (cv.verdict === 'thin' ? 'amber' : 'amber');
           wove = `<div class="plan cover" style="border-color:var(--${tone})"><b style="color:var(--${tone})">Coverage: ${esc(cv.verdict)}</b>${cv.note ? ' — ' + esc(cv.note) : ''}${cv.missing && cv.verdict !== 'strong' ? ` <span class="miss">Thin on: ${esc(cv.missing)}</span>` : ''}</div>` + wove;
           if (wove) doc.innerHTML = wove;
+        } else if (ev === 'facets') {
+          const f = JSON.parse(raw).facets || [];
+          if (f.length > 1) { wove += `<div class="plan wove">The brief's parts, each to be developed: ${f.map(esc).join(' · ')}</div>`; doc.innerHTML = wove; }
         } else if (ev === 'threads') {
           const t = JSON.parse(raw);
           wove = t.count
@@ -2895,7 +2913,7 @@ async function composeDoc() {
           setRing(0, 0, total, '');
           $('#wr-go').textContent = 'writing…';
         } else if (ev === 'sources') {
-          const s = JSON.parse(raw); secSources = s.sources;
+          const s = JSON.parse(raw); secSources = s.sources; secSearches = s.searches || [];
         } else if (ev === 'section') {
           const s = JSON.parse(raw);
           document.getElementById('wr-o' + s.index)?.setAttribute('data-state', 'writing');
@@ -2903,7 +2921,7 @@ async function composeDoc() {
           thinkHead(s.heading);
           if (s.chapter && s.chapter !== lastCh) { lastCh = s.chapter; const ch = document.createElement('h2'); ch.className = 'chap'; ch.textContent = s.chapter; doc.appendChild(ch); }
           secEl = document.createElement('div'); secEl.className = 'sec';
-          secEl.innerHTML = `<${s.chapter ? 'h3' : 'h2'}>${esc(s.heading)}</${s.chapter ? 'h3' : 'h2'}><div class="said md"><p></p></div>`;
+          secEl.innerHTML = `<${s.chapter ? 'h3' : 'h2'}>${esc(s.heading)}</${s.chapter ? 'h3' : 'h2'}>${secSearches.length > 1 ? `<div class="searched">searched: ${secSearches.map(esc).join(' · ')}</div>` : ''}<div class="said md"><p></p></div>`;
           doc.appendChild(secEl); said = secEl.querySelector('.said'); text = '';
         } else if (ev === 'thinking') {
           thinkPush(raw);

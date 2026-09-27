@@ -329,6 +329,8 @@ async def run_turn(
                     "held": s.held,
                     "kind": s.kind,
                     "live": s.live,
+                    "artifact_id": s.artifact_id,
+                    "page_end": s.page_end,
                 }
                 for s in state.sources
             ],
@@ -413,6 +415,9 @@ async def run_turn(
                                 "section": plain_label(s.section_path),
                                 "kind": s.kind,
                                 "live": s.live,
+                                "artifact_id": s.artifact_id,
+                                "page_end": s.page_end,
+                                "span_chunk_ids": s.span_chunk_ids,
                             }
                             for s in used
                         ],

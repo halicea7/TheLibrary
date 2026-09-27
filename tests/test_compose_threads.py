@@ -120,24 +120,125 @@ async def test_threads_nearest_the_brief_with_their_disagreement(scratch_db, mon
     assert block.count("⚡") == 1
 
 
+async def _claims(db, cl, rows):
+    """cluster_claim rows: (document, claim text)."""
+    from library_agent.db.models import ClusterClaim, ClusterMember
+    from library_agent.library.cluster import _hash
+
+    members = {
+        m.document_id: m.artifact_id
+        for m in (
+            await db.execute(select(ClusterMember).where(ClusterMember.cluster_id == cl.id))
+        ).scalars()
+    }
+    for i, (d, claim) in enumerate(rows):
+        db.add(
+            ClusterClaim(
+                cluster_id=cl.id,
+                artifact_id=members[d.id],
+                claim_index=i,
+                claim_hash=_hash(claim),
+                document_id=d.id,
+                text=claim,
+            )
+        )
+    await db.flush()
+
+
 async def test_threads_respect_scope(scratch_db, monkeypatch):
+    """Scope selects claims, not clusters: a thread is a thread in scope only when two of
+    its volumes are there, and it is shown as what those volumes claim -- never with the
+    library-wide summary that speaks for volumes outside it."""
     db = scratch_db
     from library_agent.library import taxonomy
 
     a = await make_document(db, title="Shelved Vol", body="a " * 60)
     b = await make_document(db, title="Other Vol", body="b " * 60)
+    c = await make_document(db, title="Third Vol", body="c " * 60)
     cat = await taxonomy.get_or_create(db, "Networking")
     await taxonomy.assign_document(db, a.id, ["Networking"])
-    await _cluster(db, "In scope", [a, b], vec_seed=100)
+    await taxonomy.assign_document(db, c.id, ["Networking"])
+    cl = await _cluster(
+        db, "Across three", [a, b, c], vec_seed=100, summary="Other Vol settles it."
+    )
+    await _claims(db, cl, [(a, "A says x"), (b, "B says y"), (c, "C says z")])
+    lonely = await _cluster(db, "One in scope", [a, b], vec_seed=100)
+    await _claims(db, lonely, [(a, "A alone"), (b, "B elsewhere")])
 
     async def near(text, client=None):
         return _vec(100)
 
     monkeypatch.setattr(threads, "embed_query", near)
-    assert await threads.relevant_threads(db, "q", limit=5, category_ids=[cat.id])
+    got = await threads.relevant_threads(db, "q", limit=5, category_ids=[cat.id])
+    assert [t["label"] for t in got] == ["Across three"]  # one in-scope volume: not a thread
+    t = got[0]
+    assert t["documents"] == ["Shelved Vol", "Third Vol"]
+    assert t["scoped"] == {"documents": 2, "of_documents": 3}
+    assert {x["claim"] for x in t["claims"]} == {"A says x", "C says z"}
+    block = threads.render_threads(got)
+    assert "B says y" not in block and "Other Vol settles it" not in block
+    assert "2 of its 3 volumes are in scope" in block
     other = uuid.uuid4()
     assert await threads.relevant_threads(db, "q", limit=5, category_ids=[other]) == []
+    # unscoped, both threads, each with its summary
+    assert len(await threads.relevant_threads(db, "q", limit=5)) == 2
 
 
 def test_render_is_empty_without_threads():
     assert threads.render_threads([]) == ""
+
+
+def test_a_disagreement_names_its_side_loosely():
+    from library_agent.api.routes.library import same_source
+
+    assert same_source("Nginx", "Nginx — Nginx security vulnerabilities and misconfigurations")
+    assert same_source(
+        "Smali - Decompiling/[Modifying]/Compiling",
+        "Smali - Decompiling/[Modifying]/Compilin — Smali code modification",
+    )
+    assert not same_source("Nginx", "Upgrade Header Smuggling — HTTP request smuggling")
+    assert not same_source("SQL", "SQLmap — tool")  # a short name must match whole
+
+
+async def test_hold_both_opens_the_claims_own_passage(scratch_db):
+    """Evidence for a claim comes from its own section, and within it the passage nearest
+    the claim's kept vector -- not a fresh search across the thread's volumes."""
+    from library_agent.api.routes.library import evidence
+    from library_agent.db.models import Chunk, ClaimVector, ClusterMember, Embedding
+    from library_agent.library.cluster import _hash
+
+    db = scratch_db
+    a = await make_document(db, title="Volume A", body="a " * 60)
+    b = await make_document(db, title="Volume B", body="b " * 60)
+    cl = await _cluster(db, "Remedy", [a, b], vec_seed=100)
+    await _claims(db, cl, [(a, "Patch first"), (b, "Isolate first")])
+    # Volume B's member section gets a second passage, the one the claim is about.
+    member = (
+        await db.execute(
+            select(ClusterMember).where(
+                ClusterMember.cluster_id == cl.id, ClusterMember.document_id == b.id
+            )
+        )
+    ).scalar_one()
+    sec_id = (await db.get(Artifact, member.artifact_id)).target_id
+    extra = Chunk(
+        id=uuid.uuid4(),
+        document_id=b.id,
+        section_id=sec_id,
+        order_index=9,
+        text="Isolate the host before anything else.",
+        page_start=7,
+    )
+    db.add(extra)
+    await db.flush()
+    from library_agent.config import settings
+
+    m = settings().embed_model
+    db.add(Embedding(owner_kind=OwnerKind.CHUNK, owner_id=extra.id, model=m, vec=_vec(99)))
+    db.add(ClaimVector(hash=_hash("Isolate first"), model=m, vec=_vec(99)))
+    await db.flush()
+
+    got = await evidence(db, cl.id, "Volume B — what it is about", "Isolate first")
+    assert got["chunk_id"] == str(extra.id) and got["page"] == 7 and got["exact"]
+    other = await evidence(db, cl.id, "Volume A", "Patch first")
+    assert other["document_title"] == "Volume A" and not other["exact"]  # no kept vector

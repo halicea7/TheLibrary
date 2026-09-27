@@ -29,7 +29,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from library_agent.db.models import (
@@ -297,12 +297,14 @@ async def _fold(db: AsyncSession, loser: Category, winner: Category) -> None:
             (await db.execute(select(key).where(model.category_id == winner.id))).scalars()
         )
         movers = list(
-            (await db.execute(select(key).where(model.category_id == loser.id))).scalars()
+            (await db.execute(select(model).where(model.category_id == loser.id))).scalars()
         )
-        for owner in movers:
+        for row in movers:
+            owner = getattr(row, key.key)
             if owner in existing:
                 continue
-            db.add(model(**{key.key: owner, "category_id": winner.id}))
+            extra = {"origin": row.origin} if model is DocumentCategory else {}
+            db.add(model(**{key.key: owner, "category_id": winner.id, **extra}))
             existing.add(owner)
         await db.execute(
             model.__table__.delete().where(model.category_id == loser.id)  # type: ignore[attr-defined]
@@ -677,6 +679,9 @@ async def build_taxonomy(
     # visibly unshelved rather than sitting on a shelf that no longer exists.
     await db.execute(update(Category).values(parent_id=None))
     await db.execute(update(Document).where(Document.tier >= 1).values(shelf_id=None))
+    # A shelf tag is the home, as a filter; with the homes cleared, so are they. The
+    # reader's subjects stay: the shelves change, what the volumes are about does not.
+    await db.execute(delete(DocumentCategory).where(DocumentCategory.origin == "shelf"))
     tx = Taxonomy()
     absorbed: set[uuid.UUID] = set()
     for coll, out in designs:
@@ -785,6 +790,8 @@ async def _summary_and_tags(db: AsyncSession, doc: Document) -> tuple[str, list[
                 .join(DocumentCategory, DocumentCategory.category_id == Category.id)
                 .where(DocumentCategory.document_id == doc.id)
                 .where(Category.id != doc.shelf_id)  # its current shelf is not evidence
+                # nor any shelf it was put on before: a placement is not a reading of it
+                .where(DocumentCategory.origin.is_distinct_from("shelf"))
             )
         ).scalars()
     )
@@ -854,6 +861,14 @@ async def _resolve_place(db: AsyncSession, tx: Taxonomy, out: dict[str, Any]) ->
     sub: Category | None = None
     if choice != NEW and choice in tx.ids and choice not in tx.tops:
         sub = await db.get(Category, tx.ids[choice])
+        # The sub-shelf must be on a top shelf in view (this volume's collection's), and
+        # on the one the answer named when it named one. The id map is shared across
+        # collections, so a name alone could file a volume on another collection's shelf.
+        in_view = {tx.ids[t] for t in tx.tops}
+        if sub is None or sub.parent_id not in in_view:
+            return None
+        if top and sub.parent_id != tx.ids[top]:
+            return None
     elif choice == NEW and top:
         new_name = taxonomy.normalize_name(str(out.get("new_sub_shelf_name") or ""))
         if 3 <= len(new_name) <= 40 and new_name not in tx.tops:
@@ -870,16 +885,24 @@ async def _resolve_place(db: AsyncSession, tx: Taxonomy, out: dict[str, Any]) ->
 
 
 async def _finish_place(db: AsyncSession, doc: Document, sub: Category) -> Category:
-    # The shelf is also a tag, so filtering by it finds the volume.
-    have = set(
-        (
-            await db.execute(
-                select(DocumentCategory.category_id).where(DocumentCategory.document_id == doc.id)
-            )
-        ).scalars()
+    """The shelf is also a tag, so filtering by it finds the volume -- one shelf tag, the
+    current home's. Moving a volume replaces it; the reader's own subjects are untouched."""
+    await db.execute(
+        delete(DocumentCategory).where(
+            DocumentCategory.document_id == doc.id,
+            DocumentCategory.origin == "shelf",
+            DocumentCategory.category_id != sub.id,
+        )
     )
-    if sub.id not in have:
-        db.add(DocumentCategory(document_id=doc.id, category_id=sub.id))
+    have = (
+        await db.execute(
+            select(DocumentCategory).where(
+                DocumentCategory.document_id == doc.id, DocumentCategory.category_id == sub.id
+            )
+        )
+    ).scalar_one_or_none()
+    if have is None:
+        db.add(DocumentCategory(document_id=doc.id, category_id=sub.id, origin="shelf"))
     await db.flush()
     return sub
 
@@ -1008,7 +1031,6 @@ async def split_crowded(
             # the rack. It comes off only once it is empty: a volume whose re-placement
             # fails keeps a real place rather than a shelf with no top.
             local = Taxonomy(tops={top: names}, ids=tx.ids)
-            fallback = tx.ids[names[0]]
             for i, d in enumerate(docs):
                 if gate:
                     await gate()
@@ -1016,10 +1038,10 @@ async def split_crowded(
                     if await place_document(db, d.id, client=client, tx=local, allow_new=False):
                         moved += 1
                     else:
-                        d.shelf_id = fallback
+                        d.shelf_id = sid  # not placed: it stays where it was
                 except Exception:
                     log.warning("re-placing %s failed", d.id, exc_info=True)
-                    d.shelf_id = fallback
+                    d.shelf_id = sid
                 if progress:
                     await progress(i + 1, n, "splitting crowded shelves")
             await db.flush()
@@ -1060,24 +1082,30 @@ async def merge_sparse(db: AsyncSession, tx: Taxonomy, *, client: Ollama, gate=N
                     await db.execute(select(Document).where(Document.shelf_id == tx.ids[sub]))
                 ).scalars()
             )
-            tx.tops[top].remove(sub)
-            cat = await db.get(Category, tx.ids[sub])
-            if cat:
-                cat.parent_id = None
-            local = Taxonomy(tops={top: tx.tops[top]}, ids=dict(tx.ids))
+            siblings = [s for s in tx.tops[top] if s != sub]
+            local = Taxonomy(tops={top: siblings}, ids=dict(tx.ids))
+            stayed = 0
             for d in docs:
                 if gate:
                     await gate()
-                d.shelf_id = None
                 try:
                     placed = await place_document(
                         db, d.id, client=client, tx=local, allow_new=False
                     )
                 except Exception:  # noqa: BLE001
                     placed = None
-                if not placed:
-                    d.shelf_id = tx.ids[tx.tops[top][0]]
-                moved += 1
+                if placed:
+                    moved += 1
+                else:
+                    # Not the first sibling by default: a volume that fits none of them
+                    # keeps its shelf, and the shelf stays while anything is on it.
+                    d.shelf_id = tx.ids[sub]
+                    stayed += 1
+            if not stayed:
+                tx.tops[top].remove(sub)
+                cat = await db.get(Category, tx.ids[sub])
+                if cat:
+                    cat.parent_id = None
             await db.flush()
     return moved
 
@@ -1184,3 +1212,74 @@ async def expand_category_ids(db: AsyncSession, ids: list[uuid.UUID]) -> list[uu
         (await db.execute(select(Category.id).where(Category.parent_id.in_(ids)))).scalars()
     )
     return list({*ids, *kids})
+
+
+@dataclass
+class TagReport:
+    reader: int = 0
+    home: int = 0
+    stale: int = 0
+    unknown: int = 0
+    samples: list[tuple[str, str]] = field(default_factory=list)
+
+
+async def classify_tags(db: AsyncSession, *, repair: bool = False) -> TagReport:
+    """Give each subject tag from before origins were kept its origin, and find the stale.
+
+    A tag the reader gave is in the volume's summary (`categories`, resolved through any
+    later fold); the tag of its current home is the shelf's. Anything else on a read volume
+    was put there by an earlier placement -- a home it has since left -- and with `repair`
+    is removed: a stale shelf tag widens every search scoped to that shelf. A volume with
+    no summary to check against is left alone."""
+    cats = list((await db.execute(select(Category))).scalars())
+    by_name: dict[str, uuid.UUID] = {}
+    for c in cats:
+        if c.canonical:
+            by_name.setdefault(c.name, c.id)
+    for c in cats:  # a folded name resolves to the category that absorbed it
+        if c.canonical:
+            for old in c.merged_from or []:
+                by_name.setdefault(old, c.id)
+    names = {c.id: c.name for c in cats}
+    readers: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for doc_id, data in (
+        await db.execute(
+            select(Artifact.target_id, Artifact.data).where(
+                Artifact.kind == ArtifactKind.DOCUMENT_SUMMARY,
+                Artifact.target_kind == TargetKind.DOCUMENT,
+            )
+        )
+    ).all():
+        if "categories" not in (data or {}):
+            continue  # no subjects recorded: nothing to check its tags against
+        wanted = {taxonomy.normalize_name(str(x)) for x in data["categories"] or []}
+        readers[doc_id] = {by_name[n] for n in wanted if n in by_name}
+    homes = dict((await db.execute(select(Document.id, Document.shelf_id))).all())
+    titles = dict((await db.execute(select(Document.id, Document.title))).all())
+    r = TagReport()
+    rows = (
+        await db.execute(select(DocumentCategory).where(DocumentCategory.origin.is_(None)))
+    ).scalars()
+    for row in rows:
+        mine = readers.get(row.document_id)
+        if mine is None:
+            r.unknown += 1
+            continue
+        if row.category_id in mine:
+            r.reader += 1
+            if repair:
+                row.origin = "reader"
+        elif row.category_id == homes.get(row.document_id):
+            r.home += 1
+            if repair:
+                row.origin = "shelf"
+        else:
+            r.stale += 1
+            if len(r.samples) < 12:
+                r.samples.append(
+                    (titles.get(row.document_id, "?")[:50], names.get(row.category_id, "?"))
+                )
+            if repair:
+                await db.delete(row)
+    await db.flush()
+    return r

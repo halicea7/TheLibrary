@@ -196,6 +196,9 @@ class Chunk(Base):
     page_start: Mapped[int | None] = mapped_column(Integer, default=None)
     char_start: Mapped[int] = mapped_column(Integer, default=0)
     char_end: Mapped[int] = mapped_column(Integer, default=0)
+    # Whether text[char_start:char_end] of the extraction holds this chunk (whitespace
+    # aside). None: not yet checked -- `./library spans --repair` checks and fixes.
+    span_exact: Mapped[bool | None] = mapped_column(default=None)
 
     document: Mapped[Document] = relationship(back_populates="chunks")
 
@@ -369,6 +372,10 @@ class DocumentCategory(Base):
         ForeignKey("category.id", ondelete="CASCADE"), primary_key=True
     )
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    # "reader": Tier 1 named it a subject. "shelf": the volume's home, added by placement so
+    # a shelf filter finds it -- replaced when the volume moves, cleared by a redesign.
+    # None: from before origins were kept.
+    origin: Mapped[str | None] = mapped_column(String(8), default=None)
 
 
 class ChunkCategory(Base):
@@ -435,6 +442,27 @@ class ClusterMember(Base):
         ForeignKey("document.id", ondelete="CASCADE"), index=True
     )
     distance: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class ClusterClaim(Base):
+    """A thread's membership, claim by claim. A claim is identified by the section summary
+    that holds it and its place in that summary's list; `claim_hash` is its text's hash,
+    the key its vector is kept under (ClaimVector). ClusterMember stays section-level."""
+
+    __tablename__ = "cluster_claim"
+
+    cluster_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("cluster.id", ondelete="CASCADE"), primary_key=True
+    )
+    artifact_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("artifact.id", ondelete="CASCADE"), primary_key=True
+    )
+    claim_index: Mapped[int] = mapped_column(Integer, primary_key=True)
+    claim_hash: Mapped[str] = mapped_column(String(32), index=True)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document.id", ondelete="CASCADE"), index=True
+    )
+    text: Mapped[str] = mapped_column(Text)
 
 
 class Citation(Base):

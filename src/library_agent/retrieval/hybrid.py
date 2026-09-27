@@ -34,6 +34,11 @@ class SearchHit:
     rerank_score: float | None = None
     kind: str = "passage"  # or "reading": the library's summary of the section; or "live"
     live: dict | None = None  # for a live module result: {module, colour, op, when, arg, error}
+    # A reading is its own source: the summary artifact, and the span it summarises -- every
+    # passage of the section and its pages -- not only the first passage it opens on.
+    artifact_id: uuid.UUID | None = None
+    page_end: int | None = None
+    span_chunk_ids: list | None = None
 
     def citation(self) -> str:
         loc = f", p.{self.page}" if self.page else ""

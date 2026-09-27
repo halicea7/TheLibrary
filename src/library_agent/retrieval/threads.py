@@ -18,25 +18,146 @@ from library_agent.llm.embed import embed_query
 
 _SQL = """
 select cl.id, cl.label, a.text as summary, cl.document_count, cl.has_contradiction,
+       a.data->'claims' as listed, a.data->'claim_sources' as listed_sources,
        (select array_agg(distinct d.title)
         from cluster_member m join document d on d.id = m.document_id
-        where m.cluster_id = cl.id) as documents
+        where m.cluster_id = cl.id) as documents,
+       (select array_agg(distinct m.document_id)
+        from cluster_member m where m.cluster_id = cl.id) as document_ids
 from embedding e
 join artifact a on a.id = e.owner_id and a.kind = 'cluster_summary'
 join cluster cl on cl.id = a.target_id
 where e.owner_kind = 'artifact' and e.model = :emodel
   and cl.document_count > 1
-  and (cast(:cats as uuid[]) is null or exists (
-      select 1 from cluster_member m join document_category dc on dc.document_id = m.document_id
-      where m.cluster_id = cl.id and dc.category_id = any(cast(:cats as uuid[]))
-  ))
-  and (cast(:carts as uuid[]) is null or exists (
-      select 1 from cluster_member m join cartridge_document cd on cd.document_id = m.document_id
-      where m.cluster_id = cl.id and cd.cartridge_id = any(cast(:carts as uuid[]))
+  and (cast(:docs as uuid[]) is null or exists (
+      select 1 from cluster_member m
+      where m.cluster_id = cl.id and m.document_id = any(cast(:docs as uuid[]))
   ))
 order by e.vec <=> cast(:qv as halfvec)
 limit :lim
 """
+
+# How many in-scope claims a scoped thread shows in place of its whole-library summary.
+SCOPED_CLAIMS = 8
+
+
+async def scope_documents(
+    db: AsyncSession,
+    category_ids: list[uuid.UUID] | None = None,
+    cartridge_ids: list[uuid.UUID] | None = None,
+) -> set[uuid.UUID] | None:
+    """The volumes a scope admits, by one rule for every view of the threads: a shelf
+    stands for its sub-shelves, and a volume is on it by home shelf or by subject; a
+    cartridge admits the volumes it carries; both together admit what both admit. None
+    when nothing is scoped."""
+    if not category_ids and not cartridge_ids:
+        return None
+    from library_agent.library.shelving import expand_category_ids
+
+    keep: set[uuid.UUID] | None = None
+    if category_ids:
+        cats = await expand_category_ids(db, list(category_ids))
+        keep = set(
+            (
+                await db.execute(
+                    text(
+                        "select d.id from document d where d.shelf_id = any(:c) or exists ("
+                        "select 1 from document_category dc where dc.document_id = d.id"
+                        " and dc.category_id = any(:c))"
+                    ),
+                    {"c": cats},
+                )
+            ).scalars()
+        )
+    if cartridge_ids:
+        carts = set(
+            (
+                await db.execute(
+                    text("select document_id from cartridge_document where cartridge_id = any(:c)"),
+                    {"c": list(cartridge_ids)},
+                )
+            ).scalars()
+        )
+        keep = carts if keep is None else keep & carts
+    return keep or set()
+
+
+async def scoped_claims(
+    db: AsyncSession, cluster_ids: list, docs: set[uuid.UUID]
+) -> dict[uuid.UUID, list[dict]]:
+    """Each cluster's claims from in-scope volumes, with their volume -- the material a
+    scoped view is rebuilt from. Clusters with no claim rows yet are absent."""
+    if not cluster_ids:
+        return {}
+    rows = (
+        await db.execute(
+            text(
+                "select cc.cluster_id, cc.text, cc.document_id, d.title from cluster_claim cc"
+                " join document d on d.id = cc.document_id"
+                " where cc.cluster_id = any(:ids) and cc.document_id = any(:docs)"
+                " order by cc.cluster_id, d.title, cc.claim_index"
+            ),
+            {"ids": list(cluster_ids), "docs": list(docs)},
+        )
+    ).all()
+    # A cluster with claim rows but none in scope maps to an empty list, not to absent.
+    out: dict[uuid.UUID, list[dict]] = {
+        cid: []
+        for cid in (
+            await db.execute(
+                text("select distinct cluster_id from cluster_claim where cluster_id = any(:ids)"),
+                {"ids": list(cluster_ids)},
+            )
+        ).scalars()
+    }
+    for cid, claim, did, title in rows:
+        out.setdefault(cid, []).append({"claim": claim, "document_id": did, "source": title})
+    return out
+
+
+def scope_thread(t: dict, claims: list[dict] | None, docs: set[uuid.UUID]) -> dict | None:
+    """A thread as seen from inside a scope, or None when it is not a thread there.
+
+    Its whole-library summary speaks for volumes outside the scope, so a scoped thread is
+    rebuilt from its in-scope claims: those claims, their volumes, and a disagreement only
+    when both of its sides are in scope. Fewer than two in-scope volumes is not a
+    connection across volumes, and is dropped."""
+    if claims is None:
+        # No claim rows yet: fall back to the claims the summary lists, by source title.
+        titles = {
+            title
+            for title, did in zip(t.get("documents") or [], t.get("_doc_ids") or [], strict=False)
+            if did in docs
+        }
+        claims = [
+            {"claim": c, "source": src, "document_id": None}
+            for c, src in zip(t.get("_listed") or [], t.get("_listed_sources") or [], strict=False)
+            if src in titles
+        ]
+    in_docs = {c["source"] for c in claims}
+    if len(in_docs) < 2:
+        return None
+    out = dict(t)
+    out["documents"] = sorted(in_docs)
+    out["scoped"] = {
+        "documents": len(in_docs),
+        "of_documents": t.get("document_count") or len(t.get("documents") or []),
+    }
+    # Spread across volumes: one claim from each in turn, so no single volume fills it.
+    by_doc: dict[str, list[dict]] = {}
+    for c in claims:
+        by_doc.setdefault(c["source"], []).append(c)
+    picked: list[dict] = []
+    while len(picked) < SCOPED_CLAIMS and any(by_doc.values()):
+        for src in list(by_doc):
+            if by_doc[src] and len(picked) < SCOPED_CLAIMS:
+                picked.append(by_doc[src].pop(0))
+    out["claims"] = [{"source": c["source"], "claim": c["claim"]} for c in picked]
+    cx = t.get("contradiction")
+    if cx and not (cx["a"]["source"] in in_docs and cx["b"]["source"] in in_docs):
+        out["contradiction"] = None
+    return out
+
 
 _CONTRA = """
 select a.data->>'claim_a' as claim_a, a.data->>'source_a' as source_a,
@@ -60,15 +181,18 @@ async def relevant_threads(
     if limit <= 0:
         return []
     vec = await embed_query(brief, client)
+    docs = await scope_documents(db, category_ids, cartridge_ids)
+    if docs is not None and not docs:
+        return []
     rows = (
         await db.execute(
             text(_SQL),
             {
                 "qv": str(vec),
                 "emodel": settings().embed_model,
-                "cats": [str(x) for x in category_ids] if category_ids else None,
-                "carts": [str(x) for x in cartridge_ids] if cartridge_ids else None,
-                "lim": limit,
+                "docs": [str(x) for x in docs] if docs is not None else None,
+                # A scope drops threads with one in-scope volume, so look further for them.
+                "lim": limit * 3 if docs is not None else limit,
             },
         )
     ).all()
@@ -81,6 +205,9 @@ async def relevant_threads(
             "document_count": r.document_count,
             "has_contradiction": r.has_contradiction,
             "contradiction": None,
+            "_doc_ids": list(r.document_ids or []),
+            "_listed": list(r.listed or []),
+            "_listed_sources": list(r.listed_sources or []),
         }
         for r in rows
     ]
@@ -109,6 +236,16 @@ async def relevant_threads(
                     "b": {"source": r.source_b or "", "claim": r.claim_b},
                     "explanation": r.explanation or "",
                 }
+    if docs is not None:
+        claims = await scoped_claims(db, [t["id"] for t in threads], docs)
+        threads = [
+            s
+            for t in threads
+            if (s := scope_thread(t, claims.get(t["id"]) if t["id"] in claims else None, docs))
+        ][:limit]
+    for t in threads:
+        for k in ("_doc_ids", "_listed", "_listed_sources"):
+            t.pop(k, None)
     return threads
 
 
@@ -120,10 +257,20 @@ def render_threads(threads: list[dict], *, max_chars: int = 6000) -> str:
     lines: list[str] = []
     for t in threads:
         docs = ", ".join(t["documents"][:6])
-        head = f"- {t['label']}: {(t['summary'] or '').strip()}"
-        if docs:
-            head += f" (across: {docs})"
-        lines.append(head)
+        if t.get("scoped"):
+            # Inside a scope the thread is its in-scope claims; the library-wide summary
+            # would speak for volumes the document may not use.
+            sc = t["scoped"]
+            lines.append(
+                f"- {t['label']} ({sc['documents']} of its {sc['of_documents']} volumes are "
+                f"in scope; what they claim):"
+            )
+            lines += [f"    · {c['source']}: {c['claim']}" for c in t.get("claims", [])]
+        else:
+            head = f"- {t['label']}: {(t['summary'] or '').strip()}"
+            if docs:
+                head += f" (across: {docs})"
+            lines.append(head)
         if c := t.get("contradiction"):
             lines.append(
                 f"    ⚡ the library found these at odds — {c['a']['source']}: {c['a']['claim']} "

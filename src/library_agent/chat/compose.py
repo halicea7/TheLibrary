@@ -32,6 +32,7 @@ from library_agent.chat.citations import (
     Source,
     citation_validity,
     plain_label,
+    reading_identity,
     render_context,
     validate,
 )
@@ -323,11 +324,12 @@ class Composition:
                 src = next((x for x in self.sources if x.n == n), None)
                 if not src:
                     continue
-                loc = f", p.{src.page}" if src.page else ""
+                loc = src.pages()
                 path = plain_label(src.section_path)
                 sec = f" — {path}" if path else ""
                 who = f" ({src.cartridge['name']})" if src.cartridge else ""
-                out.append(f"[{n}] {plain_label(src.document_title)}{loc}{sec}{who}")
+                what = " (the library's reading of the section)" if src.kind == "reading" else ""
+                out.append(f"[{n}] {plain_label(src.document_title)}{loc}{sec}{what}{who}")
         stamp = datetime.now(UTC).strftime("%Y-%m-%d")
         out += [
             "",
@@ -510,6 +512,30 @@ async def _section_hits(
                 seen_r.add((h.document_id, h.section_path))
                 readings.append(h)
     return passages + readings[:COMPOSE_READINGS]
+
+
+def _numbered(h: SearchHit, by_key: dict, comp: Composition, docs: dict, provenance: dict):
+    """The document-wide source for a hit: the one already numbered if this same source was
+    used before, otherwise a new number."""
+    d = docs.get(h.document_id)
+    src = Source(
+        n=len(comp.sources) + 1,
+        chunk_id=str(h.chunk_id),
+        document_id=str(h.document_id),
+        document_title=d.title if d else h.document_title,
+        section_path=h.section_path,
+        page=h.page,
+        cartridge=provenance.get(h.document_id),
+        readings_only=bool(d and d.readings_only),
+        kind=getattr(h, "kind", "passage"),
+        **reading_identity(h),
+    )
+    if src.key() in by_key:
+        return by_key[src.key()]
+    by_key[src.key()] = src
+    comp.sources.append(src)
+    comp.hits_by_n[src.n] = h
+    return src
 
 
 async def _coverage(client, model, brief: str, hits: list[SearchHit]) -> dict:
@@ -768,9 +794,9 @@ async def compose(
         section_queries = [await _section_queries(client, model, brief, sec) for sec in outline]
         await prime_queries([q for qs in section_queries for q in qs], client)
 
-        # Keyed by kind as well as chunk: a reading is cited through its section's first
-        # chunk, and must not collide with that chunk cited as a passage.
-        by_chunk: dict[str, Source] = {}
+        # Keyed by what each source is (Source.key): a reading is its summary artifact, not
+        # the first passage of its section, so the two never share a number.
+        by_key: dict[str, Source] = {}
         for i, sec in enumerate(outline):
             await mark_chat_active(redis)
             async with session_scope() as db:
@@ -798,24 +824,7 @@ async def compose(
             section_sources: list[Source] = []
             section_hits: list[SearchHit] = []
             for h in hits:
-                key = f"{getattr(h, 'kind', 'passage')}:{h.chunk_id}"
-                src = by_chunk.get(key)
-                if not src:
-                    d = docs.get(h.document_id)
-                    src = Source(
-                        n=len(comp.sources) + 1,
-                        chunk_id=str(h.chunk_id),
-                        document_id=str(h.document_id),
-                        document_title=d.title if d else h.document_title,
-                        section_path=h.section_path,
-                        page=h.page,
-                        cartridge=provenance.get(h.document_id),
-                        readings_only=bool(d and d.readings_only),
-                        kind=getattr(h, "kind", "passage"),
-                    )
-                    by_chunk[key] = src
-                    comp.sources.append(src)
-                    comp.hits_by_n[src.n] = h
+                src = _numbered(h, by_key, comp, docs, provenance)
                 section_sources.append(src)
                 section_hits.append(h)
             yield {
@@ -833,6 +842,8 @@ async def compose(
                             "cartridge": s.cartridge,
                             "readings_only": s.readings_only,
                             "kind": s.kind,
+                            "artifact_id": s.artifact_id,
+                            "page_end": s.page_end,
                         }
                         for s in section_sources
                     ],

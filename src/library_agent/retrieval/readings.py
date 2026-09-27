@@ -4,8 +4,9 @@ Retrieval finds passages: a page's worth of the text at a time. For a question a
 a work says across its chapters -- "how would the book apply to X" -- the right material
 is the library's summary of each section, which Tier 1 wrote and embedded and Ask never
 used. These are searched the same way, in the same scope, and handed to the model as
-numbered items beside the passages, cited like them, pointing at the section's first
-passage so the reader opens where the reading begins.
+numbered items beside the passages, cited like them. A reading is its own source -- the
+summary artifact, with the section's passages and page range as its span -- and opens on
+the section's first passage, where the reading begins.
 
 And a question that names a volume is about that volume: `named_documents` finds it, so
 retrieval can lift the per-volume cap for it rather than cutting the subject at three."""
@@ -28,9 +29,10 @@ from library_agent.retrieval.pipeline import is_apparatus
 MIN_TITLE = 10
 
 _SQL = """
-select s.document_id, d.title, coalesce(s.path, s.title, '') as path, s.page_start, a.text,
-       (select c.id from chunk c where c.section_id = s.id
-        order by c.order_index limit 1) as chunk_id,
+select s.document_id, d.title, coalesce(s.path, s.title, '') as path, s.page_start,
+       s.page_end, a.text, a.id as artifact_id,
+       (select array_agg(c.id order by c.order_index) from chunk c
+        where c.section_id = s.id and c.kind = 'text') as span_ids,
        1 - (e.vec <=> cast(:qv as halfvec)) as score
 from embedding e
 join artifact a on a.id = e.owner_id and a.kind = 'section_summary'
@@ -108,7 +110,7 @@ async def retrieve_readings(
         ).all()
         return [
             SearchHit(
-                chunk_id=r.chunk_id,
+                chunk_id=r.span_ids[0],
                 document_id=r.document_id,
                 document_title=r.title,
                 section_path=r.path,
@@ -118,9 +120,12 @@ async def retrieve_readings(
                 dense_rank=None,
                 lexical_rank=None,
                 kind="reading",
+                artifact_id=r.artifact_id,
+                page_end=r.page_end,
+                span_chunk_ids=list(r.span_ids),
             )
             for r in rows
-            if r.chunk_id is not None and not is_apparatus(r.path)
+            if r.span_ids and not is_apparatus(r.path)
         ]
 
     named = [d for d in (favour or []) if not document_ids or d in set(document_ids)]

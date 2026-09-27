@@ -55,13 +55,40 @@ class Source:
     # "reading": the library's summary of the section; "live": a module result.
     kind: str = "passage"
     live: dict | None = None
+    # A reading's own identity and span (see SearchHit).
+    artifact_id: str | None = None
+    page_end: int | None = None
+    span_chunk_ids: list[str] | None = None
+
+    def key(self) -> str:
+        """What makes two sources the same: a reading is its artifact, a passage its chunk --
+        never a reading and the passage it opens on."""
+        return f"reading:{self.artifact_id}" if self.artifact_id else f"{self.kind}:{self.chunk_id}"
+
+    def pages(self) -> str:
+        if not self.page:
+            return ""
+        if self.page_end and self.page_end > self.page:
+            return f", pp.{self.page}–{self.page_end}"
+        return f", p.{self.page}"
 
     def label(self) -> str:
-        loc = f", p.{self.page}" if self.page else ""
+        loc = self.pages()
         title = plain_label(self.document_title)
         if self.readings_only and self.cartridge:
             return f"{self.cartridge['name']}'s reading of {title}{loc}"
         return f"{title}{loc}"
+
+
+def reading_identity(h) -> dict:
+    """The fields that make a reading its own source, for Source(**...)."""
+    if getattr(h, "kind", "passage") != "reading" or not getattr(h, "artifact_id", None):
+        return {}
+    return {
+        "artifact_id": str(h.artifact_id),
+        "page_end": h.page_end,
+        "span_chunk_ids": [str(c) for c in (h.span_chunk_ids or [])],
+    }
 
 
 def build_sources(hits: list[SearchHit], held: set | None = None) -> list[Source]:
@@ -77,6 +104,7 @@ def build_sources(hits: list[SearchHit], held: set | None = None) -> list[Source
             held=h.chunk_id in held,
             kind=getattr(h, "kind", "passage"),
             live=getattr(h, "live", None),
+            **reading_identity(h),
         )
         for i, h in enumerate(hits, start=1)
     ]

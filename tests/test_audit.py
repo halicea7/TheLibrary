@@ -168,3 +168,107 @@ async def test_primed_queries_are_not_embedded_again(monkeypatch):
     assert await embed.embed_query("beta") == [4.0]
     assert await embed.embed_query("gamma") == [5.0]
     assert calls == [["alpha", "beta"], ["gamma"]]
+
+
+def _spaced_markdown(tmp_path):
+    """Awkward spacing of the kind extraction produces: runs of spaces, lines broken mid-
+    sentence, blank lines holding spaces -- everything packing normalises."""
+    import random
+
+    random.seed(3)
+    words = [
+        "the",
+        "leader",
+        "appends",
+        "entries",
+        "to",
+        "its",
+        "log",
+        "and",
+        "replicates",
+        "them",
+        "to",
+        "followers",
+    ]
+    paras = []
+    for p in range(60):
+        sents = []
+        for _s in range(random.randint(3, 9)):
+            w = random.sample(words, random.randint(6, 12))
+            sents.append(" ".join(w).capitalize() + ".")
+        joiner = random.choice([" ", "  ", "\n", " \n  "])
+        paras.append(joiner.join(sents))
+    body = "\n \n".join(paras)
+    text = "# Consensus\n\n" + body + "\n\n## Safety\n\n" + body[::-1].swapcase()
+    f = tmp_path / "doc.md"
+    f.write_text(text, encoding="utf-8")
+    return f
+
+
+def test_every_chunk_opens_on_its_own_text(tmp_path):
+    """The span round-trips: text[char_start:char_end] is the chunk, whitespace aside."""
+    import re
+
+    from library_agent.ingest.chunk import chunk_document
+    from library_agent.ingest.extract import extract
+    from library_agent.ingest.structure import build_sections
+
+    ex = extract(_spaced_markdown(tmp_path))
+    chunks = chunk_document(ex, build_sections(ex), "Doc")
+    assert len(chunks) > 5
+    ws = re.compile(r"\s+")
+    for c in chunks:
+        assert c.span_exact
+        assert ws.sub("", ex.text[c.char_start : c.char_end]) == ws.sub("", c.text)
+    starts = [c.char_start for c in chunks]
+    assert starts == sorted(starts)
+
+
+def test_old_find_misplaced_chunks_on_the_same_text(tmp_path):
+    """The defect the aligner replaced, measured on the same input: searching for the first
+    120 characters misses whenever packing changed the spacing inside them."""
+    import re
+
+    from library_agent.ingest.chunk import chunk_document
+    from library_agent.ingest.extract import extract
+    from library_agent.ingest.structure import build_sections
+
+    ex = extract(_spaced_markdown(tmp_path))
+    chunks = chunk_document(ex, build_sections(ex), "Doc")
+    misses = sum(ex.text.find(c.text[:120]) == -1 for c in chunks)
+    assert misses > 0  # the input really does defeat a literal search
+    ws = re.compile(r"\s+")
+    assert all(ws.sub("", ex.text[c.char_start : c.char_end]) == ws.sub("", c.text) for c in chunks)
+
+
+def test_a_reading_and_its_first_passage_are_two_sources():
+    """Astra's defect: keyed by chunk id, a reading (cited through its section's first
+    chunk) and that chunk cited as a passage shared one number, and the first mapping won."""
+    from library_agent.chat.compose import Composition, _numbered
+
+    doc, first = uuid.uuid4(), uuid.uuid4()
+    art, other = uuid.uuid4(), uuid.uuid4()
+    passage = _hit(doc, "the passage", chunk=first)
+    reading = _hit(doc, "the reading", kind="reading", chunk=first)
+    reading.artifact_id, reading.page_end, reading.span_chunk_ids = art, 9, [first, other]
+    comp, by_key = Composition(), {}
+    a = _numbered(passage, by_key, comp, {}, {})
+    b = _numbered(reading, by_key, comp, {}, {})
+    again = _numbered(reading, by_key, comp, {}, {})
+    assert (a.n, b.n, again.n) == (1, 2, 2)
+    assert b.kind == "reading" and b.artifact_id == str(art)
+    assert b.span_chunk_ids == [str(first), str(other)]
+    assert b.pages() == ", pp.1–9" and a.pages() == ", p.1"
+
+
+def test_build_sources_carries_a_readings_span():
+    from library_agent.chat.citations import build_sources
+
+    doc, c1, art = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    r = _hit(doc, kind="reading", chunk=c1)
+    r.artifact_id, r.page_end, r.span_chunk_ids = art, 4, [c1]
+    p = _hit(doc, chunk=c1)
+    srcs = build_sources([p, r])
+    assert srcs[0].key() != srcs[1].key()
+    assert srcs[1].artifact_id == str(art) and srcs[1].page_end == 4
+    assert srcs[0].artifact_id is None

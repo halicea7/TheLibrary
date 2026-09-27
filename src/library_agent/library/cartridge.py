@@ -483,7 +483,9 @@ async def gather(db: AsyncSession, document_ids: list[uuid.UUID], level: str) ->
     if cat_ids:
         cats = (await db.execute(select(Category).where(Category.id.in_(cat_ids)))).scalars()
         b.categories = [_row(c, ("id", "name", "description")) for c in cats]
-    b.document_categories = [_row(x, ("document_id", "category_id", "confidence")) for x in dcs]
+    b.document_categories = [
+        _row(x, ("document_id", "category_id", "confidence", "origin")) for x in dcs
+    ]
 
     # Citations within the slice; edges out of it keep the raw reference and lose the match.
     cits = (
@@ -1097,13 +1099,26 @@ async def import_cartridge(
             if cat:
                 cat_map[c["id"]] = cat.id
         for x in doc_cats:
+            # The exporter's shelves are not this library's: its shelf tags stay behind, and
+            # the volume is placed here among our own. Its reader's subjects come across.
+            if x.get("origin") == "shelf":
+                continue
             did, catid = doc_map.get(x["document_id"]), cat_map.get(x["category_id"])
             if did and catid and did in introduced:
                 await db.merge(
                     DocumentCategory(
-                        document_id=did, category_id=catid, confidence=x.get("confidence", 1.0)
+                        document_id=did,
+                        category_id=catid,
+                        confidence=x.get("confidence", 1.0),
+                        # A cartridge made before origins were kept says nothing; those
+                        # are sorted against the volume's own summary below.
+                        origin=x.get("origin"),
                     )
                 )
+        await db.flush()
+        from library_agent.library.shelving import classify_tags
+
+        await classify_tags(db, repair=True)
         for x in chunk_cats:
             chid, catid = chunk_map.get(x["chunk_id"]), cat_map.get(x["category_id"])
             if chid and catid and doc_map.get(doc_of_chunk.get(x["chunk_id"], "")) in introduced:

@@ -187,6 +187,7 @@ async def ingest(
                 page_start=k.page_start,
                 char_start=k.char_start,
                 char_end=k.char_end,
+                span_exact=k.span_exact,
             )
         )
         db.add(Embedding(owner_kind=OwnerKind.CHUNK, owner_id=cid, model=model, vec=vec))

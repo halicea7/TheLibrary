@@ -6,7 +6,7 @@ import uuid
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -14,7 +14,7 @@ from library_agent.config import settings
 from library_agent.db.session import SessionDep
 from library_agent.library.citations import hubs
 from library_agent.library.contradictions import list_contradictions
-from library_agent.library.shelving import expand_category_ids
+from library_agent.retrieval.threads import scope_documents, scope_thread, scoped_claims
 
 router = APIRouter(prefix="/api/library", tags=["library"])
 
@@ -28,6 +28,10 @@ class ClusterOut(BaseModel):
     has_contradiction: bool
     documents: list[str]
     document_ids: list[str] = []
+    # Inside a scope: how many of its volumes are in it, and what those volumes claim. The
+    # summary is the whole library's; these are what the scope holds.
+    scoped: dict | None = None
+    claims: list[dict] = []
 
 
 class GraphEdge(BaseModel):
@@ -36,31 +40,15 @@ class GraphEdge(BaseModel):
     confidence: float
 
 
-async def _scope(
+async def _scope_docs(
     db: SessionDep, categories: str | None, cartridges: str | None
-) -> tuple[str, dict]:
-    """A SQL fragment keeping clusters with a member volume in the chosen shelves or
-    cartridges -- the same scope the chips give Ask and Find."""
-    clauses, params = [], {}
-    if categories:
-        ids = await expand_category_ids(
-            db, [uuid.UUID(x) for x in categories.split(",") if x.strip()]
-        )
-        clauses.append(
-            "exists (select 1 from cluster_member sm join document sd on sd.id = sm.document_id"
-            " where sm.cluster_id = c.id and (sd.shelf_id = any(:cats) or exists (select 1"
-            " from document_category dc where dc.document_id = sd.id"
-            " and dc.category_id = any(:cats))))"
-        )
-        params["cats"] = ids
-    if cartridges:
-        clauses.append(
-            "exists (select 1 from cluster_member sm join cartridge_document cd"
-            " on cd.document_id = sm.document_id where sm.cluster_id = c.id"
-            " and cd.cartridge_id = any(:carts))"
-        )
-        params["carts"] = [uuid.UUID(x) for x in cartridges.split(",") if x.strip()]
-    return (" and " + " and ".join(clauses)) if clauses else "", params
+) -> set[uuid.UUID] | None:
+    """The volumes the chips and the rack admit, by the rule Write uses too."""
+    return await scope_documents(
+        db,
+        [uuid.UUID(x) for x in categories.split(",") if x.strip()] if categories else None,
+        [uuid.UUID(x) for x in cartridges.split(",") if x.strip()] if cartridges else None,
+    )
 
 
 @router.get("/clusters", response_model=list[ClusterOut])
@@ -70,12 +58,13 @@ async def clusters(
     categories: str | None = None,
     cartridges: str | None = None,
 ) -> list[ClusterOut]:
-    scope, params = await _scope(db, categories, cartridges)
+    docs = await _scope_docs(db, categories, cartridges)
     rows = (
         await db.execute(
-            text(f"""
+            text("""
             select c.id, c.label, a.text as summary, c.size, c.document_count,
-                   c.has_contradiction,
+                   c.has_contradiction, a.data->'claims' as listed,
+                   a.data->'claim_sources' as listed_sources,
                    array_agg(distinct d.title) as docs,
                    array_agg(distinct d.id) as doc_ids
             from cluster c
@@ -83,13 +72,52 @@ async def clusters(
             join cluster_member m on m.cluster_id = c.id
             join document d on d.id = m.document_id
             where (not :cross_only or c.document_count > 1)
-              and a.text is not null {scope}
-            group by c.id, c.label, a.text, c.size, c.document_count, c.has_contradiction
+              and a.text is not null
+            group by c.id, c.label, a.text, a.data, c.size, c.document_count,
+                     c.has_contradiction
             order by c.document_count desc, c.size desc
             """),
-            {"cross_only": cross_document_only, **params},
+            {"cross_only": cross_document_only},
         )
     ).all()
+    if docs is not None:
+        # Rebuilt from inside the scope: its in-scope claims and volumes, or dropped when
+        # fewer than two of its volumes are in scope.
+        claims = await scoped_claims(db, [r.id for r in rows if set(r.doc_ids) & docs], docs)
+        out = []
+        for r in rows:
+            if not set(r.doc_ids) & docs:
+                continue
+            t = scope_thread(
+                {
+                    "documents": list(r.docs),
+                    "_doc_ids": list(r.doc_ids),
+                    "_listed": list(r.listed or []),
+                    "_listed_sources": list(r.listed_sources or []),
+                    "document_count": r.document_count,
+                    "contradiction": None,
+                },
+                claims.get(r.id),
+                docs,
+            )
+            if not t:
+                continue
+            in_ids = [str(x) for x in r.doc_ids if x in docs]
+            out.append(
+                ClusterOut(
+                    id=r.id,
+                    label=r.label,
+                    summary=r.summary,
+                    size=r.size,
+                    document_count=r.document_count,
+                    has_contradiction=r.has_contradiction,
+                    documents=t["documents"],
+                    document_ids=in_ids,
+                    scoped=t["scoped"],
+                    claims=t["claims"],
+                )
+            )
+        return out
     return [
         ClusterOut(
             id=r.id,
@@ -110,15 +138,19 @@ async def contradictions(
     db: SessionDep, categories: str | None = None, cartridges: str | None = None
 ) -> list[dict]:
     out = await list_contradictions(db)
-    if categories or cartridges:
-        scope, params = await _scope(db, categories, cartridges)
-        keep = {
-            str(x)
-            for x in (
-                await db.execute(text(f"select c.id from cluster c where true {scope}"), params)
+    docs = await _scope_docs(db, categories, cartridges)
+    if docs is not None:
+        # A disagreement is in scope when both of its sides are.
+        titles = set(
+            (
+                await db.execute(
+                    text("select title from document where id = any(:d)"), {"d": list(docs)}
+                )
             ).scalars()
-        }
-        out = [x for x in out if x["cluster_id"] in keep]
+        )
+        out = [
+            x for x in out if x.get("pair") and all(side["source"] in titles for side in x["pair"])
+        ]
     return out
 
 
@@ -253,3 +285,97 @@ async def rebuild(kinds: str = "all") -> dict[str, str]:
     finally:
         await redis.aclose()
     return {"queued": kinds}
+
+
+def same_source(title: str, source: str) -> bool:
+    """A disagreement names its sides as the judge saw them -- "Title — what it is about",
+    the title sometimes cut short -- so match on the title part, allowing a clipped one."""
+    name = source.split(" — ")[0].strip().lower()
+    t = (title or "").strip().lower()
+    if not name or not t:
+        return False
+    return t == name or (len(name) >= 12 and (t.startswith(name) or name.startswith(t)))
+
+
+@router.get("/evidence")
+async def evidence(db: SessionDep, cluster: uuid.UUID, source: str, claim: str) -> dict:
+    """The passage behind one claim of a thread, opened from what the library stored rather
+    than searched for again: the claim's own record in the thread, the section it was drawn
+    from, and within that section the passage nearest the claim's kept vector. `exact` is
+    false when the claim was matched loosely or no vector was kept for it."""
+    from library_agent.library.cluster import _hash
+
+    want = " ".join(claim.split())
+    rows = (
+        await db.execute(
+            text(
+                "select cc.artifact_id, cc.text, cc.claim_hash, a.target_id as section_id,"
+                " d.title from cluster_claim cc join document d on d.id = cc.document_id"
+                " join artifact a on a.id = cc.artifact_id where cc.cluster_id = :c"
+            ),
+            {"c": cluster},
+        )
+    ).all()
+    if not rows:  # a thread built before claims were kept: the member sections' own lists
+        rows = (
+            await db.execute(
+                text(
+                    "select a.id as artifact_id, claim.value as text, null as claim_hash,"
+                    " a.target_id as section_id, d.title"
+                    " from cluster_member m join document d on d.id = m.document_id"
+                    " join artifact a on a.id = m.artifact_id,"
+                    " lateral jsonb_array_elements_text(a.data->'claims') as claim"
+                    " where m.cluster_id = :c"
+                ),
+                {"c": cluster},
+            )
+        ).all()
+    rows = [r for r in rows if same_source(r.title, source)]
+    if not rows:
+        raise HTTPException(404, "that claim is not in this thread")
+
+    def closeness(t: str) -> float:
+        a, b = set(t.lower().split()), set(want.lower().split())
+        return 2.0 if " ".join(t.split()) == want else len(a & b) / max(1, len(a | b))
+
+    best = max(rows, key=lambda r: closeness(r.text))
+    exact = closeness(best.text) == 2.0
+    h = best.claim_hash or _hash(best.text)
+    hit = (
+        await db.execute(
+            text(
+                "select c.id, c.document_id, d.title, c.page_start, s.path"
+                " from chunk c join document d on d.id = c.document_id"
+                " left join section s on s.id = c.section_id"
+                " join embedding e on e.owner_kind = 'chunk' and e.owner_id = c.id"
+                " join claim_vector v on v.hash = :h and v.model = e.model"
+                " where c.section_id = :s and c.kind = 'text'"
+                " order by e.vec <=> v.vec limit 1"
+            ),
+            {"h": h, "s": best.section_id},
+        )
+    ).first()
+    if hit is None:  # no kept vector for the claim: the section's opening passage
+        exact = False
+        hit = (
+            await db.execute(
+                text(
+                    "select c.id, c.document_id, d.title, c.page_start, s.path"
+                    " from chunk c join document d on d.id = c.document_id"
+                    " left join section s on s.id = c.section_id"
+                    " where c.section_id = :s and c.kind = 'text' order by c.order_index limit 1"
+                ),
+                {"s": best.section_id},
+            )
+        ).first()
+    if hit is None:
+        raise HTTPException(404, "the section behind this claim has no passages")
+    return {
+        "chunk_id": str(hit.id),
+        "document_id": str(hit.document_id),
+        "document_title": hit.title,
+        "page": hit.page_start,
+        "section": hit.path,
+        "claim": best.text,
+        "exact": exact,
+    }

@@ -12,7 +12,7 @@ import uuid
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from library_agent.db.models import Category, ChunkCategory, DocumentCategory
+from library_agent.db.models import Category, ChunkCategory, Document, DocumentCategory
 
 
 def normalize_name(name: str) -> str:
@@ -97,9 +97,42 @@ async def get_or_create(db: AsyncSession, name: str) -> Category | None:
 async def assign_document(
     db: AsyncSession, document_id: uuid.UUID, names: list[str], *, replace: bool = True
 ) -> list[Category]:
+    """The reader's subjects for a volume. Replacing them leaves its shelf tag alone: that
+    one belongs to placement, and a re-read must not take a volume off its shelf's filter."""
+    shelf_tags = {
+        r.category_id: r
+        for r in (
+            await db.execute(
+                select(DocumentCategory).where(
+                    DocumentCategory.document_id == document_id,
+                    DocumentCategory.origin == "shelf",
+                )
+            )
+        ).scalars()
+    }
     if replace:
+        # The volume's home stays tagged even when the reader had named it: it reverts to
+        # a shelf tag rather than going with the reader's old subjects.
+        home = (
+            await db.execute(select(Document.shelf_id).where(Document.id == document_id))
+        ).scalar()
+        if home is not None and home not in shelf_tags:
+            row = (
+                await db.execute(
+                    select(DocumentCategory).where(
+                        DocumentCategory.document_id == document_id,
+                        DocumentCategory.category_id == home,
+                    )
+                )
+            ).scalar_one_or_none()
+            if row:
+                row.origin = "shelf"
+                shelf_tags[home] = row
         await db.execute(
-            delete(DocumentCategory).where(DocumentCategory.document_id == document_id)
+            delete(DocumentCategory).where(
+                DocumentCategory.document_id == document_id,
+                DocumentCategory.origin.is_distinct_from("shelf"),
+            )
         )
     out: list[Category] = []
     seen: set[uuid.UUID] = set()
@@ -107,7 +140,13 @@ async def assign_document(
         cat = await get_or_create(db, n)
         if cat and cat.id not in seen:
             seen.add(cat.id)
-            db.add(DocumentCategory(document_id=document_id, category_id=cat.id))
+            if cat.id in shelf_tags:
+                # Its home is also one of its subjects: the reader says so too.
+                shelf_tags[cat.id].origin = "reader"
+            else:
+                db.add(
+                    DocumentCategory(document_id=document_id, category_id=cat.id, origin="reader")
+                )
             out.append(cat)
     return out
 

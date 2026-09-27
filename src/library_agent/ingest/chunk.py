@@ -6,6 +6,7 @@ sentence or hard splits when a paragraph is itself oversized."""
 
 from __future__ import annotations
 
+import bisect
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -37,6 +38,9 @@ class Chunk:
     char_end: int
     page_start: int | None
     section_index: int | None
+    # True when the span was found exactly: text[char_start:char_end] holds this chunk's
+    # characters, differing at most in whitespace. False means the location is approximate.
+    span_exact: bool = True
 
 
 _PARA_SPLIT = re.compile(r"\n\s*\n")
@@ -87,6 +91,33 @@ def build_context_prefix(doc_title: str, section: Section | None, orientation: s
     return " › ".join(p for p in parts if p)
 
 
+class _Aligner:
+    """Finds a chunk in the extracted text, ignoring whitespace.
+
+    Packing only ever changes whitespace -- paragraphs are stripped, sentences rejoined
+    with one space, an overlap tail re-spaced -- so the chunk's non-whitespace characters
+    appear in the text exactly, in order. Matching on those gives the true span; matching
+    on the chunk's opening 120 characters, as before, missed whenever the spacing differed
+    and fell back to a cursor, which put one chunk in six at the wrong place or length."""
+
+    def __init__(self, text: str):
+        self.pos = [i for i, ch in enumerate(text) if not ch.isspace()]
+        self.dense = "".join(text[i] for i in self.pos)
+
+    def _dense_index(self, char_offset: int) -> int:
+        return bisect.bisect_left(self.pos, char_offset)
+
+    def find(self, piece: str, start: int, end: int) -> tuple[int, int] | None:
+        key = "".join(piece.split())
+        if not key:
+            return None
+        lo, hi = self._dense_index(start), self._dense_index(end)
+        j = self.dense.find(key, lo, hi)
+        if j == -1:
+            return None
+        return self.pos[j], self.pos[j + len(key) - 1] + 1
+
+
 def chunk_document(
     ex: Extracted, sections: list[Section], doc_title: str, orientation: str = ""
 ) -> list[Chunk]:
@@ -94,6 +125,7 @@ def chunk_document(
     target = cfg.chunk_target_tokens
     overlap_tokens = int(target * cfg.chunk_overlap_ratio)
     chunks: list[Chunk] = []
+    aligner = _Aligner(ex.text)
 
     for section in sections:
         body = ex.text[section.char_start : section.char_end]
@@ -130,9 +162,13 @@ def chunk_document(
 
         cursor = section.char_start
         for piece in packed:
-            found = ex.text.find(piece[:120], cursor, section.char_end + 200)
-            start = found if found != -1 else cursor
-            end = min(start + len(piece), len(ex.text))
+            span = aligner.find(piece, cursor, section.char_end)
+            exact = span is not None
+            if span is None:  # not expected; keep the old estimate, marked as such
+                found = ex.text.find(piece[:120], cursor, section.char_end + 200)
+                start = found if found != -1 else cursor
+                span = (start, min(start + len(piece), len(ex.text)))
+            start, end = span
             chunks.append(
                 Chunk(
                     order_index=len(chunks),
@@ -143,8 +179,10 @@ def chunk_document(
                     char_end=end,
                     page_start=ex.page_for_offset(start),
                     section_index=section.order_index,
+                    span_exact=exact,
                 )
             )
-            cursor = max(cursor, end - 200)
+            # The next chunk starts at or after this one's start (overlap allows before its end).
+            cursor = max(cursor, start + 1)
 
     return chunks

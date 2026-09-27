@@ -36,6 +36,7 @@ from library_agent.db.models import (
     ArtifactKind,
     ClaimVector,
     Cluster,
+    ClusterClaim,
     ClusterMember,
     Document,
     Embedding,
@@ -88,7 +89,7 @@ class ClusterResult:
 
 async def _load_sections(
     db: AsyncSession, client: Ollama, progress=None
-) -> tuple[list[uuid.UUID], list[uuid.UUID], list[str], np.ndarray]:
+) -> tuple[list[uuid.UUID], list[uuid.UUID], list[str], np.ndarray, list[int]]:
     """Individual claims extracted at Tier 1, each embedded on its own.
 
     Claims rather than section summaries: a claim is atomic and comparable across papers,
@@ -97,24 +98,31 @@ async def _load_sections(
     rows = (
         await db.execute(
             text("""
-            select a.id as artifact_id, claim as text, s.document_id
+            select a.id as artifact_id, claim.value as text, claim.ordinality - 1 as idx,
+                   s.document_id
             from artifact a
             join section s on s.id = a.target_id,
-            lateral jsonb_array_elements_text(a.data->'claims') as claim
+            lateral jsonb_array_elements_text(a.data->'claims') with ordinality as claim
             where a.kind = :kind and a.data ? 'claims'
             """),
             {"kind": ArtifactKind.SECTION_SUMMARY.value},
         )
     ).all()
     if not rows:
-        return [], [], [], np.zeros((0, 0))
+        return [], [], [], np.zeros((0, 0)), []
 
     texts = [r.text for r in rows]
     vecs = await _claim_vectors(db, client, texts, progress)
     # Normalise so euclidean distance is monotonic in cosine distance.
     norms = np.linalg.norm(vecs, axis=1, keepdims=True)
     vecs = vecs / np.clip(norms, 1e-9, None)
-    return [r.artifact_id for r in rows], [r.document_id for r in rows], texts, vecs
+    return (
+        [r.artifact_id for r in rows],
+        [r.document_id for r in rows],
+        texts,
+        vecs,
+        [int(r.idx) for r in rows],
+    )
 
 
 def _hash(text_: str) -> str:
@@ -168,6 +176,95 @@ async def _claim_vectors(
     return np.stack([have[h] for h in hashes])
 
 
+async def write_claims(db: AsyncSession, rows: list[tuple]) -> int:
+    """(cluster_id, artifact_id, claim_index, text, document_id) rows, replacing whatever
+    those clusters held before."""
+    clusters = list({r[0] for r in rows})
+    for i in range(0, len(clusters), 5000):
+        await db.execute(
+            delete(ClusterClaim).where(ClusterClaim.cluster_id.in_(clusters[i : i + 5000]))
+        )
+    uniq = {(r[0], r[1], r[2]): r for r in rows}
+    values = [
+        {
+            "cluster_id": cid,
+            "artifact_id": aid,
+            "claim_index": idx,
+            "claim_hash": _hash(txt),
+            "text": txt,
+            "document_id": did,
+        }
+        for (cid, aid, idx, txt, did) in uniq.values()
+    ]
+    for i in range(0, len(values), 5000):
+        await db.execute(pg_insert(ClusterClaim).values(values[i : i + 5000]))
+    return len(values)
+
+
+async def backfill_claims(db: AsyncSession) -> tuple[int, int]:
+    """Claim rows for clusters built before they were kept, without re-clustering.
+
+    A cluster's `member_key` is the hash of exactly its claims, so a candidate set can be
+    checked: first every claim of its member sections, then -- for a cluster small enough
+    that its summary kept all of them -- the claims its summary lists. A cluster neither
+    reproduces is left for the next rebuild. Returns (filled, left)."""
+    have = set((await db.execute(select(ClusterClaim.cluster_id).distinct())).scalars())
+    clusters = [
+        c
+        for c in (
+            await db.execute(select(Cluster).where(Cluster.member_key.is_not(None)))
+        ).scalars()
+        if c.id not in have
+    ]
+    if not clusters:
+        return 0, 0
+    members = (
+        await db.execute(
+            select(ClusterMember.cluster_id, ClusterMember.artifact_id, ClusterMember.document_id)
+        )
+    ).all()
+    by_cluster: dict = {}
+    for cid, aid, did in members:
+        by_cluster.setdefault(cid, []).append((aid, did))
+    claims_of = {
+        a.id: list((a.data or {}).get("claims") or [])
+        for a in (
+            await db.execute(
+                select(Artifact).where(
+                    Artifact.id.in_({aid for _, aid, _ in members}),
+                    Artifact.kind == ArtifactKind.SECTION_SUMMARY,
+                )
+            )
+        ).scalars()
+    }
+    listed = {
+        a.target_id: list((a.data or {}).get("claims") or [])
+        for a in (
+            await db.execute(select(Artifact).where(Artifact.kind == ArtifactKind.CLUSTER_SUMMARY))
+        ).scalars()
+    }
+    rows: list[tuple] = []
+    filled = 0
+    for c in clusters:
+        secs = by_cluster.get(c.id, [])
+        every = [
+            (aid, i, t, did) for aid, did in secs for i, t in enumerate(claims_of.get(aid, []))
+        ]
+        candidates = [every]
+        stated = listed.get(c.id) or []
+        if stated and len(stated) == c.size:
+            wanted = set(stated)
+            candidates.append([x for x in every if x[2] in wanted])
+        for cand in candidates:
+            key = _hash("\n".join(sorted(f"{aid}\t{t}" for aid, _, t, _ in cand)))
+            if cand and key == c.member_key:
+                rows += [(c.id, aid, i, t, did) for aid, i, t, did in cand]
+                filled += 1
+                break
+    await write_claims(db, rows)
+    return filled, len(clusters) - filled
+
+
 def _member_key(idxs: list[int], artifact_ids: list[uuid.UUID], texts: list[str]) -> str:
     """Which claims, from which sections: the same set again is the same cluster."""
     return _hash("\n".join(sorted(f"{artifact_ids[i]}\t{texts[i]}" for i in idxs)))
@@ -203,7 +300,7 @@ async def build_clusters(
     own = client is None
     c = client or LLM()
     try:
-        artifact_ids, doc_ids, texts, vectors = await _load_sections(db, c, progress)
+        artifact_ids, doc_ids, texts, vectors, claim_idx = await _load_sections(db, c, progress)
         if len(artifact_ids) < 6:
             raise ValueError(f"only {len(artifact_ids)} section summaries; run Tier 1 first")
 
@@ -242,6 +339,7 @@ async def build_clusters(
         }
         kept: set[uuid.UUID] = set()
         fresh: list[tuple[str, list[int]]] = []
+        placed: list[tuple[uuid.UUID, list[int]]] = []  # every cluster and its claims
         for _lab, idxs in sorted(groups.items()):
             key = _member_key(idxs, artifact_ids, texts)
             prev = on_file.get(key)
@@ -257,6 +355,7 @@ async def build_clusters(
             )
             if current:
                 kept.add(prev.id)
+                placed.append((prev.id, idxs))
             else:
                 fresh.append((key, idxs))
         dead = select(Cluster.id).where(Cluster.id.not_in(kept)) if kept else select(Cluster.id)
@@ -290,6 +389,7 @@ async def build_clusters(
             )
             db.add(cluster)
             await db.flush()
+            placed.append((cluster.id, idxs))
             seen_artifacts: set[uuid.UUID] = set()
             for i in idxs:
                 # (cluster_id, artifact_id) is the PK, and one section can contribute
@@ -373,6 +473,16 @@ async def build_clusters(
                 to_embed.append((art.id, f"{cluster.label}\n\n{art.text}"))
             if progress:
                 await progress(n + 1, len(fresh), phase)
+
+        # Membership claim by claim, for kept clusters as well as new ones.
+        await write_claims(
+            db,
+            [
+                (cid, artifact_ids[i], claim_idx[i], texts[i], doc_ids[i])
+                for cid, idxs in placed
+                for i in idxs
+            ],
+        )
 
         if to_embed:
             vecs = await embed_texts([t for _, t in to_embed], c)

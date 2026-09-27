@@ -613,7 +613,12 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 .theme.small > summary::before { content:'▸'; font:10px/1 var(--mono); color:var(--faint); }
 .theme.small[open] > summary::before { content:'▾'; }
 .theme.small > summary .theme-n { margin-left:auto; }
-.theme.small .theme-s { margin:8px 0 8px 24px; } .theme.small .spans { margin:0 0 12px 24px; }
+.theme.small .theme-s { margin:8px 0 8px 24px; }
+.scoped-note { font:11px/1.5 var(--mono); color:var(--faint); margin:6px 0 2px; }
+.theme.small .scoped-note, .theme.small .scoped-claims { margin-left:24px; }
+.scoped-claims { margin:4px 0 6px; padding-left:18px; font:13px/1.55 var(--serif); max-width:74ch; }
+.scoped-claims b { font:500 10.5px/1 var(--mono); color:var(--dim); margin-right:4px; }
+.theme-s.library-wide { font-size:12px; color:var(--faint); } .theme.small .spans { margin:0 0 12px 24px; }
 .conflict { padding:14px 0 16px; border-bottom:1px solid var(--rule-soft); }
 .conflict-h { display:flex; align-items:baseline; gap:9px; }
 .pair { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:9px 0 8px; max-width:88ch; }
@@ -2192,7 +2197,7 @@ function renderAnswer(el, text) {
       // The library's own summary of a section, not a page of its text.
       const rd = s.kind === 'reading' ? `<span class="rd" title="The library's reading of this section, not a quotation">reading</span>` : '';
       return `<span class="note ${c ? 'from' : ''}${s.held ? ' held' : ''}" data-n="${n}" ${c ? `style="--c:${esc(c.colour)}"` : ''}>${who}${rd}<b>${esc(short)}</b>${
-        s.page ? `<span class="pg">p.${s.page}</span>` : ''}${where ? ` · ${esc(where.slice(0,40))}` : ''}</span>`;
+        s.page ? `<span class="pg">${s.page_end > s.page ? `pp.${s.page}–${s.page_end}` : `p.${s.page}`}</span>` : ''}${where ? ` · ${esc(where.slice(0,40))}` : ''}</span>`;
     }).join('');
     return `${html}<div class="apparatus">${notes}</div>`;
   }).join('');
@@ -2373,7 +2378,7 @@ async function openChat(id) {
     if (st) { wrap.dataset.stance = st; wrap.insertAdjacentHTML('afterbegin', `<div class="stanced">${esc(stanceMeta.find(s => s.id === st)?.label || st)}</div>`); }
     const said = document.createElement('div'); said.className = 'said';
     wrap.appendChild(said);
-    sources = (m.sources?.cited || []).map(c => ({ n: c.n, title: c.title, page: c.page, document_id: c.document_id, section: c.section || '', kind: c.kind }));
+    sources = (m.sources?.cited || []).map(c => ({ n: c.n, title: c.title, page: c.page, page_end: c.page_end, document_id: c.document_id, section: c.section || '', kind: c.kind }));
     renderAnswer(said, m.content);
     renderFlags(wrap, m.sources?.flags);
     asked = null;
@@ -2462,14 +2467,21 @@ function renderTray() {
     `<button type="button" class="linkish clear" onclick="clearHeld()">let them all go</button>`;
   if (view === 'ask') $('#entry').placeholder = inHandPlaceholder();
 }
-// Hold a disagreement: the passage each claim came from, found inside its own volume.
-async function holdConflict(pair, docIds, btn) {
+// Hold a disagreement: the passage each claim came from, opened from what the library
+// stored -- the claim's own section, and the passage in it nearest the claim -- not
+// searched for again across the thread's volumes.
+async function holdConflict(clusterId, pair, btn) {
   btn.disabled = true; btn.textContent = 'finding…';
   try {
+    let found = 0;
     for (const p of pair) {
-      const r = await (await fetch(`/api/search?q=${encodeURIComponent(p.claim)}&limit=1${docIds.length ? '&documents=' + docIds.join(',') : ''}`)).json();
-      const h = r.hits[0]; if (h) held.set(h.chunk_id, { title: h.document_title, page: h.page, document_id: h.document_id });
+      const r = await fetch(`/api/library/evidence?cluster=${encodeURIComponent(clusterId)}&source=${encodeURIComponent(p.source || '')}&claim=${encodeURIComponent(p.claim)}`);
+      if (!r.ok) continue;
+      const h = await r.json();
+      held.set(h.chunk_id, { title: h.document_title, page: h.page, document_id: h.document_id });
+      found++;
     }
+    if (!found) throw new Error('none');
     renderTray();
     btn.setAttribute('aria-pressed', 'true'); btn.textContent = 'held';
     say('Both sides of the disagreement are in hand. Ask which is right for you.');
@@ -2530,7 +2542,7 @@ function renderThreads() {
   const f = threadsFilter.trim().toLowerCase();
   const fwords = terms(f);
   const matches = txt => !f || (txt || '').toLowerCase().includes(f);
-  const shownThemes = themes.filter(t => matches([t.label, t.summary, ...(t.documents || [])].join(' ')));
+  const shownThemes = themes.filter(t => matches([t.label, t.summary, ...(t.documents || []), ...(t.claims || []).map(c => c.claim)].join(' ')));
   const shownConf = conflicts.filter(c => matches([c.label, c.explanation, ...(c.sources || [])].join(' ')));
   const where = roomName() ? `in ${roomName()}'s shelf` : subjects.size ? 'in what is chosen' : 'across the shelf';
   const ids = new Set(shownThemes.flatMap(t => t.document_ids || []));
@@ -2551,7 +2563,7 @@ function renderThreads() {
         const a = terms(c.pair[0].claim), b = new Set(terms(c.pair[1].claim));
         const shared = a.filter(w => b.has(w));
         body = `<div class="pair">${c.pair.map(p => `<blockquote><cite>${esc(p.source || 'one source')}</cite>${hl(esc(p.claim), [...shared, ...fwords])}</blockquote>`).join('')}</div>
-          <button type="button" class="hold" onclick='event.stopPropagation(); holdConflict(${JSON.stringify(c.pair).replace(/'/g, "&#39;")}, ${dids}, this)' title="Hold both claims' passages: then ask which is right for you">hold both</button>
+          <button type="button" class="hold" onclick='event.stopPropagation(); holdConflict('${esc(c.cluster_id)}', ${JSON.stringify(c.pair).replace(/'/g, "&#39;")}, this)' title="Hold both claims' passages: then ask which is right for you">hold both</button>
           <p class="why">${hl(esc(c.explanation), fwords)}</p>`;
       } else {
         body = `<p class="why">${hl(esc(c.explanation), fwords)}</p>`;
@@ -2567,20 +2579,28 @@ function renderThreads() {
     }
   }
 
-  const big = shownThemes.filter(t => t.document_count >= 4);
-  const rest = shownThemes.filter(t => t.document_count < 4);
+  // Inside a scope a thread is what its in-scope volumes claim; the summary is the whole
+  // library's and may speak for volumes outside the scope, so it is marked as such.
+  const nVols = t => t.scoped ? t.scoped.documents : t.document_count;
+  const body = t => t.scoped
+    ? `<div class="scoped-note">${t.scoped.documents} of its ${t.scoped.of_documents} volumes are in scope. What they claim:</div>
+       <ul class="scoped-claims">${(t.claims || []).map(c => `<li><b>${esc(shortTitle(c.source))}</b> ${hl(esc(c.claim), fwords)}</li>`).join('')}</ul>
+       <div class="theme-s library-wide" title="Written across every volume in the thread, including those outside the scope">Across the whole library: ${hl(esc(t.summary || ''), fwords)}</div>`
+    : `<div class="theme-s">${hl(esc(t.summary || ''), fwords)}</div>`;
+  const big = shownThemes.filter(t => nVols(t) >= 4);
+  const rest = shownThemes.filter(t => nVols(t) < 4);
   const card = t => `<div class="theme big" onmouseenter='threadLight(${docIds(t)})' onclick='this.classList.toggle("open"); threadDive(${docIds(t)})'>
       <div class="theme-h">
         <span class="theme-t">${hl(esc(t.label || 'unnamed'), fwords)}</span>
-        <span class="theme-n">${t.document_count} volumes · ${t.size} claims</span>
+        <span class="theme-n">${t.scoped ? `${t.scoped.documents} of ${t.scoped.of_documents}` : t.document_count} volumes · ${t.size} claims</span>
         ${t.has_contradiction ? '<span class="flag">conflict</span>' : ''}
       </div>
-      <div class="theme-s">${hl(esc(t.summary || ''), fwords)}</div>
+      ${body(t)}
       <div class="spans">${t.documents.map(d => `<span class="span">${esc(d.slice(0, 40))}</span>`).join('')}</div>
     </div>`;
   const line = t => `<details class="theme small" onmouseenter='threadLight(${docIds(t)})'>
-      <summary><span class="theme-t">${hl(esc(t.label || 'unnamed'), fwords)}</span>${t.has_contradiction ? '<span class="flag">conflict</span>' : ''}<span class="theme-n">${t.document_count} volume${t.document_count === 1 ? '' : 's'}</span></summary>
-      <div class="theme-s">${hl(esc(t.summary || ''), fwords)}</div>
+      <summary><span class="theme-t">${hl(esc(t.label || 'unnamed'), fwords)}</span>${t.has_contradiction ? '<span class="flag">conflict</span>' : ''}<span class="theme-n">${t.scoped ? `${t.scoped.documents} of ${t.scoped.of_documents}` : t.document_count} volume${nVols(t) === 1 ? '' : 's'}</span></summary>
+      ${body(t)}
       <div class="spans" onclick='threadDive(${docIds(t)})'>${t.documents.map(d => `<span class="span">${esc(d.slice(0, 40))}</span>`).join('')}</div>
     </details>`;
 

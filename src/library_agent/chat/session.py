@@ -238,6 +238,10 @@ async def run_turn(
                 merged: list[SearchHit] = []
                 # A volume the question names is its subject, not one voice among many.
                 named = await named_documents(db, question) if needs_retrieval else []
+                # Volumes the person held are the whole shelf for this question, and each
+                # is a subject in its own right, so none is held to the per-volume cap.
+                if document_ids:
+                    named = list(document_ids)
                 for q in queries if needs_retrieval else []:
                     for h in await retrieve(
                         db,
@@ -249,6 +253,7 @@ async def run_turn(
                         else max(3, lvl.passages // len(queries) + 2),
                         category_ids=category_ids,
                         cartridge_ids=cartridge_ids,
+                        document_ids=document_ids,
                         favour=named,
                     ):
                         if h.chunk_id not in seen:
@@ -280,7 +285,13 @@ async def run_turn(
                 # against passages or counted against the passage budget.
                 state.hits = live_hits + held_hits + merged[:room] + readings[: lvl.readings]
                 if document_ids:
-                    state.hits = [h for h in state.hits if h.document_id in set(document_ids)]
+                    # Held passages and live results stand even from outside the scope.
+                    docs_in, pinned_in = set(document_ids), {h.chunk_id for h in held_hits}
+                    state.hits = [
+                        h
+                        for h in state.hits
+                        if h.kind == "live" or h.document_id in docs_in or h.chunk_id in pinned_in
+                    ]
                 state.sources = build_sources(state.hits, {h.chunk_id for h in held_hits})
                 docs = {
                     d.id: d

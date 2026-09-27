@@ -580,6 +580,12 @@ select, .toggle {
 .tray .chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tray .chip b { color:var(--amber); font-weight:500; cursor:pointer; }
 .tray .clear { margin-left:auto; }
+/* A held volume: the whole book, so a filled edge rather than an outline. */
+.tray .vol-chip { border-left-width:3px; }
+.vol { position:relative; }
+.vol .vol-t { padding-right:46px; }
+.vol-hold { position:absolute; top:2px; right:0; margin:0; opacity:0; transition:opacity .12s; }
+.vol:hover .vol-hold, .vol:focus-within .vol-hold, .vol-hold[aria-pressed=true] { opacity:1; }
 .note.held b::after { content:' held'; font:9px/1 var(--mono); color:var(--amber); letter-spacing:.06em; font-weight:400; }
 .note.held { border-left-color:var(--amber); }
 
@@ -1478,7 +1484,7 @@ function roomName() {
 }
 function placeholderFor(v) {
   const room = roomName();
-  if (v === 'ask' && held.size) return 'Ask about the passages in hand';
+  if (v === 'ask' && (held.size || heldDocs.size)) return inHandPlaceholder();
   if (v === 'ask') return room ? `Ask ${room}'s shelf` : 'Ask the library something';
   return room ? `Search ${room}'s shelf` : 'Search for a passage';
 }
@@ -1522,6 +1528,8 @@ function volHtml(d, words = []) {
         ${d.tier === 1 ? `<button class="linkish" onclick="readDoc('${d.id}', 2)">annotate it</button>` : ''}
         <button class="linkish danger" onclick="removeDoc('${d.id}', this)">remove</button>
       </div>
+      <button class="hold vol-hold" aria-pressed="${heldDocs.has(d.id)}" data-id="${d.id}" data-title="${esc(d.title)}"
+              onclick="holdDocFrom(this)" title="Hold this volume: the next answer draws only from the volumes in hand">${heldDocs.has(d.id) ? 'held' : 'hold'}</button>
     </div>`;
 }
 
@@ -2220,7 +2228,8 @@ async function ask(text) {
   const body = { message:text, conversational:$('#multi').checked, model:$('#model').value,
                  conversation_id:convId, category_ids:subjects.size ? [...subjects] : null,
                  cartridge_ids:cartridges.size ? [...cartridges] : null, stance, effort: $('#effort').value,
-                 pinned_chunk_ids: held.size ? [...held.keys()] : null };
+                 pinned_chunk_ids: held.size ? [...held.keys()] : null,
+                 document_ids: heldDocs.size ? [...heldDocs.keys()] : null };
   let answer = '', ev = null, buf = '', thought = '';
   try {
     const res = await fetch('/api/chat', {
@@ -2403,15 +2412,40 @@ function holdChunk(id, meta, btn) {
   renderTray();
 }
 function holdFrom(btn) { const d = btn.dataset; holdChunk(d.id, { title: d.title, page: d.page ? +d.page : null, document_id: d.doc }, btn); }
-function clearHeld() { held.clear(); document.querySelectorAll('.hold[aria-pressed=true]').forEach(b => b.setAttribute('aria-pressed', 'false')); renderTray(); }
+// Whole volumes can be held too, from the shelf: the next answer draws only from them
+// (held passages from elsewhere still lead).
+const heldDocs = new Map();  // document_id -> { title }
+function holdDoc(id, title) {
+  if (heldDocs.has(id)) heldDocs.delete(id); else heldDocs.set(id, { title });
+  document.querySelectorAll(`.vol-hold[data-id="${id}"]`).forEach(b => {
+    b.setAttribute('aria-pressed', String(heldDocs.has(id))); b.textContent = heldDocs.has(id) ? 'held' : 'hold';
+  });
+  renderTray();
+}
+function holdDocFrom(btn) { holdDoc(btn.dataset.id, btn.dataset.title); }
+function clearHeld() {
+  held.clear(); heldDocs.clear();
+  document.querySelectorAll('.hold[aria-pressed=true]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  document.querySelectorAll('.vol-hold').forEach(b => b.textContent = 'hold');
+  renderTray();
+}
+function inHandPlaceholder() {
+  if (heldDocs.size === 1 && !held.size) return `Ask ${shortTitle([...heldDocs.values()][0].title)}`;
+  return heldDocs.size ? 'Ask the volumes in hand' : 'Ask about the passages in hand';
+}
 function renderTray() {
   const el = $('#tray'); if (!el) return;
-  el.hidden = !held.size;
-  if (!held.size) { $('#entry').placeholder = placeholderFor(view); return; }
-  el.innerHTML = `<span>${held.size} passage${held.size === 1 ? '' : 's'} in hand — the answer starts from these</span>` +
+  const n = held.size + heldDocs.size;
+  el.hidden = !n;
+  if (!n) { $('#entry').placeholder = placeholderFor(view); return; }
+  const plural = (k, w) => `${k} ${w}${k === 1 ? '' : 's'}`;
+  const what = [heldDocs.size ? plural(heldDocs.size, 'volume') : '', held.size ? plural(held.size, 'passage') : ''].filter(Boolean).join(' and ');
+  const says = heldDocs.size ? (held.size ? 'the answer starts from these and reads only these' : 'the answer reads only these') : 'the answer starts from these';
+  el.innerHTML = `<span>${what} in hand — ${says}</span>` +
+    [...heldDocs].map(([id, m]) => `<span class="chip vol-chip" title="${esc(m.title)} (whole volume)"><span>${esc(shortTitle(m.title))}</span><b onclick="holdDoc('${id}')" title="Let go">×</b></span>`).join('') +
     [...held].map(([id, m]) => `<span class="chip" title="${esc(m.title)}${m.page ? ', p.' + m.page : ''}"><span>${esc(shortTitle(m.title))}${m.page ? ` p.${m.page}` : ''}</span><b onclick="holdChunk('${id}')" title="Let go">×</b></span>`).join('') +
     `<button type="button" class="linkish clear" onclick="clearHeld()">let them all go</button>`;
-  if (view === 'ask') $('#entry').placeholder = 'Ask about the passages in hand';
+  if (view === 'ask') $('#entry').placeholder = inHandPlaceholder();
 }
 // Hold a disagreement: the passage each claim came from, found inside its own volume.
 async function holdConflict(pair, docIds, btn) {

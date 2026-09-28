@@ -86,7 +86,7 @@ It opens at `http://localhost:8077`. `./library stop`, `restart` and `status` do
 
 To check everything works end to end: `uv run python scripts/verify.py` exercises every surface against the running instance and reports pass/fail per check.
 
-Nothing leaves your machine: no cloud, no API keys, no telemetry. Other models and live connectors are opt-in under **Settings** (see [Models](#models) and [Modules](#modules)).
+Nothing leaves your machine: no cloud, no API keys, no telemetry. Other models are opt-in under **Settings** ([Models](#models)); live connectors in the **bay** under the rack ([Modules](#modules)).
 
 ---
 
@@ -218,7 +218,7 @@ The Settings tab opens with **About you** — a note on who the library is for, 
 
 - **Services** — Postgres, Redis, Ollama, whether the model is actually answering, the reranker.
 - **Providers** and **Models** — other model endpoints, and which model plays each role (see [Models](#models)).
-- **Modules** and **Classification** — see [Modules](#modules) and [Classification](#classification).
+- **Classification** — the scale and its ceilings; see [Classification](#classification). Modules are set up in the bay, not here.
 - **Configuration** — retrieval and library settings, each with the environment variable that changes it.
 - **Maintenance** — collect garbage, rebuild threads, reshelve, show the tour, judge the library.
 

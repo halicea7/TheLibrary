@@ -183,6 +183,12 @@ LADDER = [
 CHAT_RETRIEVAL = RetrievalConfig(name="chat", use_reranker=True, rerank_depth=20)
 # What the raw search box should use: keyword queries are hurt by the cross-encoder.
 KEYWORD_RETRIEVAL = RetrievalConfig(name="keyword", use_reranker=False)
+# What Find uses. Measured on 38 questions from real use, model-judged (2026-09-28):
+# reranking the top 20 with at most 3 passages per volume put the right passage first 74%
+# of the time (MRR .83, 95% in the top 5) against 58% (.72) unreranked; reranking 40 was
+# slower and no better. The earlier "the cross-encoder hurts keyword queries" came from
+# generated questions, and exact names are now looked up literally first anyway.
+FIND_RETRIEVAL = RetrievalConfig(name="find", use_reranker=True, rerank_depth=20, per_document=3)
 
 
 async def hits_for_chunks(db, chunk_ids: list) -> list:

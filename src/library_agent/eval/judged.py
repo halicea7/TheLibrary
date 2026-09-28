@@ -35,7 +35,7 @@ from library_agent.config import settings
 from library_agent.db.models import Chunk, Document
 from library_agent.db.session import session_scope
 from library_agent.retrieval.literal import exact_first, literal_hits, literal_terms
-from library_agent.retrieval.pipeline import LADDER, RetrievalConfig, retrieve
+from library_agent.retrieval.pipeline import FIND_RETRIEVAL, LADDER, RetrievalConfig, retrieve
 
 log = logging.getLogger(__name__)
 
@@ -223,9 +223,7 @@ def score(ranked: list[str], supporting: set[str], distractors: set[str]) -> dic
 async def _run_setup(db, client, case: Case, name: str, cfg: RetrievalConfig) -> list[str]:
     if name == "find":  # what the Find tab does: ranked, then exact names first
         terms = literal_terms(case.question)
-        hits = await retrieve(
-            db, case.question, client=client, limit=20, config=RetrievalConfig(name="api")
-        )
+        hits = await retrieve(db, case.question, client=client, limit=20, config=FIND_RETRIEVAL)
         if terms:
             lit = await literal_hits(db, terms, limit=10)
             hits, _ = exact_first(hits, lit, terms, 10)

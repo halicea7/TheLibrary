@@ -13,7 +13,7 @@ from library_agent.db.session import SessionDep
 from library_agent.library.shelving import expand_category_ids
 from library_agent.retrieval.lift import holding_sentence, lift, lift_kind
 from library_agent.retrieval.literal import exact_first, literal_hits, literal_terms
-from library_agent.retrieval.pipeline import RetrievalConfig, retrieve
+from library_agent.retrieval.pipeline import FIND_RETRIEVAL, RetrievalConfig, retrieve
 
 router = APIRouter(prefix="/api", tags=["search"])
 
@@ -23,7 +23,7 @@ async def search(
     q: Annotated[str, Query(min_length=2)],
     db: SessionDep,
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
-    rerank: Annotated[bool, Query()] = False,
+    rerank: Annotated[bool, Query()] = True,
     router: Annotated[bool, Query()] = False,
     categories: Annotated[str | None, Query(description="comma-separated category ids")] = None,
     cartridges: Annotated[str | None, Query(description="comma-separated cartridge ids")] = None,
@@ -43,7 +43,9 @@ async def search(
         category_ids=cat_ids,
         cartridge_ids=cart_ids,
         document_ids=doc_ids,
-        config=RetrievalConfig(name="api", use_reranker=rerank, use_router=router),
+        config=FIND_RETRIEVAL
+        if rerank and not router
+        else RetrievalConfig(name="api", use_reranker=rerank, use_router=router),
     )
     exact: set = set()
     if terms:

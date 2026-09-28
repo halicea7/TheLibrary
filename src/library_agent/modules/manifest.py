@@ -648,3 +648,57 @@ def to_dict(m: Module) -> dict:
         ),
         "operations": ops,
     }
+
+
+# Headers whose values are about the protocol, not about you -- kept when a module is
+# shared. Any other header's value is yours (an organisation id, a tenant, a key) and is
+# left for the person importing it to set.
+SHAREABLE_HEADERS = {"accept", "content-type", "accept-language", "user-agent"}
+
+
+def for_sharing(m: Module) -> tuple[dict, dict]:
+    """A module as others may have it: its overall configuration -- what it asks, how it
+    reads the answers, how it signs in -- without anything of this installation: the base
+    URL or server URL, header and environment values, allowed hosts, an absolute token URL,
+    paths under this home directory. Returns (manifest, requires) where `requires` names
+    what the importer must fill in. Secrets are never in a manifest to begin with."""
+    import os
+
+    d = to_dict(m)
+    requires: dict = {}
+    if d.get("base_url"):
+        d["base_url"] = ""
+        requires["base_url"] = True
+    if d.get("allowed_hosts"):
+        requires["allowed_hosts"] = len(d["allowed_hosts"])
+        d["allowed_hosts"] = []
+    kept, needed = {}, []
+    for k, v in (d.get("headers") or {}).items():
+        if k.lower() in SHAREABLE_HEADERS:
+            kept[k] = v
+        else:
+            needed.append(k)
+    d["headers"] = kept
+    if needed:
+        requires["headers"] = needed
+    a = d.get("auth") or {}
+    if a.get("token_url", "").startswith(("http://", "https://")):
+        from urllib.parse import urlparse
+
+        a["token_url"] = urlparse(a["token_url"]).path or "/"
+        requires["token_url_host"] = True
+    t = d.get("transport")
+    if t:
+        home = os.path.expanduser("~")
+        scrub = lambda s: s.replace(home, "~") if isinstance(s, str) else s
+        t["command"] = scrub(t.get("command", ""))
+        t["args"] = [scrub(x) for x in t.get("args") or []]
+        if t.get("env"):
+            requires["env"] = sorted(t["env"])
+            t["env"] = {k: "" for k in t["env"]}
+        if t.get("url"):
+            t["url"] = ""
+            requires["server_url"] = True
+    d.pop("builtin", None)
+    d.pop("source", None)
+    return d, requires

@@ -242,12 +242,17 @@ async def try_it(body: TryIn) -> dict:
 
 @router.get("/{mid}/export")
 async def export(mid: str) -> dict:
-    """A token as a file to share: its manifest and design, never its connection."""
+    """A module as a file to share: its overall configuration and its look -- never its
+    connection, and nothing of this installation (see manifest.for_sharing). `requires`
+    names what whoever imports it must fill in."""
+    from library_agent.modules.manifest import for_sharing
+
     m = registry.get(mid)
     if not m:
         raise HTTPException(404, f"no connector {mid!r}")
+    manifest, requires = for_sharing(m)
     design = mod_store.config_for(mid).design or {}
-    return {"library_token": 1, "manifest": to_dict(m), "design": design}
+    return {"library_module": 1, "manifest": manifest, "design": design, "requires": requires}
 
 
 class ImportIn(BaseModel):
@@ -263,6 +268,8 @@ async def import_token(body: ImportIn) -> dict:
     manifest = f.get("manifest") if isinstance(f.get("manifest"), dict) else f
     m = _check(manifest)
     summary = describe(m)
+    if isinstance(f.get("requires"), dict) and f["requires"]:
+        summary["requires"] = f["requires"]
     if registry.get(m.id):
         summary["conflict"] = f"a connector {m.id!r} already exists; change the id to import it"
     if not body.approve:

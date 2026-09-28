@@ -15,7 +15,7 @@
  * traced mask (a PNG, white raised), never the uploaded image. */
 import * as THREE from 'three';
 import { makeMask, contours } from './tokenmask.js';
-import { environment, makeRenderer, lights, refractionPlate, connectorPedestal } from './cartridge3d.js';
+import { environment, makeRenderer, lights, refractionPlate, connectorPedestal, makeCartridge } from './cartridge3d.js';
 
 export const SOCKETS = 4;
 export const DEFAULT_DESIGN = Object.freeze({
@@ -467,7 +467,7 @@ function zoomer(canvas, get, set, [near, far], wake) {
 
 /* ── the bay: the connector pedestal, its panel, four sockets ────────── */
 export function mountBay(canvas, { onSocket = () => {} } = {}) {
-  const v = viewport(canvas, { fov: 34, z: 5.2 });
+  const v = viewport(canvas, { fov: 34, z: 7.0 });
   v.renderer.setClearColor(0x000000, 0);
   const assembly = new THREE.Group(); assembly.rotation.y = -.18; v.scene.add(assembly);
   const cp = connectorPedestal(); assembly.add(cp.group);
@@ -480,7 +480,18 @@ export function mountBay(canvas, { onSocket = () => {} } = {}) {
   const ease = t => t * t * (3 - 2 * t), clamp = t => Math.max(0, Math.min(1, t));
   const d = drag(canvas, assembly, v.wake, { pitch: [-.5, .5] });
   // Distance from the cassette: the wheel brings it close enough to read the contacts.
-  let dist = 5.2;
+  let dist = 7.0;
+  // The cartridge seated on the rack sits in the pedestal's mouth here too, lit.
+  let cart = null;
+  function setCartridge(spec) {
+    if (!spec) {
+      if (cart) { assembly.remove(cart.group); cart.dispose(); cart = null; }
+      v.wake(); return;
+    }
+    if (!cart) { cart = makeCartridge(); cart.group.scale.setScalar(.5); cart.group.position.set(0, .62, 0); assembly.add(cart.group); }
+    cart.set({ design: spec.design || {}, colour: spec.colour, name: spec.name, sub: spec.sub, level: spec.level, points: spec.points || [], artUrl: spec.artUrl, lit: true });
+    v.wake();
+  }
   const unzoom = zoomer(canvas, () => dist, x => { dist = x; }, [1.6, 9], v.wake);
   const ray = new THREE.Raycaster();
   const click = e => {
@@ -527,16 +538,19 @@ export function mountBay(canvas, { onSocket = () => {} } = {}) {
       }
       if (s.token && s.token.tick(now)) busy = true;
     }
-    // Aim at the cassette; as the panel slides aside the view eases toward the sockets.
+    if (cart) { cart.twinkle(now); if (cart.booting()) busy = true; }
+    // At rest the whole object is in view, cartridge and all; as the panel slides aside
+    // the view eases down to the sockets.
     const open = Math.abs(panel.position.x) / 1.85;
-    const tx = -.12 * open, ty = -.62 + .3 * (1 - open);
+    const tx = -.12 * open, ty = .35 - .9 * open;
     v.camera.position.set(tx, ty + .55 * dist / 5.2, dist); v.camera.lookAt(tx, ty, 0);
-    return busy;
+    return busy || !!cart;
   });
   return {
     open() { if (panelState === 'closed') { panelState = 'opening'; panelAt = performance.now(); v.wake(); } },
     close() { if (panelState === 'open') { panelState = 'closing'; panelAt = performance.now(); v.wake(); } },
     isOpen: () => panelState === 'open',
+    setCartridge,
     /** What each socket holds: [{key, design, error}|null] x 4. A new key animates in;
      *  a key gone animates out; a changed design repaints in place. */
     setSockets(list, { animate = true } = {}) {
@@ -563,6 +577,7 @@ export function mountBay(canvas, { onSocket = () => {} } = {}) {
     dispose() {
       canvas.removeEventListener('pointerup', click); d.off(); unzoom();
       for (const s of slots) s.token?.dispose();
+      cart?.dispose();
       cp.dispose();
       v.dispose();
     },

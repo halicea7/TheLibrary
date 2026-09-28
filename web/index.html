@@ -997,10 +997,10 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
     <div class="rack" id="rack"></div>
     <div class="rack-note" id="rack-note"></div>
 
-    <!-- Tokens: the live API connectors, seated in the pedestal's bay. -->
-    <div class="shelf-h tokens-h" style="padding:0"><p class="label spaced" style="margin-bottom:0">Tokens</p>
-      <span class="tok-count" id="tok-count" title="Tokens seated in the bay: each is a live source consulted during your questions">Active tokens 0/4</span>
-      <button class="linkish" onclick="bayToggle()" title="Open the pedestal's bay to seat, remove or customize tokens">bay</button></div>
+    <!-- Modules: the live API connectors, seated in the pedestal's bay. -->
+    <div class="shelf-h tokens-h" style="padding:0"><p class="label spaced" style="margin-bottom:0">Modules</p>
+      <span class="tok-count" id="tok-count" title="Modules seated in the bay: each is a live source consulted during your questions">Active modules 0/4</span>
+      <button class="linkish" onclick="bayToggle()" title="Open the pedestal's bay to seat, remove or customize modules">bay</button></div>
     <div class="tok-row" id="tok-row" onclick="bayToggle()" title="Open the bay"></div>
 
     <div class="shelf-h" style="padding:0"><p class="label spaced" style="margin-bottom:0">Shelf</p><button class="linkish" id="reshelve" onclick="reshelve(this)" title="Have the library organise its shelf: top shelves, sub-shelves, one place per volume">reshelve</button></div>
@@ -1980,7 +1980,7 @@ async function loadTokens() {
   tokens.list = d.modules || []; tokens.sockets = d.sockets || 4;
   const bySocket = Array.from({ length: tokens.sockets }, (_, i) => tokens.list.find(m => m.socket === i) || null);
   const on = bySocket.filter(Boolean).length;
-  $('#tok-count').innerHTML = `Active tokens <b>${on}/${tokens.sockets}</b>`;
+  $('#tok-count').innerHTML = `Active modules <b>${on}/${tokens.sockets}</b>`;
   const faces = await Promise.all(bySocket.map(m => m ? tokenFace(tokenDesign(m)) : null));
   $('#tok-row').innerHTML = bySocket.map((m, i) => {
     const f = faces[i];
@@ -2022,6 +2022,13 @@ async function tokenFace(d) {
     || `color-mix(in srgb, ${d.color} 70%, white)`;
   return { body, logo, finish: d.logoFinish, rim: d.rimColor, mask: await alphaMask(d.mask) };
 }
+// The cartridge seated on the rack sits on the bay's pedestal too.
+function baySyncCartridge() {
+  if (!tokens.bay) return;
+  const id = [...cartridges][0], c = id && rackIndex[id];
+  tokens.bay.setCartridge(c ? { design: c.design, colour: c.colour, name: c.name, level: c.level,
+    sub: `${c.level} · ${c.document_count} volumes`, points: rack3d.points[id] || [], artUrl: `/api/cartridges/${id}/art?c=${c.colour.slice(1)}` } : null);
+}
 function bayWants() {
   return Array.from({ length: tokens.sockets }, (_, i) => {
     const m = tokens.list.find(x => x.socket === i);
@@ -2049,6 +2056,7 @@ function bayOpen() {
   if (window.Token3D) {
     tokens.bay = window.Token3D.mountBay($('#bay-canvas'), { onSocket: baySocket });
     tokens.bay.setSockets(bayWants(), { animate: false });
+    baySyncCartridge();
     // The closeup opens: the service panel comes forward and slides aside.
     setTimeout(() => { tokens.bay?.open(); setTimeout(() => { const h = $('#bay-hint'); if (h) h.textContent = 'Choose a token, then click an empty socket — or use its seat button.'; }, 1350); }, 350);
   } else $('#bay-hint').textContent = 'The 3D bay is unavailable here; the lists still work.';
@@ -2076,23 +2084,23 @@ function bayTab(t) {
 function bayRender() {
   if (!tokens.els) return;
   const on = tokens.list.filter(m => m.socket !== null && m.socket !== undefined).length;
-  $('#bay-n').textContent = `${on}/${tokens.sockets} active · ${tokens.list.length} token${tokens.list.length === 1 ? '' : 's'}`;
+  $('#bay-n').textContent = `${on}/${tokens.sockets} active · ${tokens.list.length} module${tokens.list.length === 1 ? '' : 's'}`;
   if (tokens.tab === 'cust') return custRender();
   if (tokens.tab === 'make') return makeRender();
-  $('#bay-pane').innerHTML = `<p style="margin:0 0 6px">A seated token is consulted during your questions: its live results appear beside the passages, cited and marked live. Its credentials stay on this machine.</p>` +
+  $('#bay-pane').innerHTML = `<p style="margin:0 0 6px">A seated module is consulted during your questions: its live results appear beside the passages, cited and marked live. Its credentials stay on this machine.</p>` +
     tokens.list.map(m => {
       const d = tokenDesign(m), seated = m.socket !== null && m.socket !== undefined;
       return `<div class="tok-card" data-armed="${tokens.armed === m.id}" style="--c:${esc(d.rimColor)}">
         <span class="hx"></span>
-        <div><b>${esc(m.name)}</b><div class="m">${seated ? `socket ${m.socket + 1}` : 'not seated'} · ${m.configured ? 'configured' : 'needs a URL and token'}${m.local_only ? ' · local models only' : ''}</div></div>
+        <div><b>${esc(m.name)}</b><div class="m">${seated ? `socket ${m.socket + 1}` : 'not seated'} · ${m.configured ? 'configured' : 'needs its connection'}${m.local_only ? ' · local models only' : ''}</div></div>
         <div class="acts">${seated ? `<button onclick="tokenOut('${m.id}')">take out</button>` : `<button class="go" onclick="tokenArm('${m.id}')" title="Then click a socket, or it goes in the first free one">${tokens.armed === m.id ? 'choose a socket' : 'seat'}</button>`}
           <button onclick="custOpen('${m.id}')">customize</button>
           ${m.builtin ? `<button onclick="makeDuplicate('${m.id}')" title="A copy you can change">duplicate</button>` : `<button onclick="makeEdit('${m.id}')">edit</button><button onclick="makeExport('${m.id}')" title="Save it as a file to share; the connection stays here">export</button><button onclick="makeDelete('${m.id}', this)">delete</button>`}</div></div>`;
-    }).join('') + `<div class="tok-card add" onclick="makeStart()"><span class="hx">+</span><div><b>Make a token</b><div class="m">for any API: from scratch, an OpenAPI spec, a curl command, or a shared file</div></div><div></div></div>`;
+    }).join('') + `<div class="tok-card add" onclick="makeStart()"><span class="hx">+</span><div><b>Make a module</b><div class="m">for any API or MCP server: from scratch, an OpenAPI spec, a Postman collection, a curl command, or a shared file</div></div><div></div></div>`;
 }
 function tokenArm(id) {
   const free = Array.from({ length: tokens.sockets }, (_, i) => i).filter(i => !tokens.list.some(m => m.socket === i));
-  if (!free.length) { say(`All ${tokens.sockets} sockets are taken; take a token out first.`, true); return; }
+  if (!free.length) { say(`All ${tokens.sockets} sockets are taken; take a module out first.`, true); return; }
   if (tokens.armed === id || !tokens.bay?.isOpen()) { tokens.armed = null; return tokenIn(id, free[0]); }
   tokens.armed = id; bayRender();
   $('#bay-hint').textContent = 'Click an empty socket for it — or press seat again for the first free one.';
@@ -2128,7 +2136,7 @@ function custStop() {
 function custClose() { tokens.view?.dispose(); tokens.view = null; }
 function custRender() {
   const m = tokens.list.find(x => x.id === tokens.edit) || tokens.list[0];
-  if (!m) { $('#bay-pane').innerHTML = '<div class="empty">No tokens to customize.</div>'; return; }
+  if (!m) { $('#bay-pane').innerHTML = '<div class="empty">No modules to customize.</div>'; return; }
   tokens.edit = m.id;
   const d = tokens.draft || (tokens.draft = tokenDesign(m));
   const T = window.Token3D || {};
@@ -2138,7 +2146,7 @@ function custRender() {
   const rng = (k, l, lo, hi, st) => `<label>${l}<input type="range" data-k="${k}" min="${lo}" max="${hi}" step="${st}" value="${d[k]}"></label>`;
   const fin = (k, l, extra = {}) => `<label>${l}<select data-k="${k}">${opt({ ...extra, ...T.FINISHES }, d[k])}</select></label>`;
   $('#bay-pane').innerHTML = `<div class="tok-cust">
-    <label>Token<select id="cust-which">${tokens.list.map(x => `<option value="${x.id}" ${x.id === m.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+    <label>Module<select id="cust-which">${tokens.list.map(x => `<option value="${x.id}" ${x.id === m.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
     <canvas id="cust-canvas" title="Drag to turn it"></canvas>
     <div class="views"><button class="linkish" onclick="tokens.view?.state('connecting', { loop: true })" title="Run the connection sweep until stopped">connect</button>
       <button class="linkish" onclick="custStop()" title="Stop the sweep: back to its real state">stop</button>
@@ -2160,7 +2168,7 @@ function custRender() {
       ${fin('logoFinish', 'Logo finish')}${col('logoColor', 'Logo color')}${rng('height', 'Relief', .025, .2, .005)}</details>
     <details><summary>Faces</summary>
       ${fin('faceFinish', 'Recessed face')}${col('faceColor', 'Face color')}
-      ${fin('solarFinish', 'Solar etching', { etched: 'Etched into token' })}${col('solarColor', 'Solar color')}</details>
+      ${fin('solarFinish', 'Solar etching', { etched: 'Etched into module' })}${col('solarColor', 'Solar color')}</details>
     <details><summary>Lights</summary>
       ${chk('rim', 'Rim lights')}${col('rimColor', 'Light color')}${col('errorColor', 'Error color')}${rng('brightness', 'Brightness', 0, 3, .05)}</details>
     <details><summary>Hardware</summary>
@@ -2320,8 +2328,9 @@ async function makeDuplicate(id) {
 async function makeExport(id) {
   const f = await (await fetch(`/api/connectors/${id}/export`)).json();
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(f, null, 2)], { type: 'application/json' }));
-  a.download = `${id}.token.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  say('Exported. The file carries the connector and its look, not its connection.');
+  a.download = `${id}.module.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  const need = Object.keys(f.requires || {});
+  say(`Exported its overall configuration and look — no credentials, and nothing of this installation${need.length ? ` (left out: ${need.join(', ').replace(/_/g, ' ')})` : ''}.`);
 }
 async function makeDelete(id, btn) {
   if (btn.dataset.armed !== '1') { btn.dataset.armed = '1'; btn.textContent = 'delete — sure?'; setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'delete'; }, 4000); return; }
@@ -2351,26 +2360,26 @@ function makeRender() {
   const txt = (mp, label, v, ph = '') => `<label class="wide">${label}<textarea data-mp="${mp}" placeholder="${esc2(ph)}">${esc2(v)}</textarea></label>`;
   if (!maker.m) {
     pane.innerHTML = `<div class="mk">
-      <h4>Make a token</h4><p class="nt">A token is a read-only line to an API that the librarian can consult during a question. Start from whichever you have.</p>
+      <h4>Make a module</h4><p class="nt">A module is a read-only line to an API that the librarian can consult during a question. Start from whichever you have.</p>
       <div class="starts"><button class="linkish" onclick="maker.m = makeBlank(); makeRender()">from scratch</button>
         <button class="linkish" onclick="maker.oa = maker.oa || { text: '' }; makeRender()">from an OpenAPI / Swagger document</button>
         <button class="linkish" onclick="maker.curl = maker.curl || ' '; makeRender()">from a curl command</button>
         <button class="linkish" onclick="maker.pm = maker.pm || { text: '' }; makeRender()">from a Postman collection</button>
         <button class="linkish" onclick="maker.mcp = maker.mcp || { type: 'mcp_stdio', command: '', args: '', env: '', secret_env: '', secret: '', url: '', name: '' }; makeRender()">from an MCP server</button>
-        <label style="display:inline-flex;gap:6px;align-items:center;margin:0">import a token file <input type="file" accept=".json,application/json" onchange="makeImportFile(this)"></label></div>
+        <label style="display:inline-flex;gap:6px;align-items:center;margin:0">import a module file <input type="file" accept=".json,application/json" onchange="makeImportFile(this)"></label></div>
       ${maker.oa ? `<h4>OpenAPI / Swagger</h4><label class="wide">Document<textarea id="mk-oa" placeholder="Paste the JSON or YAML here">${esc2(maker.oa.text)}</textarea></label>
         <label>or a file<input type="file" accept=".json,.yaml,.yml" onchange="makeOaFile(this)"></label>
         <div class="acts"><button onclick="makeOaList()">list its operations</button></div>
         ${maker.oa.ops ? `<p class="nt">${maker.oa.ops.length} GET operations${maker.oa.total > maker.oa.ops.length ? ` (of ${maker.oa.total})` : ''}. Pick the few the librarian should be able to ask — a curated handful, not the whole API.</p>
           <div class="picks">${maker.oa.ops.map((o, i) => `<label><input type="checkbox" data-oa="${i}" ${maker.oa.picked?.has(o.key) ? 'checked' : ''}> ${esc(o.key)} <span class="nt">${esc(o.summary)}</span></label>`).join('')}</div>
-          <div class="acts"><button class="go" onclick="makeOaDraft()">draft the token</button></div>` : ''}` : ''}
+          <div class="acts"><button class="go" onclick="makeOaDraft()">draft the module</button></div>` : ''}` : ''}
       ${maker.curl ? `<h4>curl</h4><label class="wide">Command<textarea id="mk-curl" placeholder="curl -H 'Authorization: Bearer …' 'https://api.example.com/v1/items?status=open'">${esc2(maker.curl.trim())}</textarea></label>
         <div class="acts"><button class="go" onclick="makeCurl()">draft from it</button></div>` : ''}
       ${maker.pm ? `<h4>Postman collection</h4><label class="wide">Collection<textarea id="mk-pm" placeholder="Paste the exported collection (v2.1 JSON)">${esc2(maker.pm.text)}</textarea></label>
         <label>or a file<input type="file" accept=".json" onchange="makePmFile(this)"></label>
         <div class="acts"><button onclick="makePmList()">list its requests</button></div>
         ${maker.pm.reqs ? `<div class="picks">${maker.pm.reqs.map((r, i) => `<label><input type="checkbox" data-pm="${i}" ${r.usable ? '' : 'disabled'} ${maker.pm.picked?.has(r.key) ? 'checked' : ''}> ${esc(r.method)} ${esc(r.key)} <span class="nt">${esc(r.note)}</span></label>`).join('')}</div>
-          <div class="acts"><button class="go" onclick="makePmDraft()">draft the token</button></div>` : ''}` : ''}
+          <div class="acts"><button class="go" onclick="makePmDraft()">draft the module</button></div>` : ''}` : ''}
       ${maker.mcp ? `<h4>MCP server</h4><div class="grid2">
           <label>Name<input type="text" id="mk-mcp-name" value="${esc2(maker.mcp.name)}" placeholder="GitHub"></label>
           <label>Reached by<select id="mk-mcp-type" onchange="maker.mcp.type = this.value; makeMcpKeep(); makeRender()"><option value="mcp_stdio" ${maker.mcp.type === 'mcp_stdio' ? 'selected' : ''}>a program on this machine (stdio)</option><option value="mcp_http" ${maker.mcp.type === 'mcp_http' ? 'selected' : ''}>a URL (HTTP)</option></select></label>
@@ -2382,14 +2391,15 @@ function makeRender() {
           <label>Secret<input type="password" id="mk-mcp-secret" value="${esc2(maker.mcp.secret)}" autocomplete="off"></label></div>
         ${maker.mcp.type === 'mcp_stdio' ? `<p class="nt warn">Listing its tools starts this program on this machine: ${esc(maker.mcp.command || '…')} ${esc((maker.mcp.args || '').split('\n').join(' '))}. Only use a server you trust.</p>` : ''}
         <div class="acts"><button onclick="makeMcpList()">list its tools</button></div>
-        ${maker.mcp.tools ? `<p class="nt">Only tools that look things up can be a token's operations; those the server marks destructive or not read-only are shut.</p><div class="picks">${maker.mcp.tools.map((t, i) => `<label><input type="checkbox" data-mcp="${i}" ${t.refused ? 'disabled' : ''} ${maker.mcp.picked?.has(t.name) ? 'checked' : ''}> ${esc(t.name)} <span class="nt">${t.refused ? esc(t.refused) : t.read_only ? 'read-only' : 'not marked read-only'} — ${esc(t.description.slice(0, 120))}</span></label>`).join('')}</div>
-          <div class="acts"><button class="go" onclick="makeMcpDraft()">draft the token</button></div>` : ''}` : ''}
-      ${maker.imp ? `<div class="approve"><b>This token can:</b><ul>
+        ${maker.mcp.tools ? `<p class="nt">Only tools that look things up can be a module's operations; those the server marks destructive or not read-only are shut.</p><div class="picks">${maker.mcp.tools.map((t, i) => `<label><input type="checkbox" data-mcp="${i}" ${t.refused ? 'disabled' : ''} ${maker.mcp.picked?.has(t.name) ? 'checked' : ''}> ${esc(t.name)} <span class="nt">${t.refused ? esc(t.refused) : t.read_only ? 'read-only' : 'not marked read-only'} — ${esc(t.description.slice(0, 120))}</span></label>`).join('')}</div>
+          <div class="acts"><button class="go" onclick="makeMcpDraft()">draft the module</button></div>` : ''}` : ''}
+      ${maker.imp ? `<div class="approve"><b>This module can:</b><ul>
           ${maker.imp.summary.runs ? `<li class="warn">start a program on this machine: ${esc(maker.imp.summary.runs)}</li>` : ''}
           <li>reach ${esc(maker.imp.summary.host || (maker.imp.summary.runs ? '(a local MCP server)' : '(the host you set)'))}${maker.imp.summary.other_hosts.length ? ' and ' + esc(maker.imp.summary.other_hosts.join(', ')) : ''}</li>
           <li>sign in by ${esc(maker.imp.summary.auth)}; run with ${esc(maker.imp.summary.clearance)}</li>
           ${maker.imp.summary.operations.map(o => `<li>${esc(o.method)} ${esc(o.path)} — ${esc(o.summary)}</li>`).join('')}
           ${maker.imp.summary.searches_by_post ? `<li class="warn">${maker.imp.summary.searches_by_post} operation(s) search by POST, marked read-only by their author</li>` : ''}</ul>
+        ${maker.imp.summary.requires ? `<p class="nt">After adding it, fill in what its author left out: ${Object.entries(maker.imp.summary.requires).map(([k, v]) => Array.isArray(v) ? `${k.replace(/_/g, ' ')} (${v.map(esc).join(', ')})` : esc(k.replace(/_/g, ' '))).join('; ')}.</p>` : ''}
         ${maker.imp.summary.conflict ? `<p class="warn">${esc(maker.imp.summary.conflict)}</p>` : `<div class="acts"><button class="go" onclick="makeImportApprove()">approve and add it</button><button onclick="maker.imp = null; makeRender()">no</button></div>`}</div>` : ''}
       <p class="nt warn">${esc(maker.msg)}</p></div>`;
     for (const cb of document.querySelectorAll('.mk [data-pm]')) cb.onchange = e => { const k = maker.pm.reqs[+e.target.dataset.pm].key; maker.pm.picked = maker.pm.picked || new Set(); e.target.checked ? maker.pm.picked.add(k) : maker.pm.picked.delete(k); };
@@ -2423,7 +2433,7 @@ function makeRender() {
       <div class="grid2">
         ${inp(`${P}.id`, 'Id', o.id, { ph: 'search_tickets' })}
         ${isMcp ? inp(`${P}.tool`, 'Tool', o.tool, { ph: 'search_issues' }) : sel(`${P}.method`, 'Method', o.method, [['GET', 'GET'], ['POST', 'POST (read-only search)']]) + inp(`${P}.path`, 'Path', o.path, { ph: '/v1/items/{id}', wide: true })}
-        ${sel(`${P}.clearance`, 'Clearance', o.clearance || '', [['', 'as the token'], ['local', 'local models only'], ['any', 'any model']], false)}
+        ${sel(`${P}.clearance`, 'Clearance', o.clearance || '', [['', 'as the module'], ['local', 'local models only'], ['any', 'any model']], false)}
         ${inp(`${P}.summary`, 'Answers', o.summary, { ph: 'Which tickets are open for a customer', wide: true })}
         ${inp(`${P}.ask_when`, 'Ask when', o.ask_when, { ph: 'the question asks about a customer’s open tickets', wide: true })}
       </div>
@@ -2451,7 +2461,7 @@ function makeRender() {
     </details>`;
   }).join('');
   pane.innerHTML = `<div class="mk">
-    <div class="acts"><button onclick="makeStart()">← start over</button><span class="nt">${maker.editing ? `Editing ${esc(maker.editing)}` : 'A new token'}</span></div>
+    <div class="acts"><button onclick="makeStart()">← start over</button><span class="nt">${maker.editing ? `Editing ${esc(maker.editing)}` : 'A new module'}</span></div>
     <h4>Basics</h4><div class="grid2">
       ${inp('name', 'Name', m.name, { ph: 'GitHub' })}${inp('id', 'Id', m.id, { ph: 'github' })}
       ${inp('kind', 'Kind', m.kind, { ph: 'code hosting' })}
@@ -2463,7 +2473,7 @@ function makeRender() {
       ${sel('transport.type', 'Transport', T.type, [['http', 'an HTTP API'], ['mcp_stdio', 'an MCP server this machine runs'], ['mcp_http', 'an MCP server at a URL']])}
       ${T.type === 'mcp_stdio' ? inp('transport.command', 'Command', T.command, { ph: 'npx' }) + txt('transport._args', 'Arguments', T._args, 'one per line') + txt('transport._env', 'Environment', T._env, 'NAME=value, one per line (not secrets)') + inp('transport.secret_env', 'Secret variable', T.secret_env, { ph: 'API_TOKEN' }) : ''}
       ${T.type === 'mcp_http' ? inp('transport.url', 'Server URL', T.url, { ph: 'https://mcp.example.com/mcp', wide: true }) : ''}</div>
-    ${T.type === 'mcp_stdio' ? `<p class="nt warn">This token starts ${esc(T.command || 'its program')} on this machine each time it is consulted, with only PATH, HOME, the locale and its secret in the environment.</p>` : ''}
+    ${T.type === 'mcp_stdio' ? `<p class="nt warn">This module starts ${esc(T.command || 'its program')} on this machine each time it is consulted, with only PATH, HOME, the locale and its secret in the environment.</p>` : ''}
     ${T.type === 'mcp_stdio' ? `<div class="grid2"><label>Secret${T.secret_env ? ` ($${esc(T.secret_env)})` : ''}<input type="password" id="mk-secret" value="${esc2(maker.conn.token)}" placeholder="${maker.editing ? 'blank keeps the saved one' : ''}" autocomplete="off"></label></div>` : `<h4>Signing in</h4><div class="grid2">
       ${sel('auth.type', 'Kind', a.type, T.type === 'mcp_http' ? [['none', 'none'], ['bearer', 'bearer token'], ['header', 'API key in a header']] : [['none', 'none'], ['bearer', 'bearer token'], ['header', 'API key in a header'], ['query', 'API key in the query'], ['basic', 'username and password'], ['oauth2_client', 'OAuth2 client credentials']])}
       ${authFields}</div>`}
@@ -2479,7 +2489,7 @@ function makeRender() {
     <h4>Operations <button class="linkish" onclick="maker.m.operations.push({ ...makeBlankOp(), response: { ...makeBlankOp().response, ...(isMcpNow() ? { format: 'text', line: '{text}' } : {}) } }); maker.openOp = maker.m.operations.length - 1; makeRender()">+ add</button></h4>
     <p class="nt">A curated handful — the questions this source should answer. ${isMcp ? 'Each one is a tool that only looks things up; the server’s own marks are checked before every call.' : 'Each one is a GET (or a read-only search), built from these fields.'} The librarian only picks an operation and fills its parameters.</p>
     ${ops}
-    <div class="acts"><button class="go" onclick="makeSave()">${maker.editing ? 'Save changes' : 'Make the token'}</button></div>
+    <div class="acts"><button class="go" onclick="makeSave()">${maker.editing ? 'Save changes' : 'Make the module'}</button></div>
     <p class="nt warn" id="mk-msg">${esc(maker.msg)}</p></div>`;
   for (const el of document.querySelectorAll('.mk [data-mp]')) el.addEventListener(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', () => makeSet(el));
   for (const id of ['#mk-secret', '#mk-user']) { const el = $(id); if (el) el.oninput = () => { maker.conn[id === '#mk-secret' ? 'token' : 'username'] = el.value; }; }
@@ -2520,7 +2530,7 @@ async function makePmDraft() {
   const r = await fetch('/api/connectors/draft/postman', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ collection: maker.pm.text, pick }) });
   const j = await r.json(); if (!r.ok) { maker.msg = j.detail; return makeRender(); }
   maker.m = makeFromManifest(j.manifest); maker.conn = { base_url: j.manifest.base_url, token: j.credentials.token || '', username: j.credentials.username || '' };
-  maker.pm = null; maker.msg = ['Drafted. Set each operation’s rows and line with try it, then make the token.', ...(j.notes || [])].join(' '); makeRender();
+  maker.pm = null; maker.msg = ['Drafted. Set each operation’s rows and line with try it, then make the module.', ...(j.notes || [])].join(' '); makeRender();
 }
 function makeMcpKeep() {
   // Keep what was typed across a re-render.
@@ -2550,7 +2560,7 @@ async function makeMcpDraft() {
     body: JSON.stringify({ name: maker.mcp.name, transport: makeMcpTransport(), token: maker.mcp.secret || null, pick }) });
   const j = await r.json(); if (!r.ok) { maker.msg = j.detail; return makeRender(); }
   maker.m = makeFromManifest(j.manifest); maker.conn = { base_url: '', token: maker.mcp.secret || '', username: '' };
-  maker.mcp = null; maker.msg = ['Drafted. Try each tool, then make the token.', ...(j.notes || [])].join(' '); makeRender();
+  maker.mcp = null; maker.msg = ['Drafted. Try each tool, then make the module.', ...(j.notes || [])].join(' '); makeRender();
 }
 async function makeOaFile(input) { const f = input.files[0]; if (!f) return; maker.oa.text = await f.text(); makeRender(); }
 async function makeOaList() {
@@ -2565,7 +2575,7 @@ async function makeOaDraft() {
   const r = await fetch('/api/connectors/draft/openapi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spec: maker.oa.text, pick }) });
   const j = await r.json();
   if (!r.ok) { maker.msg = j.detail; return makeRender(); }
-  maker.m = makeFromManifest(j.manifest); maker.oa = null; maker.msg = 'Drafted. Check each operation’s row path and line with try it, then make the token.'; makeRender();
+  maker.m = makeFromManifest(j.manifest); maker.oa = null; maker.msg = 'Drafted. Check each operation’s row path and line with try it, then make the module.'; makeRender();
 }
 async function makeCurl() {
   maker.curl = $('#mk-curl').value;
@@ -2599,6 +2609,7 @@ function toggleCartridge(id) {
   cartridges.clear();
   if (!wasOn) cartridges.add(id);
   if (rack3d.ctrl) { rack3d.ctrl.show(id); rack3d.ctrl.seat(id, !wasOn); }
+  baySyncCartridge();
   web.setRoom(wasOn ? null : id);
   rackUnder();
   loadRack(); loadShelf(); writeScope();

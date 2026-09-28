@@ -1102,4 +1102,4 @@ export function connectorPedestal() {
 }
 
 // Shared with token3d.js: one renderer set-up, one studio light, one environment.
-export { environment, makeRenderer, lights, refractionPlate };
+export { environment, makeRenderer, lights, refractionPlate, makeCartridge };

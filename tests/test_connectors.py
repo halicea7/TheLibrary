@@ -517,3 +517,53 @@ def test_clearance_is_per_operation():
     assert local.cleared(remote_chat=True) == ()
     with pytest.raises(ManifestError, match="clearance"):
         from_dict(manifest(op={"clearance": "public"}))
+
+
+def test_sharing_leaves_out_everything_of_this_installation(monkeypatch):
+    import os
+
+    from library_agent.modules.manifest import for_sharing
+
+    home = os.path.expanduser("~")
+    m = from_dict(
+        manifest(
+            base_url="https://acme-tenant.example.com",
+            allowed_hosts=["files.acme-tenant.example.com"],
+            headers={"Accept": "application/json", "X-Org-Id": "acme-4471"},
+            auth={
+                "type": "oauth2_client",
+                "token_url": "https://acme-tenant.example.com/oauth/token",
+            },
+        )
+    )
+    d, req = for_sharing(m)
+    text = json.dumps(d)
+    assert "acme" not in text and "4471" not in text
+    assert (
+        d["headers"] == {"Accept": "application/json"} and d["auth"]["token_url"] == "/oauth/token"
+    )
+    assert req == {
+        "base_url": True,
+        "allowed_hosts": 1,
+        "headers": ["X-Org-Id"],
+        "token_url_host": True,
+    }
+    assert from_dict(d).operations == m.operations  # the configuration itself travels whole
+    mcp = from_dict(
+        {
+            "id": "gh",
+            "name": "GH",
+            "transport": {
+                "type": "mcp_stdio",
+                "command": f"{home}/bin/server",
+                "args": [f"{home}/cfg.json"],
+                "env": {"ORG": "acme"},
+                "secret_env": "GH_TOKEN",
+            },
+            "operations": [{"id": "search", "tool": "search", "read_only": True}],
+        }
+    )
+    d, req = for_sharing(mcp)
+    assert home not in json.dumps(d) and d["transport"]["command"] == "~/bin/server"
+    assert d["transport"]["env"] == {"ORG": ""} and req["env"] == ["ORG"]
+    assert d["transport"]["secret_env"] == "GH_TOKEN"  # the variable's name, never its value

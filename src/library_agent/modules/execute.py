@@ -312,8 +312,17 @@ def parse(op: Operation, raw: bytes) -> tuple[list, Any]:
 # ------------------------------------------------------------------- one call
 
 
-async def call(module: Module, cfg: ModuleConfig, op: Operation, args: dict[str, Any]) -> dict:
-    """Run one operation. Returns {ok, rows, count, when, pages, cached}."""
+async def call(
+    module: Module,
+    cfg: ModuleConfig,
+    op: Operation,
+    args: dict[str, Any],
+    *,
+    debug: bool = False,
+) -> dict:
+    """Run one operation. Returns {ok, rows, count, when, pages, cached}. With `debug` (the
+    bay's *try it*), the cache is skipped and the first page's raw text rides along as
+    `sample`, so the person sees what came back beside how it rendered."""
     args = coerce(op, args)
     # Keyed on what the call actually is, so an edited operation never answers from a
     # cache filled by its previous shape.
@@ -330,7 +339,7 @@ async def call(module: Module, cfg: ModuleConfig, op: Operation, args: dict[str,
     ttl = module.limits.cache_seconds if module.limits else CACHE_TTL
     hit = _cache.get(key)
     now = time.time()
-    if hit and now - hit[0] < ttl:
+    if hit and now - hit[0] < ttl and not debug:
         return {
             "ok": True,
             "rows": hit[1],
@@ -350,6 +359,7 @@ async def call(module: Module, cfg: ModuleConfig, op: Operation, args: dict[str,
     pages = max(1, min(p.max_pages, HARD_MAX_PAGES)) if p.type != "none" else 1
     rows: list = []
     fetched = 0
+    sample = ""
     async with httpx.AsyncClient(
         base_url=base, timeout=module.limits.timeout, follow_redirects=False
     ) as client:
@@ -379,6 +389,8 @@ async def call(module: Module, cfg: ModuleConfig, op: Operation, args: dict[str,
                 kw["json"] = body
             resp, raw = await _fetch(client, module, op.method, target, **kw)
             fetched += 1
+            if debug and not sample:
+                sample = raw[:20_000].decode("utf-8", errors="replace")
             page_rows, doc = parse(op, raw)
             rows.extend(page_rows)
             if p.type == "none" or len(rows) >= op.render.limit:
@@ -396,12 +408,10 @@ async def call(module: Module, cfg: ModuleConfig, op: Operation, args: dict[str,
                 if not nxt:
                     break
                 url = urljoin(str(resp.request.url), nxt)
-    _cache[key] = (now, rows, len(rows))
-    return {
-        "ok": True,
-        "rows": rows,
-        "count": len(rows),
-        "when": now,
-        "cached": False,
-        "pages": fetched,
-    }
+    if not debug:
+        _cache[key] = (now, rows, len(rows))
+    out = {"ok": True, "rows": rows, "count": len(rows), "when": now, "cached": False}
+    out["pages"] = fetched
+    if debug:
+        out["sample"] = sample
+    return out

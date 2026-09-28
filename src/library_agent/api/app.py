@@ -17,6 +17,7 @@ from library_agent.api.routes import (
     cartridges,
     chat,
     compose,
+    connectors,
     documents,
     evaluation,
     library,
@@ -89,6 +90,7 @@ app.include_router(settings_routes.router)
 app.include_router(v1.router)
 app.include_router(compose.router)
 app.include_router(evaluation.router)
+app.include_router(connectors.router)
 
 
 @app.get("/api/health", response_model=HealthOut)

@@ -36,6 +36,7 @@ import io
 import json
 import logging
 import re
+import shutil
 import uuid
 import zipfile
 from dataclasses import dataclass, field
@@ -713,12 +714,55 @@ def read_manifest(zip_path: Path) -> dict:
     return m
 
 
+def _junk(name: str) -> bool:
+    """What an OS adds when it zips a folder: never part of a cartridge."""
+    base = name.rsplit("/", 1)[-1]
+    return (
+        name.startswith("__MACOSX/") or base in (".DS_Store", "Thumbs.db") or base.startswith("._")
+    )
+
+
+def _prefix(names: list[str]) -> str | None:
+    """Where the manifest sits: "" at the top, "folder/" when the whole cartridge is inside
+    one folder (unzipped and zipped again, as Finder or Explorer does), else None."""
+    names = [n for n in names if not _junk(n)]
+    if "cartridge.json" in names:
+        return ""
+    found = [n[: -len("cartridge.json")] for n in names if n.endswith("/cartridge.json")]
+    if len(found) != 1 or found[0].count("/") != 1:
+        return None
+    pre = found[0]
+    return pre if all(n.startswith(pre) for n in names) else None
+
+
 def is_cartridge(path: Path) -> bool:
     try:
         with zipfile.ZipFile(path) as z:
-            return "cartridge.json" in z.namelist()
+            return _prefix(z.namelist()) is not None
     except (zipfile.BadZipFile, OSError):
         return False
+
+
+def normalize_zip(path: Path) -> Path:
+    """The cartridge as it was made: when it was unzipped and zipped again, its one folder
+    stripped and the OS's own files left out, written beside the original. Otherwise the
+    same path. The content hash is checked after, so nothing else can change."""
+    with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+        pre = _prefix(names)
+        if pre is None:
+            raise CartridgeError("not a cartridge: no cartridge.json")
+        if not pre and not any(_junk(n) for n in names):
+            return path
+        out = path.with_name(path.stem + ".normalized.zip")
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as w:
+            for info in z.infolist():
+                n = info.filename
+                if _junk(n) or n.endswith("/") or not n.startswith(pre):
+                    continue
+                with z.open(info) as src, w.open(n[len(pre) :], "w") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
+    return out
 
 
 @dataclass

@@ -56,8 +56,13 @@ async def _insert(args: argparse.Namespace) -> None:
     from library_agent.config import settings
     from library_agent.worker.tasks import schedule_library_rebuild
 
-    async with session_scope() as db:
-        res = await cart.import_cartridge(db, Path(args.zip))
+    use = cart.normalize_zip(Path(args.zip))
+    try:
+        async with session_scope() as db:
+            res = await cart.import_cartridge(db, use)
+    finally:
+        if use != Path(args.zip):
+            use.unlink(missing_ok=True)
     if res.noop:
         print(f"{res.name} v{res.version} is already on the rack")
         return

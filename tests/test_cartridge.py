@@ -382,3 +382,49 @@ def test_every_type_the_library_reads_travels_as_an_original():
     from library_agent.library.cartridge import _ORIGINAL_EXTS
 
     assert set(SUPPORTED) <= _ORIGINAL_EXTS and ".html" in _ORIGINAL_EXTS
+
+
+def test_a_cartridge_unzipped_and_zipped_again_is_read_as_made(tmp_path):
+    # Safari unzips a download; Finder's Compress puts it back inside a folder, with
+    # __MACOSX/ and ._ files beside every entry. It was refused as "not a cartridge".
+    import zipfile
+
+    from library_agent.library import cartridge as cart
+
+    parts = [("data/documents.jsonl", b'{"id": "d"}\n'), ("vectors/chunk.ids.json", b"[]")]
+    manifest = json.dumps(
+        {
+            "format_version": 1,
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "T",
+            "level": "full",
+            "embed_model": "m",
+            "content_hash": cart._digest(parts),
+        }
+    ).encode()
+    made = tmp_path / "t.zip"
+    with zipfile.ZipFile(made, "w") as z:
+        z.writestr("cartridge.json", manifest)
+        for n, b in parts:
+            z.writestr(n, b)
+    rezipped = tmp_path / "t-finder.zip"
+    with zipfile.ZipFile(rezipped, "w") as z:
+        z.writestr("t/", b"")
+        z.writestr("t/.DS_Store", b"x")
+        z.writestr("t/cartridge.json", manifest)
+        z.writestr("__MACOSX/t/._cartridge.json", b"x")
+        for n, b in parts:
+            z.writestr(f"t/{n}", b)
+            z.writestr(f"__MACOSX/t/._{n.rsplit('/', 1)[-1]}", b"x")
+    assert cart.normalize_zip(made) == made  # as made: untouched
+    assert cart.is_cartridge(rezipped)
+    fixed = cart.normalize_zip(rezipped)
+    m = cart.read_manifest(fixed)
+    with zipfile.ZipFile(fixed) as z:
+        cart._verify(z, m)  # the content hash still holds
+        assert sorted(z.namelist()) == sorted(["cartridge.json", *[n for n, _ in parts]])
+    two = tmp_path / "two.zip"
+    with zipfile.ZipFile(two, "w") as z:
+        z.writestr("a/cartridge.json", manifest)
+        z.writestr("b/cartridge.json", manifest)
+    assert not cart.is_cartridge(two)  # two cartridges in one zip is not one cartridge

@@ -282,7 +282,9 @@ async def import_(file: Annotated[UploadFile, File()], db: SessionDep) -> dict:
         if not cart.is_cartridge(tmp_path):
             raise HTTPException(415, "not a cartridge (no cartridge.json in the zip)")
         try:
-            res = await cart.import_cartridge(db, tmp_path)
+            # Unzipped and zipped again (Finder, Explorer): read as it was made.
+            use = cart.normalize_zip(tmp_path)
+            res = await cart.import_cartridge(db, use)
             await db.commit()
         except cart.CartridgeError as exc:
             await db.rollback()
@@ -294,6 +296,7 @@ async def import_(file: Annotated[UploadFile, File()], db: SessionDep) -> dict:
             raise HTTPException(500, f"the cartridge could not be inserted: {exc}"[:400]) from exc
     finally:
         tmp_path.unlink(missing_ok=True)
+        tmp_path.with_name(tmp_path.stem + ".normalized.zip").unlink(missing_ok=True)
     if not res.noop:
         # Threads and disagreements must now be recomputed across the new whole.
         redis = await create_pool(RedisSettings.from_dsn(settings().redis_url))

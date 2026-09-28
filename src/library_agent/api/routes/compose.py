@@ -41,6 +41,7 @@ class ComposeIn(BaseModel):
     scope_label: str = ""
     review: bool = True
     force: bool = False
+    ceiling: str | None = None  # the highest classification level it may draw on
 
 
 class DocIn(BaseModel):
@@ -73,6 +74,7 @@ async def compose_stream(req: ComposeIn, db: SessionDep) -> EventSourceResponse:
                 scope_label=req.scope_label,
                 review=req.review,
                 force=req.force,
+                ceiling=req.ceiling or None,
             ):
                 if ev["event"] == "done":
                     try:

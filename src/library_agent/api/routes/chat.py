@@ -35,6 +35,9 @@ class ChatRequest(BaseModel):
     effort: str | None = None  # quick | normal | deep
     # Passages held from Find or Threads: they lead the context, retrieval fills around.
     pinned_chunk_ids: list[uuid.UUID] | None = None
+    # The highest classification level this conversation may draw on; "" clears it, None
+    # keeps what the conversation has.
+    ceiling: str | None = None
 
 
 class ConversationOut(BaseModel):
@@ -112,6 +115,7 @@ async def chat(req: ChatRequest) -> EventSourceResponse:
             stance=req.stance,
             effort=req.effort,
             pinned_chunk_ids=req.pinned_chunk_ids,
+            ceiling=req.ceiling,
         ):
             payload = ev["data"]
             yield {

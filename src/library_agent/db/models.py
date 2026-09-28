@@ -129,6 +129,10 @@ class Document(Base):
     # Arrived in a readings-only cartridge: its "passages" are the sharer's section
     # summaries, synthesised as chunks. The originals were never shared.
     readings_only: Mapped[bool] = mapped_column(default=False)
+    # Classification (see library_agent/classification.py): a level id on the scale, and
+    # where it came from -- "manual", "marking" or "cartridge". None: the scale's default.
+    classification: Mapped[str | None] = mapped_column(String(24), default=None)
+    classification_source: Mapped[str | None] = mapped_column(String(12), default=None)
     # The one place the volume sits on the shelf: a second-level category. Tags
     # (document_category) remain many-to-many for filtering; the shelf is singular.
     shelf_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -199,6 +203,9 @@ class Chunk(Base):
     # Whether text[char_start:char_end] of the extraction holds this chunk (whitespace
     # aside). None: not yet checked -- `./library spans --repair` checks and fixes.
     span_exact: Mapped[bool | None] = mapped_column(default=None)
+    # The passage's own portion mark, where its document marks portions; else it takes the
+    # volume's level.
+    portion: Mapped[str | None] = mapped_column(String(24), default=None)
 
     document: Mapped[Document] = relationship(back_populates="chunks")
 
@@ -519,6 +526,8 @@ class Conversation(Base):
     category_ids: Mapped[list[str] | None] = mapped_column(JSONB, default=None)
     # "Ask Security's shelf": scope every turn of this conversation to these cartridges.
     cartridge_ids: Mapped[list[str] | None] = mapped_column(JSONB, default=None)
+    # The highest classification level this conversation may draw on; null: none.
+    ceiling: Mapped[str | None] = mapped_column(String(24), default=None)
     created_at: Mapped[datetime] = _now()
 
     messages: Mapped[list[Message]] = relationship(

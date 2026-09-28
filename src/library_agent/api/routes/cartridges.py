@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 
+from library_agent import classification
 from library_agent.config import settings
 from library_agent.db.models import Cartridge, CartridgeDocument, Document
 from library_agent.db.session import SessionDep
@@ -143,6 +144,9 @@ async def preview(sel: Selection, db: SessionDep) -> dict:
             category_ids=sel.category_ids,
             cartridge_ids=sel.cartridge_ids,
         )
+        # Nothing above the export ceiling leaves, at any level of sharing.
+        scale = classification.load()
+        ids, held = await classification.within(db, ids, scale.export_ceiling, scale)
         bundle = await cart.gather(db, ids, sel.level)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -151,6 +155,8 @@ async def preview(sel: Selection, db: SessionDep) -> dict:
         "counts": bundle.counts(),
         "estimated_bytes": bundle.estimated_bytes(),
         "titles": [d["title"] for d in bundle.documents][:40],
+        "held_back": len(held),
+        "export_ceiling": scale.level(scale.export_ceiling).label,
     }
 
 
@@ -162,8 +168,15 @@ async def export(req: ExportRequest, db: SessionDep) -> FileResponse:
         category_ids=req.category_ids,
         cartridge_ids=req.cartridge_ids,
     )
+    scale = classification.load()
+    ids, held = await classification.within(db, ids, scale.export_ceiling, scale)
     if not ids:
-        raise HTTPException(422, "nothing selected")
+        raise HTTPException(
+            422,
+            f"nothing selected at or below the export ceiling ({scale.level(scale.export_ceiling).label})"
+            if held
+            else "nothing selected",
+        )
     art_png = None
     if req.art:
         try:

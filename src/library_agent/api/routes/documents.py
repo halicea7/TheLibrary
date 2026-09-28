@@ -88,6 +88,8 @@ def _to_out(d: Document, sections: int, chunks: int) -> DocumentOut:
         added_at=d.added_at,
         readings_only=d.readings_only,
         genre=d.genre,
+        classification=d.classification,
+        classification_source=d.classification_source,
     )
 
 
@@ -492,6 +494,8 @@ async def read_document(document_id: uuid.UUID, db: SessionDep) -> dict:
         "tier": doc.tier,
         "kind": doc.kind,
         "readings_only": doc.readings_only,
+        "classification": doc.classification,
+        "classification_source": doc.classification_source,
         "genre": doc.genre,
         "cartridge": (await cartridge_provenance(db, [doc.id])).get(doc.id),
         "page_count": doc.page_count,

@@ -59,6 +59,8 @@ class Source:
     artifact_id: str | None = None
     page_end: int | None = None
     span_chunk_ids: list[str] | None = None
+    # Its classification level (an id on the scale); see classification.hit_levels.
+    level: str | None = None
 
     def key(self) -> str:
         """What makes two sources the same: a reading is its artifact, a passage its chunk --

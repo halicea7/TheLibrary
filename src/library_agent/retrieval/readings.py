@@ -19,6 +19,7 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from library_agent.classification import default_level as _default_level
 from library_agent.config import settings
 from library_agent.llm.embed import embed_query
 from library_agent.retrieval.hybrid import SearchHit
@@ -51,6 +52,10 @@ where e.owner_kind = 'artifact' and e.model = :emodel
       select 1 from cartridge_document cd
       where cd.document_id = s.document_id and cd.cartridge_id = any(cast(:carts as uuid[]))
   ))
+  and (cast(:levels as text[]) is null or (
+      coalesce(d.classification, cast(:deflt as text)) = any(cast(:levels as text[]))
+      and not exists (select 1 from chunk c0 where c0.section_id = s.id and c0.portion is not null
+                      and c0.portion <> all(cast(:levels as text[])))))
 order by e.vec <=> cast(:qv as halfvec)
 limit :lim
 """
@@ -86,6 +91,7 @@ async def retrieve_readings(
     limit: int,
     category_ids: list[uuid.UUID] | None = None,
     cartridge_ids: list[uuid.UUID] | None = None,
+    levels: list[str] | None = None,
     document_ids: list[uuid.UUID] | None = None,
     favour: list[uuid.UUID] | None = None,
 ) -> list[SearchHit]:
@@ -99,6 +105,8 @@ async def retrieve_readings(
         "emodel": settings().embed_model,
         "cats": [str(x) for x in category_ids] if category_ids else None,
         "carts": [str(x) for x in cartridge_ids] if cartridge_ids else None,
+        "levels": levels,
+        "deflt": _default_level() if levels else None,
     }
 
     async def run(docs, lim):

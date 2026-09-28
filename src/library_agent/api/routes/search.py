@@ -8,6 +8,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
+from library_agent import classification
 from library_agent.api.schemas import SearchHitOut, SearchResponse
 from library_agent.db.session import SessionDep
 from library_agent.library.shelving import expand_category_ids
@@ -28,6 +29,7 @@ async def search(
     categories: Annotated[str | None, Query(description="comma-separated category ids")] = None,
     cartridges: Annotated[str | None, Query(description="comma-separated cartridge ids")] = None,
     documents: Annotated[str | None, Query(description="comma-separated document ids")] = None,
+    ceiling: Annotated[str | None, Query(description="the highest classification level")] = None,
 ) -> SearchResponse:
     started = time.time()
     cat_ids = [uuid.UUID(x) for x in categories.split(",") if x.strip()] if categories else None
@@ -36,6 +38,8 @@ async def search(
     cart_ids = [uuid.UUID(x) for x in cartridges.split(",") if x.strip()] if cartridges else None
     doc_ids = [uuid.UUID(x) for x in documents.split(",") if x.strip()] if documents else None
     terms = literal_terms(q)
+    scale = classification.load()
+    levels = classification.allowed_levels(ceiling or None, s=scale)
     hits = await retrieve(
         db,
         q,
@@ -43,6 +47,7 @@ async def search(
         category_ids=cat_ids,
         cartridge_ids=cart_ids,
         document_ids=doc_ids,
+        levels=levels,
         config=FIND_RETRIEVAL
         if rerank and not router
         else RetrievalConfig(name="api", use_reranker=rerank, use_router=router),
@@ -57,8 +62,10 @@ async def search(
             category_ids=cat_ids,
             cartridge_ids=cart_ids,
             document_ids=doc_ids,
+            levels=levels,
         )
         hits, exact = exact_first(hits, literal, terms, limit)
+    hit_levels = await classification.hit_levels(db, hits, scale)
     lifts = await lift(q, [h.text for h in hits]) if hits else []
     kinds: list[str | None] = []
     for i, h in enumerate(hits):
@@ -87,8 +94,9 @@ async def search(
                 lift=lifted,
                 lift_kind=kind,
                 exact=h.chunk_id in exact,
+                level=lv,
             )
-            for h, lifted, kind in zip(hits, lifts, kinds, strict=True)
+            for h, lifted, kind, lv in zip(hits, lifts, kinds, hit_levels, strict=True)
         ],
         elapsed_seconds=round(time.time() - started, 3),
     )

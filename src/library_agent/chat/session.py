@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from library_agent import classification
 from library_agent.chat import answer as answer_mod
 from library_agent.chat import audit
 from library_agent.chat import effort as effort_mod
@@ -129,6 +130,7 @@ async def run_turn(
     caller: str = "ui",
     effort: str | None = None,
     pinned_chunk_ids: list[uuid.UUID] | None = None,
+    ceiling: str | None = None,
 ) -> AsyncIterator[dict]:
     """Yields SSE-shaped events: meta → sources → thinking* → token* → done.
 
@@ -175,6 +177,16 @@ async def run_turn(
                 [uuid.UUID(x) for x in conv.cartridge_ids] if conv.cartridge_ids else None
             )
             history = await _history(db, conversation_id) if conversational else []
+            if ceiling is not None:  # "" clears it; the conversation keeps what it was given
+                conv.ceiling = ceiling or None
+            ceiling = conv.ceiling
+
+        # Classification: what this question may draw on -- at or below the conversation's
+        # ceiling, and at or below the remote ceiling when the model is not on this machine.
+        scale = classification.load()
+        top = classification.effective_ceiling(ceiling, remote=providers.is_remote(model), s=scale)
+        levels = classification.allowed_levels(top, s=scale)
+        withheld = 0
 
         query = question
         needs_retrieval = True
@@ -267,6 +279,7 @@ async def run_turn(
                         else max(3, lvl.passages // len(queries) + 2),
                         category_ids=category_ids,
                         cartridge_ids=cartridge_ids,
+                        levels=levels,
                         document_ids=document_ids,
                         favour=named,
                     ):
@@ -289,6 +302,7 @@ async def run_turn(
                         else max(2, lvl.readings // len(queries) + 1),
                         category_ids=category_ids,
                         cartridge_ids=cartridge_ids,
+                        levels=levels,
                         document_ids=document_ids,
                         favour=named,
                     ):
@@ -306,7 +320,20 @@ async def run_turn(
                         for h in state.hits
                         if h.kind == "live" or h.document_id in docs_in or h.chunk_id in pinned_in
                     ]
+                hit_levels = await classification.hit_levels(db, state.hits, scale)
+                if levels is not None:
+                    # A held passage above the ceiling is refused like any other.
+                    allowed = set(levels)
+                    kept = [
+                        (h, lv)
+                        for h, lv in zip(state.hits, hit_levels, strict=True)
+                        if lv in allowed or h.kind == "live"
+                    ]
+                    withheld = len(state.hits) - len(kept)
+                    state.hits, hit_levels = [h for h, _ in kept], [lv for _, lv in kept]
                 state.sources = build_sources(state.hits, {h.chunk_id for h in held_hits})
+                for s, lv in zip(state.sources, hit_levels, strict=True):
+                    s.level = lv
                 docs = {
                     d.id: d
                     for d in (
@@ -327,6 +354,11 @@ async def run_turn(
                     s.readings_only = d.readings_only
                     s.cartridge = provenance.get(d.id)
 
+        if withheld:
+            yield {
+                "event": "withheld",
+                "data": {"count": withheld, "ceiling": scale.level(top).label},
+            }
         yield {
             "event": "sources",
             "data": [
@@ -343,9 +375,27 @@ async def run_turn(
                     "live": s.live,
                     "artifact_id": s.artifact_id,
                     "page_end": s.page_end,
+                    "level": s.level,
                 }
                 for s in state.sources
             ],
+        }
+        # The level of what the model read as a whole: an uncited paragraph takes it
+        # (strict), and the answer's banner is never lower than what it cites.
+        yield {
+            "event": "classification",
+            "data": {
+                "scale": [
+                    {"id": lv.id, "label": lv.label, "short": lv.short, "colour": lv.colour}
+                    for lv in scale.levels
+                ],
+                "mode": scale.mode,
+                "default": scale.default,
+                "context": scale.highest([s.level for s in state.sources])
+                if state.sources
+                else scale.default,
+                "ceiling": top,
+            },
         }
 
         messages = answer_mod.build_messages(
@@ -405,6 +455,18 @@ async def run_turn(
                 brief=question,
             )
 
+        # The answer's classification: each paragraph the highest level it cites, an uncited
+        # one the level of everything the model read (strict), the banner the highest of all.
+        context_level = (
+            scale.highest([s.level for s in state.sources]) if state.sources else scale.default
+        )
+        marking = None
+        if scale.marking:
+            _, banner = classification.marked_markdown(
+                scale, cleaned, {s.n: s.level for s in state.sources if s.level}, context_level
+            )
+            marking = {"context": context_level, "banner": banner, "ceiling": top}
+
         async with session_scope() as db:
             db.add(
                 Message(
@@ -433,9 +495,11 @@ async def run_turn(
                                 "artifact_id": s.artifact_id,
                                 "page_end": s.page_end,
                                 "span_chunk_ids": s.span_chunk_ids,
+                                "level": s.level,
                             }
                             for s in used
                         ],
+                        "classification": marking,
                         "retrieved": len(state.sources),
                         "stance": stance,
                         "flags": flags,
@@ -450,6 +514,7 @@ async def run_turn(
                 "answer": cleaned,
                 "cited": [s.n for s in used],
                 "flags": flags,
+                "classification": marking,
                 **metrics,
             },
         }

@@ -247,6 +247,13 @@ body {
 .state.s2 { background:var(--verdigris); }
 /* Where a volume came from: a dot in its cartridge's colour. */
 .dot { width:7px; height:7px; flex:0 0 7px; border-radius:50%; background:var(--c); }
+.pmark { font:600 .78em/1 var(--mono); color:var(--lc); letter-spacing:.02em; margin-right:.15em; }
+.cbanner { grid-column:1 / -1; text-align:center; font:600 10.5px/1 var(--mono); letter-spacing:.18em; color:var(--lc);
+  border-top:1px solid var(--lc); border-bottom:1px solid var(--lc); padding:4px 0; margin:.2em 0 .9em; }
+.cbanner.bottom { margin:.9em 0 .2em; }
+.lvl { font:9.5px/1 var(--mono); letter-spacing:.04em; color:var(--lc); border:1px solid var(--lc); border-radius:2px; padding:2px 4px; }
+select.lvl-set { font:10px var(--mono); color:var(--lc); border:1px solid var(--lc); background:transparent; border-radius:2px; }
+.withheld { font:11px var(--mono); color:var(--amber); margin:4px 0; }
 .badge { font:9.5px/1 var(--mono); letter-spacing:.04em; color:var(--faint); border:1px solid var(--rule); border-radius:2px; padding:2px 4px; }
 /* Actions stay out of the way until the volume is under the cursor. */
 .vol-acts { display:flex; gap:10px; max-height:0; overflow:hidden; opacity:0;
@@ -1026,6 +1033,7 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
         <select id="effort" title="How much work the librarian does around the model: quick is a lookup; deep breaks the question into several searches first">
           <option value="quick">quick</option><option value="normal" selected>normal</option><option value="deep">deep</option>
         </select>
+        <select id="ceiling" title="The highest classification an answer may draw on. A remote model is also held to the remote ceiling in Settings › Classification." hidden></select>
         <span class="stance">
           <button id="stance-btn" data-on="false" aria-haspopup="true" aria-expanded="false" onclick="toggleStanceMenu()">stance</button>
           <div class="stance-menu" id="stance-menu" role="menu"></div>
@@ -1619,6 +1627,7 @@ function volHtml(d, words = []) {
         <span>${STATE[d.tier]}</span>
         ${c ? `<span class="dot" style="--c:${esc(c.colour)}" title="from ${esc(c.name)}"></span>` : ''}
         ${d.readings_only ? `<span class="badge" title="The owner shared their reading, not the text">reading only</span>` : ''}
+        ${lvlBadge(d.classification)}
         <span>·</span>
         <span>${d.page_count ? d.page_count + 'pp' : d.kind}</span>
         <span>·</span>
@@ -2978,6 +2987,126 @@ function renderAnswer(el, text) {
   }
 }
 
+/* ── classification ───────────────────────────────────────────────────── */
+// The scale from Settings › Classification. A level wears its own colour wherever it
+// shows: a volume's badge, a paragraph's portion mark, an answer's banner.
+let scale = null;
+async function loadScale() {
+  try { scale = await (await fetch('/api/settings/classification')).json(); } catch { scale = null; }
+  fillCeiling();
+}
+const lvOf = id => scale && (scale.levels.find(l => l.id === id) || scale.levels.find(l => l.id === scale.default));
+const rankOf = id => { const i = scale.levels.findIndex(l => l.id === id); return i < 0 ? scale.levels.findIndex(l => l.id === scale.default) : i; };
+const highestOf = ids => { ids = ids.filter(Boolean); return ids.length ? ids.reduce((a, b) => rankOf(b) > rankOf(a) ? b : a) : scale.default; };
+function fillCeiling() {
+  const sel = $('#ceiling'); if (!sel) return;
+  if (!scale) { sel.hidden = true; return; }
+  const was = sel.value || (() => { try { return localStorage.getItem('ceiling') || ''; } catch { return ''; } })();
+  sel.innerHTML = `<option value="">any level</option>` + scale.levels.map(l => `<option value="${esc(l.id)}">≤ ${esc(l.label)}</option>`).join('');
+  sel.value = scale.levels.some(l => l.id === was) ? was : '';
+  sel.hidden = false;
+  sel.onchange = () => { try { localStorage.setItem('ceiling', sel.value); } catch {} };
+}
+// A volume's level on the shelf, shown only when it is not the default -- 1,600 badges
+// saying "Internal" would say nothing.
+function lvlBadge(id) {
+  if (!scale || !id || id === scale.default) return '';
+  const l = lvOf(id);
+  return `<span class="lvl" style="--lc:${esc(l.colour)}" title="${esc(l.label)}">${esc(l.short)}</span>`;
+}
+function lvlSelect(d) {
+  if (!scale) return '';
+  const cur = d.classification || scale.default, l = lvOf(cur);
+  const why = { manual: 'set by hand', marking: 'from the markings in its text', cartridge: 'from the cartridge it came in' }[d.classification_source] || 'the default';
+  return `<span title="Classification: ${esc(l.label)}, ${esc(why)}"><select class="lvl-set" style="--lc:${esc(l.colour)}" onchange="setLevel('${d.id}', this.value)">${
+    scale.levels.map(x => `<option value="${esc(x.id)}" ${x.id === cur ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}${
+    d.classification_source === 'manual' ? `<option value="__auto">read the markings again</option>` : ''}</select></span>`;
+}
+async function setLevel(id, v) {
+  const r = await fetch(`/api/documents/${id}/classification`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ level: v === '__auto' ? null : v }) });
+  if (!r.ok) { say('Could not set the level.', true); return; }
+  const j = await r.json();
+  say(`Now ${lvOf(j.classification)?.label || 'the default'}${j.source === 'manual' ? ', set by hand' : ''}.`);
+  openVolume(id); loadShelf();
+}
+const pmark = id => { const l = lvOf(id); return `<span class="pmark" style="--lc:${esc(l.colour)}" title="${esc(l.label)}">(${esc(l.short)})</span> `; };
+const bannerHtml = (id, where) => { const l = lvOf(id); return `<div class="cbanner ${where}" style="--lc:${esc(l.colour)}">${esc(l.label.toUpperCase())}</div>`; };
+// An answer, marked: each block the highest level among the sources it cites; a block
+// citing none takes what the model read as a whole (strict) or the default; the banner,
+// top and bottom, the highest of them all. Headings, code and tables are not marked.
+function markAnswer(el, ctx) {
+  if (!scale || !scale.marking) return;
+  el.querySelectorAll('.cbanner, .pmark').forEach(b => b.remove());
+  const levelOf = node => {
+    const ns = [...node.querySelectorAll('.mark')].flatMap(m => m.dataset.n.split(' ').map(Number));
+    const lv = ns.map(n => sources.find(s => s.n === n)?.level).filter(Boolean);
+    return lv.length ? highestOf(lv) : (scale.mode === 'strict' ? (ctx || scale.default) : scale.default);
+  };
+  const found = [];
+  for (const b of [...el.children]) {
+    if (b.classList.contains('apparatus') || /^(H\d|PRE|TABLE|HR|BLOCKQUOTE|DIV)$/.test(b.tagName)) continue;
+    if (b.tagName === 'UL' || b.tagName === 'OL') {
+      for (const li of b.children) { const lv = levelOf(li); found.push(lv); li.insertAdjacentHTML('afterbegin', pmark(lv)); }
+      continue;
+    }
+    const lv = levelOf(b); found.push(lv); b.insertAdjacentHTML('afterbegin', pmark(lv));
+  }
+  if (!found.length) return;
+  const top = highestOf(found);
+  el.insertAdjacentHTML('afterbegin', bannerHtml(top, 'top'));
+  el.insertAdjacentHTML('beforeend', bannerHtml(top, 'bottom'));
+}
+// A composition carries its marks in its text ("(C) ..."): paint the ones on the scale.
+function paintMarks(el) {
+  if (!scale) return;
+  const by = new Map(scale.levels.map(l => [l.short, l.id]));
+  for (const b of el.querySelectorAll('p, li')) {
+    const first = b.firstChild;
+    if (!first || first.nodeType !== 3) continue;
+    const m = first.textContent.match(/^\s*\(([^)]{1,12})\)\s/);
+    if (!m || !by.has(m[1])) continue;
+    first.textContent = first.textContent.slice(m[0].length);
+    b.insertAdjacentHTML('afterbegin', pmark(by.get(m[1])));
+  }
+}
+// Settings › Classification: the scale, the ceilings, and whether output is marked.
+async function loadClassification() {
+  const el = $('#class-sect'); if (!el) return;
+  await loadScale();
+  if (!scale) { el.innerHTML = `<p class="label">Classification</p><div class="empty">Unavailable.</div>`; return; }
+  const opts = cur => scale.levels.map(l => `<option value="${esc(l.id)}" ${l.id === cur ? 'selected' : ''}>${esc(l.label)}</option>`).join('');
+  el.innerHTML = `<p class="label">Classification</p>
+    <p class="empty" style="padding:0 0 8px">Every volume has a level: read from banner lines and portion marks in its text, from the cartridge it came in, or set by hand in the reader. Answers and compositions are marked paragraph by paragraph with the highest level each one cites, and a banner with the highest of all. This labels and enforces; it is not an accredited system for handling classified information.</p>
+    <table class="kv">
+      <tr><td>Scale</td><td><select id="cl-scheme">${scale.presets.map(p => `<option value="${p}" ${p === scale.scheme ? 'selected' : ''}>${p === 'us' ? 'U.S. (U · CUI · C · S · TS)' : 'Company (Public · Internal · Confidential · Restricted)'}</option>`).join('')}${scale.scheme === 'custom' ? '<option value="custom" selected>custom</option>' : ''}</select></td>
+        <td>${scale.levels.map(l => `<span class="lvl" style="--lc:${esc(l.colour)}" title="${esc(l.label)}">${esc(l.short)}</span>`).join(' ')}</td></tr>
+      <tr><td>Unmarked volumes</td><td><select id="cl-default">${opts(scale.default)}</select></td><td>the level of a volume with no marking and nothing set</td></tr>
+      <tr><td>Remote ceiling</td><td><select id="cl-remote">${opts(scale.remote_ceiling)}</select></td><td>the highest level a model on another machine may read, whatever the question asks; also the token API</td></tr>
+      <tr><td>Export ceiling</td><td><select id="cl-export">${opts(scale.export_ceiling)}</select></td><td>nothing above it leaves in a cartridge, at any level of sharing</td></tr>
+      <tr><td>Uncited paragraphs</td><td><select id="cl-mode"><option value="strict" ${scale.mode === 'strict' ? 'selected' : ''}>strict</option><option value="cited" ${scale.mode === 'cited' ? 'selected' : ''}>cited only</option></select></td><td>strict: a paragraph citing nothing takes the highest level the model read</td></tr>
+      <tr><td>Mark output</td><td><label class="toggle"><input type="checkbox" id="cl-marking" ${scale.marking ? 'checked' : ''}/> portion marks and banners</label></td><td></td></tr>
+    </table>
+    <div class="acts" style="margin-top:8px"><button class="linkish" onclick="saveScale(this)">save</button><button class="linkish" onclick="rescanLevels(this)">read every volume's markings again</button><span id="cl-out" class="shelf-n" style="margin-left:0"></span></div>`;
+}
+async function saveScale(btn) {
+  const scheme = $('#cl-scheme').value;
+  const body = scheme !== scale.scheme && scheme !== 'custom' ? { scheme }  // a new preset brings its own ceilings
+    : { default: $('#cl-default').value, remote_ceiling: $('#cl-remote').value, export_ceiling: $('#cl-export').value, mode: $('#cl-mode').value, marking: $('#cl-marking').checked };
+  btn.disabled = true; $('#cl-out').textContent = scheme !== scale.scheme ? 'saving, then reading every volume again…' : 'saving…';
+  const r = await fetch('/api/settings/classification', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  btn.disabled = false;
+  if (!r.ok) { $('#cl-out').textContent = (await r.json()).detail || 'could not save'; return; }
+  const j = await r.json();
+  $('#cl-out').textContent = j.rescanned ? levelTally(j.rescanned) : 'saved';
+  await loadClassification(); loadShelf();
+}
+const levelTally = r => Object.entries(r.volumes).map(([k, n]) => `${n} ${k}`).join(' · ') + (r.portion_marked_passages ? ` · ${r.portion_marked_passages} passages portion-marked` : '');
+async function rescanLevels(btn) {
+  btn.disabled = true; $('#cl-out').textContent = 'reading…';
+  const r = await (await fetch('/api/settings/classification/rescan', { method:'POST' })).json();
+  btn.disabled = false; $('#cl-out').textContent = levelTally(r); loadShelf();
+}
+
 /* ── ask ──────────────────────────────────────────────────────────────── */
 async function ask(text) {
   if (busy) return;
@@ -3002,8 +3131,9 @@ async function ask(text) {
                  conversation_id:convId, category_ids:subjects.size ? [...subjects] : null,
                  cartridge_ids:cartridges.size ? [...cartridges] : null, stance, effort: $('#effort').value,
                  pinned_chunk_ids: held.size ? [...held.keys()] : null,
-                 document_ids: heldDocs.size ? [...heldDocs.keys()] : null };
-  let answer = '', ev = null, buf = '', thought = '';
+                 document_ids: heldDocs.size ? [...heldDocs.keys()] : null,
+                 ceiling: $('#ceiling').value || '' };
+  let answer = '', ev = null, buf = '', thought = '', ctxLevel = null;
   try {
     const res = await fetch('/api/chat', {
       method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
@@ -3035,6 +3165,11 @@ async function ask(text) {
           }
           for (const h of (cs.held_back || [])) say(`${h.module} not consulted — ${h.reason}.`, true);
         }
+        else if (ev === 'classification') ctxLevel = JSON.parse(raw).context;
+        else if (ev === 'withheld') {
+          const w = JSON.parse(raw);
+          asked.insertAdjacentHTML('beforeend', `<span class="withheld">${w.count} passage${w.count === 1 ? '' : 's'} above ${esc(w.ceiling)} withheld</span>`);
+        }
         else if (ev === 'sources') {
           sources = JSON.parse(raw);
           web.scan(false); web.light([...new Set(sources.map(s => s.document_id))]);
@@ -3060,6 +3195,7 @@ async function ask(text) {
           murmur.stop();
           const d = JSON.parse(raw);
           renderAnswer(said, d.answer);
+          if (d.classification) markAnswer(said, d.classification.context || ctxLevel);
           renderFlags(wrap, d.flags);
           const cited = (d.cited || []).length;
           if (!cited && sources.length) said.insertAdjacentHTML('beforeend',
@@ -3142,8 +3278,9 @@ async function openChat(id) {
     if (st) { wrap.dataset.stance = st; wrap.insertAdjacentHTML('afterbegin', `<div class="stanced">${esc(stanceMeta.find(s => s.id === st)?.label || st)}</div>`); }
     const said = document.createElement('div'); said.className = 'said';
     wrap.appendChild(said);
-    sources = (m.sources?.cited || []).map(c => ({ n: c.n, title: c.title, page: c.page, page_end: c.page_end, document_id: c.document_id, section: c.section || '', kind: c.kind }));
+    sources = (m.sources?.cited || []).map(c => ({ n: c.n, title: c.title, page: c.page, page_end: c.page_end, document_id: c.document_id, section: c.section || '', kind: c.kind, level: c.level }));
     renderAnswer(said, m.content);
+    if (m.sources?.classification) markAnswer(said, m.sources.classification.context);
     renderFlags(wrap, m.sources?.flags);
     asked = null;
   }
@@ -3257,7 +3394,7 @@ let findTimer;
 async function runFind(q) {
   const cats = subjects.size ? '&categories=' + [...subjects].join(',') : '';
   const carts = cartridges.size ? '&cartridges=' + [...cartridges].join(',') : '';
-  const r = await (await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=10${cats}${carts}`)).json();
+  const r = await (await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=10${cats}${carts}${$('#ceiling').value ? '&ceiling=' + encodeURIComponent($('#ceiling').value) : ''}`)).json();
   // The cloud closes in on where the findings are; each listed one picks out its dot.
   const found = [...new Set(r.hits.map(h => h.document_id))];
   web.focus(found); web.light(found); web.hover(null);
@@ -3268,6 +3405,7 @@ async function runFind(q) {
         <span class="hit-t">${hl(esc(h.document_title), words)}</span>
         ${h.page ? `<span class="hit-pg">p.${h.page}</span>` : ''}
         ${h.exact ? `<span class="badge exact" title="Contains exactly what you typed">exact</span>` : ''}
+        ${lvlBadge(h.level)}
         <span class="hit-rk">dense ${h.dense_rank ?? '–'} · lexical ${h.lexical_rank ?? '–'}</span>
         <button type="button" class="hold" aria-pressed="${held.has(h.chunk_id)}" data-id="${h.chunk_id}" data-title="${esc(h.document_title)}" data-page="${h.page ?? ''}" data-doc="${h.document_id}" onclick="event.stopPropagation(); holdFrom(this)" title="Hold this passage: the next answer starts from it">hold</button>
       </div>
@@ -3450,6 +3588,7 @@ async function openVolume(id) {
         <span>${state}</span>
         ${d.cartridge ? `<span><span class="dot" style="--c:${esc(d.cartridge.colour)}"></span>from ${esc(d.cartridge.name)}</span>` : ''}
         ${d.genre ? `<span title="What kind of writing this is; it changes how the library reads it">${esc(d.genre)}</span>` : ''}
+        ${lvlSelect(d)}
         ${d.page_count ? `<span>${d.page_count} pages</span>` : ''}
         <span>${d.sections.length} sections</span>
         ${figs.length ? `<span>${figs.length} figure${figs.length === 1 ? '' : 's'}</span>` : ''}
@@ -3612,7 +3751,15 @@ function renderComposition(el, markdown, opts = {}) {
   const tm = body.match(/^\s*#\s+(.+)$/m);
   const docTitle = tm ? tm[1].trim() : (opts.title || '');
   if (tm) body = body.slice(0, tm.index) + body.slice(tm.index + tm[0].length);
+  // Its banner: a bold line of nothing but a level's name, before the title.
+  let bannerId = null;
+  const bm = body.match(/^\s*\*\*([A-Z][A-Z0-9 /-]{1,40})\*\*\s*\n/);
+  if (bm && scale) {
+    const l = scale.levels.find(x => x.label.toUpperCase() === bm[1].trim());
+    if (l) { bannerId = l.id; body = body.slice(bm[0].length); }
+  }
   el.innerHTML = '';
+  if (bannerId) el.insertAdjacentHTML('beforeend', bannerHtml(bannerId, 'top'));
   if (docTitle) { const h = document.createElement('h1'); h.className = 't'; h.textContent = docTitle; el.appendChild(h); }
   // Split into sections exactly as the live view builds them: the heading outside, the
   // body in a `.said` grid so the citation notes sit in the right column, not stacked
@@ -3628,6 +3775,7 @@ function renderComposition(el, markdown, opts = {}) {
     if (!md) return;
     const said = document.createElement('div'); said.className = 'said md';
     renderAnswer(said, md);
+    paintMarks(said);
     for (const bq of said.querySelectorAll('blockquote')) {
       if (/^\s*⚠/.test(bq.textContent)) { const d = document.createElement('div'); d.className = 'caveat'; d.innerHTML = bq.innerHTML; bq.replaceWith(d); }
     }
@@ -3646,6 +3794,7 @@ function renderComposition(el, markdown, opts = {}) {
       `<div><b>[${x.n}]</b>${esc(x.title)}${x.page ? `, p.${x.page}` : ''}${x.section ? ' — ' + esc((x.section.split(' › ').slice(1).join(' › ')) || x.section) : ''}</div>`).join('');
     el.appendChild(r);
   }
+  if (bannerId) el.insertAdjacentHTML('beforeend', bannerHtml(bannerId, 'bottom'));
   if (seal) { const f = document.createElement('figure'); f.className = 'seal'; f.innerHTML = seal + (id ? `<figcaption>The Library · <code>${esc(id)}</code></figcaption>` : ''); el.appendChild(f); }
 }
 async function composeDoc() {
@@ -3658,7 +3807,7 @@ async function composeDoc() {
   // No model here: Write runs on the compose role (its own, larger model), not the chat
   // selector. The model actually used comes back on the plan event.
   const body = { brief, length: write.length, review: write.review, force: !!write.force,
-    category_ids: [...subjects], cartridge_ids: [...cartridges],
+    category_ids: [...subjects], cartridge_ids: [...cartridges], ceiling: $('#ceiling').value || null,
     scope_label: [room ? room + "'s shelf" : '', subjects.size ? `${subjects.size} subjects` : ''].filter(Boolean).join(' and ') };
   let secSources = [], secSearches = [], secEl = null, said = null, buf = '', ev = null, text = '', result = null, wove = '', lastCh = null;
   let usingModel = '', total = 0;
@@ -3718,6 +3867,7 @@ async function composeDoc() {
           document.getElementById('wr-o' + s.index)?.setAttribute('data-state', 'done');
           setRing((s.index + 1) / (total || 1), s.index + 1, total, s.heading);
           sources = secSources; renderAnswer(said, s.body);  // the apparatus reads the global
+          markAnswer(said, s.context_level); said.querySelectorAll('.cbanner').forEach(b => b.remove());
           for (const fl of (s.flags || [])) {
             const c = document.createElement('div'); c.className = 'caveat';
             c.innerHTML = `<b>⚠ Review</b> <q>${esc(fl.quote)}</q> — ${esc(fl.issue)}${fl.condition ? ` <em>Could fail if ${esc(fl.condition)}.</em>` : ''}`;
@@ -3915,6 +4065,7 @@ async function loadSettings() {
     <div class="sect" id="prov-sect"><p class="label">Providers</p><div class="empty">Looking…</div></div>
     <div class="sect" id="roles-sect"><p class="label">Models</p><div class="empty">Looking…</div></div>
     <div class="sect" id="modules-sect"><p class="label">Modules</p><div class="empty">Looking…</div></div>
+    <div class="sect" id="class-sect"><p class="label">Classification</p><div class="empty">Looking…</div></div>
     <div class="sect"><p class="label">Fixed</p>${kv(s.models)}</div>
     <div class="sect"><p class="label">Retrieval</p>${kv(s.retrieval)}</div>
     <div class="sect"><p class="label">Library</p>${kv(s.library)}
@@ -3945,6 +4096,7 @@ async function loadSettings() {
   loadProviders();
   loadAbout();
   loadModules();
+  loadClassification();
 }
 // Providers and roles. Ollama is the default and needs no entry; a provider is any
 // OpenAI-protocol endpoint, named once and then addressed by prefix. Each role picks
@@ -4467,7 +4619,7 @@ function tourMaybe() {
   if (!done) setTimeout(tourStart, 1400);
 }
 
-setView('ask'); loadModels(); holdings(); loadRack().then(loadShelf).then(tourMaybe); loadSubjects(); loadJobs(); loadTokens();
+setView('ask'); loadModels(); holdings(); loadScale().finally(() => loadRack().then(loadShelf).then(tourMaybe)); loadSubjects(); loadJobs(); loadTokens();
 web.init();
 setInterval(loadJobs, 4000);
 incidentBadge();

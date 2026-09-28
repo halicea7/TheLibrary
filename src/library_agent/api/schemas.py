@@ -26,6 +26,10 @@ class DocumentOut(BaseModel):
     cartridge: dict | None = None  # {id, name, colour} when it came in a cartridge
     shelf: dict | None = None  # {top, top_id, sub, sub_id}: the one place it sits
     genre: str | None = None
+    # Its classification level (null: the scale's default) and where that came from:
+    # "manual", "marking", or "cartridge".
+    classification: str | None = None
+    classification_source: str | None = None
 
 
 class SectionOut(BaseModel):
@@ -70,6 +74,7 @@ class SearchHitOut(BaseModel):
     # "meaning" was chosen by embedding and shares none -- a related excerpt, not proof.
     lift_kind: str | None = None
     exact: bool = False  # the passage contains every exact term in the query
+    level: str | None = None  # its classification level (portion, else volume, else default)
 
 
 class SearchResponse(BaseModel):

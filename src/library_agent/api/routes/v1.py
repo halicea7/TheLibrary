@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from library_agent import classification
 from library_agent.api.routes.documents import read_document as _read_document
 from library_agent.chat.answer import STANCES
 from library_agent.chat.session import get_or_create_conversation, run_turn
@@ -35,6 +36,10 @@ class AskIn(BaseModel):
     subjects: list[str] = Field(default_factory=list, description="shelf names to stay within")
     model: str | None = Field(default=None, description="'general' or 'technical', or a model name")
     stance: str | None = None
+    ceiling: str | None = Field(
+        default=None,
+        description="the highest classification level to draw on; never above the remote ceiling",
+    )
     conversation_id: uuid.UUID | None = None
     remember: bool = Field(default=True, description="keep the thread for follow-ups")
     temperature: float | None = Field(
@@ -163,6 +168,8 @@ async def ask(req: AskIn, request: Request) -> AskOut:
             caller=_caller(request),
             effort=req.effort,
             pinned_chunk_ids=req.passages or None,
+            # What the API hands a caller leaves this machine: held to the remote ceiling.
+            ceiling=classification.effective_ceiling(req.ceiling, remote=True),
         ):
             kind, data = ev["event"], ev["data"]
             if kind == "meta":
@@ -212,7 +219,12 @@ async def ask(req: AskIn, request: Request) -> AskOut:
 
 @router.get("/search")
 async def search(
-    q: str, db: SessionDep, room: str | None = None, subjects: str | None = None, limit: int = 8
+    q: str,
+    db: SessionDep,
+    room: str | None = None,
+    subjects: str | None = None,
+    limit: int = 8,
+    ceiling: str | None = None,
 ) -> dict:
     """Passages, ranked. `subjects` is comma-separated shelf names."""
     if len(q.strip()) < 2:
@@ -221,9 +233,12 @@ async def search(
     sids = await _subject_ids(db, [s for s in (subjects or "").split(",") if s.strip()])
     n = max(1, min(50, limit))
     terms = literal_terms(q)
+    # Passages handed to a caller leave this machine: held to the remote ceiling.
+    levels = classification.allowed_levels(ceiling, remote=True)
     hits = await retrieve(
         db,
         q,
+        levels=levels,
         limit=n + 10 if terms else n,
         category_ids=sids or None,
         cartridge_ids=[rid] if rid else None,
@@ -232,7 +247,12 @@ async def search(
     exact: set = set()
     if terms:  # a query that names something exactly: passages holding it first
         found = await literal_hits(
-            db, terms, limit=n, category_ids=sids or None, cartridge_ids=[rid] if rid else None
+            db,
+            terms,
+            limit=n,
+            category_ids=sids or None,
+            cartridge_ids=[rid] if rid else None,
+            levels=levels,
         )
         hits, exact = exact_first(hits, found, terms, n)
     return {
@@ -320,6 +340,10 @@ class ComposeIn(BaseModel):
     review: bool = Field(default=True, description="flag claims that reach past their evidence")
     force: bool = Field(default=False, description="write even when coverage is thin")
     shelve: bool = Field(default=False, description="also add the document to the library")
+    ceiling: str | None = Field(
+        default=None,
+        description="the highest classification level to draw on; never above the remote ceiling",
+    )
 
 
 @router.post("/compose")
@@ -346,6 +370,7 @@ async def compose_json(req: ComposeIn, request: Request) -> dict:
         review=req.review,
         force=req.force,
         caller=_caller(request),
+        ceiling=classification.effective_ceiling(req.ceiling, remote=True),
     ):
         if ev["event"] == "done":
             result = ev["data"]

@@ -193,6 +193,11 @@ async def ingest(
         db.add(Embedding(owner_kind=OwnerKind.CHUNK, owner_id=cid, model=model, vec=vec))
 
     await db.flush()
+    # Its markings: a banner line gives the volume its level, a "(S) ..." opening a
+    # paragraph gives that passage its own.
+    from library_agent.classification import classify_document
+
+    await classify_document(db, doc)
     return IngestResult(
         document_id=doc.id,
         title=title,

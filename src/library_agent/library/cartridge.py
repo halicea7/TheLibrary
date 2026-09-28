@@ -341,6 +341,9 @@ _DOC_COLS = (
     "tier",
     "genre",
     "added_at",
+    # The sender's classification level: honoured on arrival when the receiving scale
+    # has that level, and never lowered by it.
+    "classification",
 )
 _SEC_COLS = (
     "id",
@@ -876,6 +879,7 @@ async def import_cartridge(
         sec_map: dict[str, uuid.UUID] = {}
         chunk_map: dict[str, uuid.UUID] = {}
         introduced: set[uuid.UUID] = set()
+        shipped_levels: dict[uuid.UUID, str] = {}
         sections_by_doc: dict[str, list[dict]] = {}
         for s in sections:
             sections_by_doc.setdefault(s["document_id"], []).append(s)
@@ -964,6 +968,8 @@ async def import_cartridge(
             await db.flush()
             doc_map[d["id"]] = new_id
             introduced.add(new_id)
+            if d.get("classification"):
+                shipped_levels[new_id] = d["classification"]
             res.documents_introduced += 1
             db.add(CartridgeDocument(cartridge_id=cid, document_id=new_id, introduced=True))
 
@@ -1163,6 +1169,21 @@ async def import_cartridge(
         finally:
             if own:
                 await c.aclose()
+    await db.flush()
+    # Levels: the receiver's own reading of markings and of this cartridge's clearance,
+    # raised to what the sender marked where the receiver's scale knows that level.
+    from library_agent import classification as cls
+
+    scale = cls.load()
+    ids = {lv.id for lv in scale.levels}
+    for did in introduced:
+        doc = await db.get(Document, did)
+        if doc is None:
+            continue
+        await cls.classify_document(db, doc, scale)
+        sent = shipped_levels.get(did)
+        if sent in ids and scale.rank(sent) > scale.rank(doc.classification):
+            doc.classification, doc.classification_source = sent, "cartridge"
     await db.flush()
     return res
 

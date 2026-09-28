@@ -45,12 +45,14 @@ async def scope_documents(
     db: AsyncSession,
     category_ids: list[uuid.UUID] | None = None,
     cartridge_ids: list[uuid.UUID] | None = None,
+    levels: list[str] | None = None,
 ) -> set[uuid.UUID] | None:
     """The volumes a scope admits, by one rule for every view of the threads: a shelf
     stands for its sub-shelves, and a volume is on it by home shelf or by subject; a
-    cartridge admits the volumes it carries; both together admit what both admit. None
-    when nothing is scoped."""
-    if not category_ids and not cartridge_ids:
+    cartridge admits the volumes it carries; both together admit what both admit; a
+    classification ceiling (`levels`) admits the volumes at or below it. None when nothing
+    is scoped."""
+    if not category_ids and not cartridge_ids and not levels:
         return None
     from library_agent.library.shelving import expand_category_ids
 
@@ -79,6 +81,21 @@ async def scope_documents(
             ).scalars()
         )
         keep = carts if keep is None else keep & carts
+    if levels:
+        from library_agent.classification import default_level
+
+        cleared = set(
+            (
+                await db.execute(
+                    text(
+                        "select id from document"
+                        " where coalesce(classification, cast(:d as text)) = any(cast(:l as text[]))"
+                    ),
+                    {"d": default_level(), "l": list(levels)},
+                )
+            ).scalars()
+        )
+        keep = cleared if keep is None else keep & cleared
     return keep or set()
 
 
@@ -175,13 +192,14 @@ async def relevant_threads(
     limit: int = 10,
     category_ids: list[uuid.UUID] | None = None,
     cartridge_ids: list[uuid.UUID] | None = None,
+    levels: list[str] | None = None,
 ) -> list[dict]:
     """Cross-document threads nearest the brief, each with its documents and, where the
     library judged one, the disagreement at its heart."""
     if limit <= 0:
         return []
     vec = await embed_query(brief, client)
-    docs = await scope_documents(db, category_ids, cartridge_ids)
+    docs = await scope_documents(db, category_ids, cartridge_ids, levels)
     if docs is not None and not docs:
         return []
     rows = (

@@ -214,6 +214,30 @@ A folder can also arrive as a cartridge directly: `./library import ~/hacktricks
 
 Inside a room, eject removes what the cartridge brought and leaves what was already yours. A document that arrives from two cartridges is one document with two memberships; subjects merge by name; vectors ship as float16 and are loaded directly when the embedding model matches, re-embedded from the shipped text when it doesn't. Clusters and contradictions are never shipped — the receiver recomputes them across the new whole, which is the point. Content is hash-verified; there is no signing.
 
+## Classification
+
+Every volume has a **level** on a scale you choose in **Settings › Classification**: the U.S. scale (*Unclassified · CUI · Confidential · Secret · Top Secret*) or a company one (*Public · Internal · Confidential · Restricted*). A volume gets its level from one of four places:
+
+- a banner line in its text: a line that's nothing but a marking, such as `SECRET//NOFORN` or `COMPANY CONFIDENTIAL`, never the word mid-sentence;
+- the clearance of the cartridge it came in, or the level its sender marked it with;
+- the reader, where the level in the header can be set by hand;
+- otherwise, the scale's default.
+
+A passage opening with a portion mark such as `(S)` or `(C)` carries that level itself, and a volume is never lower than its highest passage.
+
+**Enforcement.**
+
+- **Ceiling.** A ceiling next to *effort* keeps a conversation, a Find or a Write below a level. Passages and readings above it aren't retrieved at all, held passages above it are dropped, and the answer says how many were withheld.
+- **Remote ceiling.** A model on another machine (a remote provider, for either writing or checking) is always held to the remote ceiling, whatever the question asks. So is everything the token API hands out.
+- **Export ceiling.** Nothing above the export ceiling leaves in a cartridge, at any level of sharing. The preview says how many volumes were held back.
+
+**Marking.** Output follows the derivative rule:
+
+- **Paragraphs.** Each paragraph and list item of an answer or composition is marked with the highest level among the sources it cites, as `(C)`. A paragraph that cites nothing takes the highest level the model read (*strict*, the default) or the default (*cited only*).
+- **Banners.** A banner in the level's colour sits at the top and bottom with the highest level of all. A saved composition carries its marks and banner in its Markdown.
+
+This labels and enforces a policy you set. It isn't an accredited system for handling classified information: detection reads only markings it's told to look for, and marks on output are derived from sources, not from judging what a sentence reveals.
+
 ## Modules
 
 A **module** is a live connector as an object: a read-only line to an API the librarian can consult during a question. SentinelOne is the first: CVE exposure, whether an indicator has been seen, the application inventory and where an application runs, and agent status. Nothing is ingested. When a question calls for it, the librarian picks one declared operation and fills in its parameters (never a URL, never code), makes one GET to the configured host, and the result joins the passages. It's cited and verified like them, and marked *live* in the module's colour.

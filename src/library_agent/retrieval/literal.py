@@ -16,6 +16,7 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from library_agent.classification import default_level as _default_level
 from library_agent.retrieval.hybrid import SearchHit
 
 _QUOTED = re.compile(r'"([^"]{3,80})"|“([^”]{3,80})”')
@@ -89,6 +90,7 @@ where {conds}
       select 1 from cartridge_document cd
       where cd.document_id = c.document_id and cd.cartridge_id = any(cast(:carts as uuid[]))
   ))
+      and (cast(:levels as text[]) is null or coalesce(c.portion, (select d0.classification from document d0 where d0.id = c.document_id), cast(:deflt as text)) = any(cast(:levels as text[])))
 order by length(c.text)
 limit :lim
 """
@@ -105,6 +107,7 @@ async def literal_hits(
     limit: int = 10,
     category_ids: list[uuid.UUID] | None = None,
     cartridge_ids: list[uuid.UUID] | None = None,
+    levels: list[str] | None = None,
     document_ids: list[uuid.UUID] | None = None,
 ) -> list[SearchHit]:
     """Passages containing every term, case-insensitively, shortest first (the term is a
@@ -115,6 +118,8 @@ async def literal_hits(
         "docs": [str(x) for x in document_ids] if document_ids else None,
         "cats": [str(x) for x in category_ids] if category_ids else None,
         "carts": [str(x) for x in cartridge_ids] if cartridge_ids else None,
+        "levels": levels,
+        "deflt": _default_level() if levels else None,
         "lim": limit,
     }
     conds = []

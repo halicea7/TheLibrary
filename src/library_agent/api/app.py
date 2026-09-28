@@ -25,6 +25,7 @@ from library_agent.api.routes import (
     search,
     v1,
 )
+from library_agent.api.routes import classification as classification_routes
 from library_agent.api.routes import (
     settings as settings_routes,
 )
@@ -91,6 +92,7 @@ app.include_router(v1.router)
 app.include_router(compose.router)
 app.include_router(evaluation.router)
 app.include_router(connectors.router)
+app.include_router(classification_routes.router)
 
 
 @app.get("/api/health", response_model=HealthOut)

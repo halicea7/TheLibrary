@@ -57,6 +57,7 @@ async def retrieve(
     limit: int | None = None,
     category_ids: list[uuid.UUID] | None = None,
     cartridge_ids: list[uuid.UUID] | None = None,
+    levels: list[str] | None = None,
     document_ids: list[uuid.UUID] | None = None,
     favour: list[uuid.UUID] | None = None,
 ) -> list[SearchHit]:
@@ -87,6 +88,7 @@ async def retrieve(
         "use_reflections": rc.use_reflections,
         "category_ids": category_ids,
         "cartridge_ids": cartridge_ids,
+        "levels": levels,
         "weight_lexical": rc.weight_lexical
         if rc.weight_lexical is not None
         else cfg.weight_lexical,

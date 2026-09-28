@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from library_agent.classification import default_level as _default_level
 from library_agent.config import settings
 from library_agent.db.models import OwnerKind
 from library_agent.llm.embed import embed_query
@@ -72,6 +73,7 @@ def _build_sql(use_dense: bool, use_lexical: bool, use_reflections: bool = False
           where cd.document_id = c.document_id
             and cd.cartridge_id = any(cast(:carts as uuid[]))
       ))
+      and (cast(:levels as text[]) is null or coalesce(c.portion, (select d0.classification from document d0 where d0.id = c.document_id), cast(:deflt as text)) = any(cast(:levels as text[])))
 
         union all
         select a.target_id as chunk_id, e.vec
@@ -93,6 +95,7 @@ def _build_sql(use_dense: bool, use_lexical: bool, use_reflections: bool = False
           where cd.document_id = c.document_id
             and cd.cartridge_id = any(cast(:carts as uuid[]))
       ))
+      and (cast(:levels as text[]) is null or coalesce(c.portion, (select d0.classification from document d0 where d0.id = c.document_id), cast(:deflt as text)) = any(cast(:levels as text[])))
 
     )"""
             if use_reflections
@@ -114,6 +117,7 @@ def _build_sql(use_dense: bool, use_lexical: bool, use_reflections: bool = False
           where cd.document_id = c.document_id
             and cd.cartridge_id = any(cast(:carts as uuid[]))
       ))
+      and (cast(:levels as text[]) is null or coalesce(c.portion, (select d0.classification from document d0 where d0.id = c.document_id), cast(:deflt as text)) = any(cast(:levels as text[])))
 
     )"""
         )
@@ -152,6 +156,7 @@ def _build_sql(use_dense: bool, use_lexical: bool, use_reflections: bool = False
           where cd.document_id = c.document_id
             and cd.cartridge_id = any(cast(:carts as uuid[]))
       ))
+      and (cast(:levels as text[]) is null or coalesce(c.portion, (select d0.classification from document d0 where d0.id = c.document_id), cast(:deflt as text)) = any(cast(:levels as text[])))
 
     limit :pool
 )""")
@@ -192,6 +197,7 @@ async def hybrid_search(
     use_reflections: bool = False,
     category_ids: list[uuid.UUID] | None = None,
     cartridge_ids: list[uuid.UUID] | None = None,
+    levels: list[str] | None = None,
 ) -> list[SearchHit]:
     cfg = settings()
     if not (use_dense or use_lexical):
@@ -206,6 +212,8 @@ async def hybrid_search(
         "cats": [str(x) for x in category_ids] if category_ids else None,
         # A cartridge is a room: scoping to one keeps every hit inside it.
         "carts": [str(x) for x in cartridge_ids] if cartridge_ids else None,
+        "levels": levels,
+        "deflt": _default_level() if levels else None,
         "pool": pool or cfg.candidate_pool,
         "k": cfg.rrf_k,
         "w_dense": weight_dense,

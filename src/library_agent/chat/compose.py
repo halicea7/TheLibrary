@@ -29,6 +29,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from library_agent import classification
 from library_agent.chat import audit
 from library_agent.chat.citations import (
     Source,
@@ -301,9 +302,40 @@ class Composition:
     emitted: int = 0
     resolved: int = 0
     flags: int = 0  # claims the review pass flagged as reaching past their evidence
+    scale: classification.Scale | None = None  # None: the document is not marked
+    ceiling: str | None = None
+
+    def _levels(self) -> dict[int, str]:
+        return {s.n: s.level for s in self.sources if s.level}
+
+    def banner(self) -> dict | None:
+        """The document's overall level: the highest of its marked paragraphs."""
+        if not self.scale or not self.scale.marking:
+            return None
+        found = [
+            classification.marked_markdown(
+                self.scale,
+                s.get("body", ""),
+                self._levels(),
+                s.get("context_level") or self.scale.default,
+            )[1]
+            for s in self.sections
+        ]
+        lv = self.scale.level(self.scale.highest(found))
+        return {"id": lv.id, "label": lv.label, "short": lv.short, "colour": lv.colour}
+
+    def _body(self, s: dict) -> str:
+        body = s.get("body", "").strip()
+        if not self.scale or not self.scale.marking:
+            return body
+        return classification.marked_markdown(
+            self.scale, body, self._levels(), s.get("context_level") or self.scale.default
+        )[0]
 
     def markdown(self, partial: bool = False) -> str:
-        out = [f"# {self.title}", ""]
+        banner = self.banner()
+        rule = [f"**{banner['label'].upper()}**", ""] if banner else []
+        out = [*rule, f"# {self.title}", ""]
         if partial:
             out += ["*(still writing — this is the document so far)*", ""]
         nested = any(s.get("chapter") for s in self.sections)
@@ -314,7 +346,7 @@ class Composition:
                 out += [f"## {ch}", ""]
                 last_ch = ch
             depth = "###" if nested else "##"
-            out += [f"{depth} {s['heading']}", "", s.get("body", "").strip(), ""]
+            out += [f"{depth} {s['heading']}", "", self._body(s), ""]
             for fl in s.get("flags", []):
                 cond = f" It could fail if {fl['condition']}" if fl.get("condition") else ""
                 out += [f"> ⚠ **Review** — “{fl['quote']}”: {fl['issue']}{cond}", ""]
@@ -338,6 +370,7 @@ class Composition:
             "",
             f"`The Library · {self.id}`",
             "",
+            *rule,
         ]
         return "\n".join(out)
 
@@ -473,7 +506,7 @@ async def _section_queries(client, model, brief: str, sec: dict) -> list[str]:
 
 
 async def _section_hits(
-    db, client, queries: list[str], *, category_ids, cartridge_ids, named
+    db, client, queries: list[str], *, category_ids, cartridge_ids, named, levels=None
 ) -> list[SearchHit]:
     """A section's material, gathered as a deep Ask gathers it: each search retrieved, the
     union ranked and capped per volume, then the library's readings of the nearest sections."""
@@ -488,6 +521,7 @@ async def _section_hits(
             limit=per_q,
             category_ids=category_ids,
             cartridge_ids=cartridge_ids,
+            levels=levels,
             favour=named,
         ):
             if h.chunk_id not in merged or h.score > merged[h.chunk_id].score:
@@ -507,6 +541,7 @@ async def _section_hits(
             limit=per_r,
             category_ids=category_ids,
             cartridge_ids=cartridge_ids,
+            levels=levels,
             favour=named,
         ):
             if (h.document_id, h.section_path) not in seen_r:
@@ -695,6 +730,7 @@ async def compose(
     review: bool = True,
     force: bool = False,
     caller: str = "ui",
+    ceiling: str | None = None,
 ) -> AsyncIterator[dict]:
     """Yields SSE-shaped events: plan → for each section (section, sources, token*,
     section_done) → done. The lease is held throughout: this is one long piece of work
@@ -707,7 +743,13 @@ async def compose(
     clock = _Clock()
     redis = redis_client()
     client = LLM()
-    comp = Composition(brief=brief)
+    # Classification: the writer and the checker both read the material, so a remote
+    # model on either side holds the whole composition to the remote ceiling.
+    scale = classification.load()
+    remote = providers.is_remote(model) or providers.is_remote(helper)
+    top = classification.effective_ceiling(ceiling, remote=remote, s=scale)
+    levels = classification.allowed_levels(top, s=scale)
+    comp = Composition(brief=brief, scale=scale, ceiling=top)
     held = False
     try:
         if not liveness.alive:
@@ -746,6 +788,7 @@ async def compose(
                 limit=COMPOSE_THREADS,
                 category_ids=category_ids,
                 cartridge_ids=cartridge_ids,
+                levels=levels,
             )
         clock.stop(t_threads)
         thread_block = render_threads(threads)
@@ -779,6 +822,7 @@ async def compose(
                     limit=max(3, 12 // len(facets) + 1),
                     category_ids=category_ids,
                     cartridge_ids=cartridge_ids,
+                    levels=levels,
                     favour=named,
                 )
                 found += await retrieve_readings(
@@ -788,6 +832,7 @@ async def compose(
                     limit=max(1, 6 // len(facets)),
                     category_ids=category_ids,
                     cartridge_ids=cartridge_ids,
+                    levels=levels,
                     favour=named,
                 )
                 per_facet.append(found)
@@ -900,6 +945,7 @@ async def compose(
                     category_ids=category_ids,
                     cartridge_ids=cartridge_ids,
                     named=named,
+                    levels=levels,
                 )
                 docs = {
                     d.id: d
@@ -912,12 +958,20 @@ async def compose(
                     ).scalars()
                 }
                 provenance = await cartridge_provenance(db, list(docs))
+                levels_of = dict(
+                    zip(
+                        [id(h) for h in hits],
+                        await classification.hit_levels(db, hits, scale),
+                        strict=True,
+                    )
+                )
             clock.stop(t_ret)
             # Global numbering: a passage seen before keeps its number.
             section_sources: list[Source] = []
             section_hits: list[SearchHit] = []
             for h in hits:
                 src = _numbered(h, by_key, comp, docs, provenance)
+                src.level = src.level or levels_of.get(id(h))
                 section_sources.append(src)
                 section_hits.append(h)
             yield {
@@ -937,6 +991,7 @@ async def compose(
                             "kind": s.kind,
                             "artifact_id": s.artifact_id,
                             "page_end": s.page_end,
+                            "level": s.level,
                         }
                         for s in section_sources
                     ],
@@ -1030,6 +1085,9 @@ async def compose(
                     "cited": [s.n for s in used],
                     "takeaway": takeaway,
                     "flags": flags,
+                    # What the writer read for this section, as a whole: the level an
+                    # uncited paragraph of it takes (strict).
+                    "context_level": scale.highest([s.level for s in section_sources]),
                 }
             )
             yield {
@@ -1041,6 +1099,7 @@ async def compose(
                     "chapter": sec["chapter"],
                     "takeaway": takeaway,
                     "flags": flags,
+                    "context_level": comp.sections[-1]["context_level"],
                     "timings": clock.this_section(),
                     **m,
                 },
@@ -1068,6 +1127,7 @@ async def compose(
                 "markers_emitted": comp.emitted,
                 "markers_resolved": comp.resolved,
                 "timings": clock.totals(),
+                "banner": comp.banner(),
                 "references": [
                     {
                         "n": s.n,

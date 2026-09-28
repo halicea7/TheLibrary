@@ -2645,8 +2645,12 @@ async function ejectCartridge(id, btn) {
 async function insertCartridge(file) {
   say(`Inserting ${file.name}…`);
   const fd = new FormData(); fd.append('file', file);
-  const r = await fetch('/api/cartridges/import', { method:'POST', body:fd });
-  const j = await r.json();
+  let r, j;
+  try {
+    r = await fetch('/api/cartridges/import', { method:'POST', body:fd });
+    const body = await r.text();
+    try { j = JSON.parse(body); } catch { j = { detail: `${r.status} ${r.statusText}: ${body.slice(0, 200)}` }; }
+  } catch (e) { say(`Could not reach the library: ${e}`, true); return false; }
   if (!r.ok) { say(j.detail || 'That cartridge could not be inserted.', true); return false; }
   if (j.noop) say(`${j.name} v${j.version} is already on the rack.`);
   else say(`${j.name} is on the rack — ${j.documents_introduced} new volumes, ${j.documents_joined} already here, ${j.artifacts} readings`

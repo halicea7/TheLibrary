@@ -374,3 +374,11 @@ class TestRoundTrips:
             b.id,
         }
         assert await resolve_selection(db) == []
+
+
+def test_every_type_the_library_reads_travels_as_an_original():
+    # An HTML volume shipped at full level was refused on arrival ("unexpected type").
+    from library_agent.ingest.extract import SUPPORTED
+    from library_agent.library.cartridge import _ORIGINAL_EXTS
+
+    assert set(SUPPORTED) <= _ORIGINAL_EXTS and ".html" in _ORIGINAL_EXTS

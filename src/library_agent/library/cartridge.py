@@ -69,6 +69,7 @@ from library_agent.db.models import (
 )
 from library_agent.db.purge import delete_document
 from library_agent.ingest.dedup import find_exact
+from library_agent.ingest.extract import SUPPORTED
 from library_agent.library import taxonomy
 from library_agent.library.cartridge_design import (
     clamp_design,
@@ -118,7 +119,8 @@ VECTOR_KINDS = ("chunk", "artifact", "document")
 
 _CATALOGUE_ARTIFACTS = {ArtifactKind.ORIENTATION, ArtifactKind.DOCUMENT_SUMMARY}
 _HASH = re.compile(r"[0-9a-f]{64}")
-_ORIGINAL_EXTS = {".pdf", ".md", ".markdown", ".txt", ".text", ".rst"}
+# Every type the library reads can travel as an original -- and nothing else.
+_ORIGINAL_EXTS = frozenset(SUPPORTED)
 
 
 _SVG_TAGS = {

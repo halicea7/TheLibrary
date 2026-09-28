@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import tempfile
@@ -34,6 +35,7 @@ from library_agent.reading.genre import GENRES
 from library_agent.reading.genre import normalise as normalise_genre
 from library_agent.worker.tasks import schedule_library_rebuild
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/cartridges", tags=["cartridges"])
 
 
@@ -285,6 +287,11 @@ async def import_(file: Annotated[UploadFile, File()], db: SessionDep) -> dict:
         except cart.CartridgeError as exc:
             await db.rollback()
             raise HTTPException(422, str(exc)) from exc
+        except Exception as exc:
+            # Whoever inserts it should see why, not a bare 500 their page cannot read.
+            await db.rollback()
+            log.exception("cartridge import failed")
+            raise HTTPException(500, f"the cartridge could not be inserted: {exc}"[:400]) from exc
     finally:
         tmp_path.unlink(missing_ok=True)
     if not res.noop:

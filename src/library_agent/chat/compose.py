@@ -166,18 +166,17 @@ established. Build on it: do not restate what is settled, and where you rely on 
 point, refer to it briefly ("as established earlier") rather than re-arguing it. Do not
 contradict it without saying you are doing so and why.
 
-Hold every example to the question before you use it:
-- What was supposed to be protected, and what actually happened?
-- Was that a security FAILURE, or a control working as intended? Access that was correctly
-  denied is the control succeeding — never present a failed login or a blocked action as a
-  vulnerability.
-- What mechanism caused it, and does that mechanism actually bear on the brief? An example
-  that shares a word with the brief but turns on a different mechanism does not support it.
+Before you use an example, check it silently against these questions. They are for your
+reasoning only: never write them, or phrases from them, into the document.
+- What was the example about, and what actually happened in it?
+- Does the mechanism it turns on bear on the brief? An example that shares a word with the
+  brief but works by a different mechanism does not support it.
+- Is it a failure, or something working as designed? (For security material: access that
+  was correctly denied is the control succeeding, never a vulnerability.)
 - Keep related protocols, tools, modes and identifiers distinct; do not merge two that
   differ in mechanism just because their names or purposes are close.
-- Do not assert how common, default or motivated something is ("widespread", "rarely
-  changed by users", "vendors prioritise speed") unless a passage says so; if it is your
-  inference, mark it as your inference, uncited.
+- Do not assert how common, default or motivated something is unless a passage says so;
+  if it is your inference, mark it as your inference, uncited.
 
 Write only this section's body in markdown: no title, no heading (it is added for you),
 no preamble, no summary of other sections. Use lists, code and tables where they belong.
@@ -644,7 +643,15 @@ async def _review(
     client, model, heading: str, body: str, context: str, brief: str = ""
 ) -> list[dict]:
     """A finished section read back against its passages; see chat/audit.py."""
-    return await audit.review(client, model, body, context, brief=brief, heading=heading)
+    return await audit.review(
+        client,
+        model,
+        body,
+        context,
+        brief=brief,
+        heading=heading,
+        think=settings().compose_review_think,
+    )
 
 
 def _established(sections: list[dict], chapter_theses: dict[str, str], current_chapter) -> str:
@@ -1005,6 +1012,8 @@ async def compose(
                     if review and section_hits
                     else []
                 )
+                # The writer's checklist copied into the prose: caught without a model call.
+                flags += audit.echoed_instructions(cleaned, WRITE_SYSTEM)
             # Distil what this section settled, for the sections that follow -- after the
             # review, so a flagged claim is not carried forward as a premise.
             with clock("takeaway"):

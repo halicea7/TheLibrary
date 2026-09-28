@@ -352,3 +352,30 @@ def test_the_checking_role_defaults_to_the_compose_model():
 
     assert providers.default_for("compose_check") == ""  # empty: compose checks its own work
     assert "compose_check" in providers.ROLES
+
+
+def test_the_writers_checklist_copied_into_prose_is_flagged():
+    from library_agent.chat import audit
+
+    rules = "Is it a failure, or something working as designed? Check it silently."
+    body = (
+        "B-trees split pages when they fill. "
+        "The library makes clear that it is a failure, or something working as designed here. "
+        "Compaction merges tables."
+    )
+    flags = audit.echoed_instructions(body, rules)
+    assert len(flags) == 1 and flags[0]["quote"].startswith("The library makes clear")
+    assert audit.echoed_instructions("B-trees split pages when they fill.", rules) == []
+    # wording the instructions ask for is not a leak
+    say = "If the library does not address the question, say that plainly."
+    ans = "The library does not address the question of reranker latency."
+    assert audit.echoed_instructions(ans, say) and not audit.echoed_instructions(
+        ans, say, allowed=("the library does not address the question",)
+    )
+
+
+def test_the_writers_checks_are_marked_as_not_for_the_text():
+    from library_agent.chat.compose import WRITE_SYSTEM
+
+    assert "never write them" in WRITE_SYSTEM
+    assert "security FAILURE" not in WRITE_SYSTEM  # the phrase that leaked into a B-tree paper

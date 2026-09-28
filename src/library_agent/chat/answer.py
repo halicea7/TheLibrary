@@ -49,6 +49,9 @@ say what they say.
     + EVIDENCE_RULES
 )
 
+# Wording SYSTEM asks the librarian to use, so its appearing in an answer is not a leak.
+SAY_SO = ("the library does not address the question", "outside the collection")
+
 # A stance loosens the librarian's default reserve. The citation contract holds either
 # way -- claims drawn from the shelf still carry [n] -- but the librarian is invited to
 # interpret, take a position, and commit to it. Each stance has its counterpart.

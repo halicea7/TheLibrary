@@ -127,7 +127,14 @@ def clip(s: str, n: int) -> str:
 
 
 async def review(
-    client, model, body: str, context: str, *, brief: str = "", heading: str = ""
+    client,
+    model,
+    body: str,
+    context: str,
+    *,
+    brief: str = "",
+    heading: str = "",
+    think: bool = True,
 ) -> list[dict]:
     """Read finished text against its passages and flag where it reaches past them or
     misses the question. Flag-only: it never touches the prose. A flag whose quote is not
@@ -149,8 +156,8 @@ async def review(
             # Without thinking the reviewer passed an answer calling Raft "superior to Paxos"
             # for latency beside a passage saying their performance is similar; with it, it
             # flags that and the adopted design claims. About ten seconds on the 30B.
-            think=True,
-            num_predict=4000,
+            think=think,
+            num_predict=4000 if think else 1100,
         )
     except Exception:
         log.warning("review failed for %r", heading or brief[:60], exc_info=True)
@@ -165,6 +172,53 @@ async def review(
                     "quote": clip(quote, 300),
                     "issue": clip(issue, 500),
                     "condition": clip(str(f.get("condition") or ""), 500),
+                }
+            )
+    return flags
+
+
+# ------------------------------------------------------------ instructions in the prose
+
+ECHO_WORDS = 5  # measured: catches the checklist leak, no false positives in 18 documents
+_WORD = re.compile(r"[a-z0-9']+")
+_SENT = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(*_`])")
+
+
+def _shingles(text: str, n: int | None = None) -> set[tuple[str, ...]]:
+    n = n or ECHO_WORDS
+    words = _WORD.findall((text or "").lower())
+    return {tuple(words[i : i + n]) for i in range(len(words) - n + 1)}
+
+
+def _overlaps(run: tuple[str, ...], words: list[str]) -> bool:
+    """Whether a run of words shares three consecutive words with a phrase."""
+    grams = {tuple(words[i : i + 3]) for i in range(len(words) - 2)}
+    return any(tuple(run[i : i + 3]) in grams for i in range(len(run) - 2))
+
+
+def echoed_instructions(body: str, *instructions: str, allowed: tuple[str, ...] = ()) -> list[dict]:
+    """Sentences of the prose that copy a run of the writer's own instructions -- the
+    checklist leaking into the document ("not a security failure, but a control working
+    as intended" in a paper on B-trees). Flagged like a review finding, never removed."""
+    marks: set[tuple[str, ...]] = set()
+    for ins in instructions:
+        marks |= _shingles(ins)
+    # Wording the instructions ask the writer to use ("the library does not address
+    # the question") is not a leak when it appears.
+    for phrase in allowed:
+        words = _WORD.findall(phrase.lower())
+        marks = {m for m in marks if not _overlaps(m, words)}
+    if not marks:
+        return []
+    flags = []
+    for sent in _SENT.split(" ".join((body or "").split())):
+        if _shingles(sent) & marks:
+            flags.append(
+                {
+                    "quote": clip(sent, 300),
+                    "issue": "This repeats the writer's own instructions, not anything the "
+                    "sources say; it belongs to how the section was checked, not in the text.",
+                    "condition": "",
                 }
             )
     return flags

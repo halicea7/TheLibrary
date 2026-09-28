@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     # i.e. 15-25s before a single word appears. These two knobs are the only real lever.
     chat_passages: int = 5
     chat_passage_chars: int = 1200
+    # Whether Write's review of each section thinks first. Thinking finds invented figures
+    # and misattributed passages; on a large compose model it is most of a document's time.
+    compose_review_think: bool = True
 
     # Measured and rejected: see reading/tier1.py step 6. A document-constant orientation
     # line in every chunk prefix homogenises that document's vectors and costs recall.

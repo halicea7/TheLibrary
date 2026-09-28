@@ -378,11 +378,14 @@ async def run_turn(
 
         # Deep: the answer read back against the passages it was given, as Write reviews a
         # section. Flag-only; the flags travel with the answer and are saved beside it.
-        flags: list[dict] = []
+        # At every effort, the librarian's own rules copied into the answer are flagged.
+        flags: list[dict] = audit.echoed_instructions(
+            cleaned, answer_mod.SYSTEM, allowed=answer_mod.SAY_SO
+        )
         if lvl.audit and used:
             yield {"event": "reviewing", "data": {}}
             await mark_chat_active(redis)
-            flags = await audit.review(
+            flags += await audit.review(
                 client,
                 model,
                 cleaned,

@@ -247,7 +247,7 @@ A team's documentation comes in as its own cartridge (`./library import ~/docs -
 | Chat — general | `qwen3:30b-a3b` | Thinks before answering; the UI streams it |
 | Chat — technical | `huihui_ai/qwen3-coder-abliterated` | Per-conversation toggle |
 | Compose (Write) | `qwen3:30b-a3b` | A background job, so it can carry a larger, slower model without slowing chat |
-| Compose — checking | the Compose model | Splits each section into searches, reviews it against its passages, and distils what it settled. Set it to a smaller model to trade a model swap per section for much faster reviews: on the 235B with thinking, the review was 84% of a document's time |
+| Compose — checking | the Compose model | Splits each section into searches, reviews it against its passages, and distils what it settled. Its review runs without thinking by default: on the 235B, thinking took 64 of a medium document's 76 minutes, and without it the document took 11 while flagging the same kinds of overreach (unsourced prevalence, dropped qualifiers, unattributed design claims). Set `LIBRARY_COMPOSE_REVIEW_THINK=true` for a document to be read closely |
 | Embeddings | `bge-m3` | 1024-dim, stored as `halfvec` |
 | Reranker | `BAAI/bge-reranker-v2-m3` | In-process torch; the one thing not served by Ollama |
 | Figures | `qwen2.5vl` | Reads each figure into a passage at Tier 1; optional |

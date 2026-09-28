@@ -220,6 +220,18 @@ Under the rack, **Tokens** shows the pedestal's four sockets and *Active tokens 
 
 **Customize** turns the token in close-up and changes every part of it: the body (moulded plastic, brushed metal, gold, clear, frosted or glitter resin, glazed ceramic), a raised logo traced from any image you give it (only the traced mask is kept, and it's re-encoded on the server), foil finishes for the logo, face and the etched solar back, the rim-light colours, the identity strip, contacts, edge and circuit colours, and the planet inlays. **Connection** holds its base URL and API token. The token is kept 0600 in `~/.library-agent/modules.json`, never sent to a model or back to the browser. A token in a socket without a connection glows amber. A module marked *local models only* refuses to run when chat is on a remote provider, and the desk says so.
 
+**Make a token, for any API.** The bay's **Make** tab (or *+ make a token*) widens to a builder. Start from scratch, from an **OpenAPI / Swagger** document (JSON or YAML: pick the handful of GET operations the librarian should be able to ask; the parameters, auth scheme, row path and line are drafted from the spec), from a working **curl** command (its auth is recognised and its secret goes to the connection, never the file), or from a **shared token file**, which shows what the token can do (host, sign-in, every operation) before you approve it.
+
+A token is a manifest (`library-connector/1`) in `~/.library-agent/connectors/`, plain data checked field by field when it loads:
+
+- **Signing in:** none, bearer, an API key in a named header (with a prefix such as `ApiToken `), a key in the query, username and password, or OAuth2 client credentials (exchanged on the pinned host and cached until expiry).
+- **Operations:** a path template with typed parameters (string, int, number, bool, enum, date; required, defaults, bounds), placed in the path (percent-encoded whole), the query or a body. GET only, or POST for a search endpoint that you mark read-only. No write verbs, no absolute or `../` paths, no setting the host or the secret's header.
+- **Responses:** JSON rows by path (`data.items[*]`, nested fields, a single object as one row), XML (entities refused), CSV or plain text. Each row prints by a line format like `{title} by {user.login} ({created_at|date})`, with filters `date`, `join`, `trunc:N`, `upper`, `lower`, `default:x` and `count`.
+- **Pagination:** page number, offset, cursor or `Link` header, capped per token and at ten pages absolute; a next link off the pinned host is refused.
+- **Guard rails:** each token has a pinned host (plus any it names), no redirects, a timeout, a byte cap, a rate limit, a short cache and a clearance.
+
+**try it** runs an operation of the unsaved draft once and shows what came back beside how the librarian will read it, so a path or line format is fixed before anything is saved. Your tokens can be edited, exported (manifest and look, never the connection) and deleted, and the built-in SentinelOne can be duplicated as a starting point.
+
 ## Connecting other tools
 
 Other programs — a script, an internal tool, an agent — can talk to the library the way a person at the desk does, and get the same verified citations back.

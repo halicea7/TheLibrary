@@ -303,6 +303,13 @@ async def advise(incident_id: uuid.UUID, db: SessionDep) -> dict:
     return advice
 
 
+@router.post("/incidents/resolve-all")
+async def resolve_all(db: SessionDep) -> dict:
+    n = await incidents.resolve_all(db)
+    await db.commit()
+    return {"resolved": n}
+
+
 @router.post("/incidents/{incident_id}/resolve")
 async def resolve(incident_id: uuid.UUID, db: SessionDep, resolved: bool = True) -> dict:
     await incidents.resolve(db, incident_id, resolved=resolved)

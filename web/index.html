@@ -3990,6 +3990,12 @@ async function saveAbout(b) {
     b.textContent = 'saved'; setTimeout(() => { b.textContent = 'save'; aboutDirty(t); }, 1400);
   } catch (e) { b.textContent = 'save'; b.disabled = false; say(`Could not save: ${e.message}`, true); }
 }
+async function clearIncidents(btn) {
+  btn.disabled = true;
+  const r = await (await fetch('/api/settings/incidents/resolve-all', { method:'POST' })).json();
+  say(`${r.resolved} incident${r.resolved === 1 ? '' : 's'} cleared — still there under show resolved.`);
+  loadSettings();
+}
 async function loadSettings() {
   const el = $('#view-settings');
   el.innerHTML = '<div class="empty">Reading the settings…</div>';
@@ -4045,7 +4051,8 @@ async function loadSettings() {
     </div>
     <div class="sect">
       <div class="shelf-h" style="padding:0 0 8px"><p class="label" style="margin:0">Incidents</p>
-        <button class="linkish" style="margin-left:auto" onclick="showResolved=!showResolved; loadSettings()">${showResolved ? 'hide resolved' : 'show resolved'}</button></div>
+        ${s.incidents_open ? `<button class="linkish" style="margin-left:auto" onclick="clearIncidents(this)" title="Mark every open incident resolved; they stay under show resolved">clear all ${s.incidents_open}</button>` : ''}
+        <button class="linkish" style="margin-left:${s.incidents_open ? '12px' : 'auto'}" onclick="showResolved=!showResolved; loadSettings()">${showResolved ? 'hide resolved' : 'show resolved'}</button></div>
       <div id="incidents">${inc.length ? inc.map(incidentHtml).join('') : '<div class="empty"><b>Nothing has gone wrong.</b>Errors from the API, the worker, reading jobs and chat turns collect here, and the library can be asked to troubleshoot them against its own documentation.</div>'}</div>
     </div>
   </div>`;

@@ -196,6 +196,15 @@ async def resolve(db: AsyncSession, incident_id: uuid.UUID, *, resolved: bool = 
     await db.execute(update(Incident).where(Incident.id == incident_id).values(resolved=resolved))
 
 
+async def resolve_all(db: AsyncSession) -> int:
+    """Every open incident marked resolved -- kept, and shown again under *show resolved*.
+    One that happens again is recorded afresh. Returns how many were cleared."""
+    res = await db.execute(
+        update(Incident).where(Incident.resolved.is_(False)).values(resolved=True)
+    )
+    return res.rowcount or 0
+
+
 async def open_count(db: AsyncSession) -> int:
     return (await db.execute(select(func.count()).where(Incident.resolved.is_(False)))).scalar_one()
 

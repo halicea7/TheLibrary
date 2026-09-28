@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from library_agent.config import settings
@@ -250,3 +252,45 @@ def test_model_output_is_scrubbed_of_nul_bytes():
         '{"summary": "x\\u0000y", "tags": ["a\\u0000"]}', {"required": ["summary"]}
     )
     assert why is None and parsed == {"summary": "xy", "tags": ["a"]}
+
+
+async def test_rereading_a_volume_that_also_came_in_a_cartridge(db):
+    # The cartridge carries its maker's reading beside ours; a re-read found both and
+    # failed ("Multiple rows were found"). Tier 1 rewrites only its own.
+    from conftest import make_document
+
+    from library_agent.db.models import Artifact, ArtifactKind, Cartridge, TargetKind
+    from library_agent.reading.tier1 import _upsert_artifact
+
+    doc = await make_document(db, title="Twice read", body="a" * 400 + "b" * 400)
+    cart = Cartridge(
+        id=uuid.uuid4(),
+        name="Theirs",
+        slug="theirs",
+        version=1,
+        colour="#333",
+        level="full",
+        embed_model="bge-m3",
+        content_hash="0" * 64,
+    )
+    db.add(cart)
+    await db.flush()
+    common = {
+        "kind": ArtifactKind.ORIENTATION,
+        "target_kind": TargetKind.DOCUMENT,
+        "target_id": doc.id,
+    }
+    theirs = Artifact(
+        **common, text="their reading", model="m", prompt_version="v1", tier=1, cartridge_id=cart.id
+    )
+    db.add(theirs)
+    await db.flush()
+    ours = await _upsert_artifact(
+        db, **common, text="ours", data=None, model="m", prompt_version="v1"
+    )
+    again = await _upsert_artifact(
+        db, **common, text="ours, again", data=None, model="m", prompt_version="v1"
+    )
+    assert again.id == ours.id != theirs.id and ours.cartridge_id is None
+    await db.refresh(theirs)
+    assert theirs.text == "their reading"

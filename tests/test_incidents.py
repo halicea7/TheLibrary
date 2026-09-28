@@ -67,3 +67,17 @@ class TestRecording:
         # A resolved incident does not absorb a recurrence; that is a new one.
         d = await incidents.record(db, source="test", kind="RuntimeError", message="boom /tmp/c 3")
         assert d.id != a.id
+
+
+async def test_clear_all_resolves_every_open_incident_and_keeps_them(db):
+    from library_agent.ops import incidents
+
+    for m in ("model liveness lost: probe", "unusable output"):
+        await incidents.record(db, source="worker", kind="X", message=m)
+    assert await incidents.open_count(db) >= 2
+    n = await incidents.resolve_all(db)
+    assert n >= 2 and await incidents.open_count(db) == 0
+    kept = await incidents.list_incidents(db, include_resolved=True)
+    assert {"model liveness lost: probe", "unusable output"} <= {i.message for i in kept}
+    again = await incidents.record(db, source="worker", kind="X", message="unusable output")
+    assert not again.resolved and await incidents.open_count(db) == 1

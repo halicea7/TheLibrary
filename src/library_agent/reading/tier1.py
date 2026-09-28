@@ -73,12 +73,15 @@ async def _upsert_artifact(
     prompt_version: str,
     tier: int = 1,
 ) -> Artifact:
+    # This library's own reading: a volume that also arrived in a cartridge carries its
+    # maker's reading beside it (cartridge_id set), which Tier 1 never rewrites.
     existing = (
         await db.execute(
             select(Artifact).where(
                 Artifact.kind == kind,
                 Artifact.target_kind == target_kind,
                 Artifact.target_id == target_id,
+                Artifact.cartridge_id.is_(None),
             )
         )
     ).scalar_one_or_none()
@@ -479,6 +482,7 @@ async def run_tier1(
                     select(Artifact).where(
                         Artifact.kind == ArtifactKind.SECTION_SUMMARY,
                         Artifact.target_id == s.id,
+                        Artifact.cartridge_id.is_(None),
                     )
                 )
             ).scalar_one()

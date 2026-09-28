@@ -53,9 +53,11 @@ class Tier2Result:
 async def _orientation(db: AsyncSession, document_id: uuid.UUID) -> str:
     row = (
         await db.execute(
-            select(Artifact).where(
-                Artifact.kind == ArtifactKind.ORIENTATION, Artifact.target_id == document_id
-            )
+            # Ours first; a cartridge's orientation only when this library has none.
+            select(Artifact)
+            .where(Artifact.kind == ArtifactKind.ORIENTATION, Artifact.target_id == document_id)
+            .order_by(Artifact.cartridge_id.is_not(None))
+            .limit(1)
         )
     ).scalar_one_or_none()
     if row and row.data:

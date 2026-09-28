@@ -328,6 +328,7 @@ async def raise_test_incident() -> dict:
 class ModulePut(BaseModel):
     base_url: str | None = None
     token: str | None = None  # kept if omitted, so the UI never has to re-send it
+    username: str | None = None  # basic auth's user, or an OAuth client id
     seated: bool | None = None
     # The bay: 0-3 puts the token in that socket (seating it), -1 takes it out.
     socket: int | None = None
@@ -353,18 +354,28 @@ def _module_public(mod, cfg) -> dict:
             for o in mod.operations
         ],
         **cfg.public(),
+        "configured": mod_store_configured(mod, cfg),
+        "auth": mod.auth_spec().type,
+        "builtin": mod.builtin,
+        "suggested_base_url": mod.base_url,
     }
+
+
+def mod_store_configured(mod, cfg) -> bool:
+    from library_agent.modules.store import is_configured
+
+    return is_configured(mod, cfg)
 
 
 @router.get("/modules")
 async def list_modules() -> dict:
     from library_agent.modules import store as mod_store
-    from library_agent.modules.builtin import BUILTIN
+    from library_agent.modules.registry import all_modules
 
     cfgs = mod_store.load()
     mods = [
         _module_public(mod, cfgs.get(mid) or mod_store.ModuleConfig(id=mid))
-        for mid, mod in BUILTIN.items()
+        for mid, mod in all_modules().items()
     ]
     return {"modules": mods, "sockets": mod_store.SOCKETS}
 
@@ -372,8 +383,9 @@ async def list_modules() -> dict:
 @router.put("/modules/{mid}")
 async def put_module(mid: str, body: ModulePut) -> dict:
     from library_agent.modules import store as mod_store
-    from library_agent.modules.builtin import BUILTIN
+    from library_agent.modules.registry import all_modules
 
+    BUILTIN = all_modules()
     if mid not in BUILTIN:
         raise HTTPException(404, f"no module {mid!r}")
     cfgs = mod_store.load()
@@ -382,6 +394,8 @@ async def put_module(mid: str, body: ModulePut) -> dict:
         cfg.base_url = body.base_url.strip().rstrip("/")
     if body.token is not None and body.token != "":
         cfg.token = body.token.strip()
+    if body.username is not None:
+        cfg.username = body.username.strip()[:200]
     taken = {c.socket: c.id for c in cfgs.values() if c.socket is not None and c.id != mid}
     want = body.socket
     if want is None and body.seated is not None:
@@ -425,9 +439,10 @@ async def test_module(mid: str) -> dict:
     """Reach the module with its configured base URL and token, running its first
     operation with an obviously-harmless value, so a wrong URL or token shows at once."""
     from library_agent.modules import store as mod_store
-    from library_agent.modules.builtin import BUILTIN
     from library_agent.modules.execute import ModuleError, call
+    from library_agent.modules.registry import all_modules
 
+    BUILTIN = all_modules()
     if mid not in BUILTIN:
         raise HTTPException(404, f"no module {mid!r}")
     mod = BUILTIN[mid]

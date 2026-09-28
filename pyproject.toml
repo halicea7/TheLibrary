@@ -30,6 +30,7 @@ dependencies = [
     "pillow>=12.3.0",
     "mcp>=2.2.0",
     "markdownify>=1.2.3",
+    "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,154 @@
+{
+  "format": "library-connector/1",
+  "id": "sentinelone",
+  "name": "SentinelOne",
+  "kind": "endpoint security",
+  "colour": "#e0564b",
+  "description": "The SentinelOne fleet, read-only: exposure to a CVE, whether an indicator has been seen, which endpoints run an application, and the state of the agents.",
+  "base_url": "",
+  "clearance": "local",
+  "auth": {
+    "type": "header",
+    "header": "Authorization",
+    "prefix": "ApiToken "
+  },
+  "headers": {},
+  "limits": {
+    "timeout": 30.0,
+    "max_bytes": 2000000,
+    "rate_per_minute": 30,
+    "cache_seconds": 90.0
+  },
+  "allowed_hosts": [],
+  "operations": [
+    {
+      "id": "cve_exposure",
+      "summary": "Which endpoints in the fleet are exposed to a given CVE.",
+      "ask_when": "the question names a CVE id and asks who or what is exposed, affected, vulnerable or at risk in the fleet.",
+      "method": "GET",
+      "path": "/web/api/v2.1/application-management/risks",
+      "params": {
+        "cve": {
+          "type": "string",
+          "description": "a CVE id, e.g. CVE-2024-3094",
+          "in": "query",
+          "key": "cveId__contains",
+          "required": true
+        }
+      },
+      "query": {
+        "limit": "100"
+      },
+      "response": {
+        "format": "json",
+        "rows": "data",
+        "line": "{cveId}: {applicationName} on {endpointName} \u2014 severity {severity}",
+        "empty": "No fleet endpoint is recorded as exposed to this CVE.",
+        "limit": 30
+      }
+    },
+    {
+      "id": "ioc_seen",
+      "summary": "Whether an indicator of compromise has been seen in the tenant.",
+      "ask_when": "the question gives an indicator \u2014 a file hash, IP address, domain or URL \u2014 and asks whether it has been seen, is known, or is malicious.",
+      "method": "GET",
+      "path": "/web/api/v2.1/threat-intelligence/iocs",
+      "params": {
+        "indicator": {
+          "type": "string",
+          "description": "a hash, IP, domain or URL to look up",
+          "in": "query",
+          "key": "value",
+          "required": true
+        }
+      },
+      "query": {
+        "limit": "20"
+      },
+      "response": {
+        "format": "json",
+        "rows": "data",
+        "line": "{value} \u2014 {name} ({type}), source {source}",
+        "empty": "This indicator is not in the tenant's threat-intelligence records.",
+        "limit": 20
+      }
+    },
+    {
+      "id": "app_inventory",
+      "summary": "Whether an application is present in the fleet, and its vendor.",
+      "ask_when": "the question asks whether a named application or piece of software is installed, present or in use anywhere in the fleet.",
+      "method": "GET",
+      "path": "/web/api/v2.1/application-management/inventory",
+      "params": {
+        "application": {
+          "type": "string",
+          "description": "an application name, e.g. OpenSSL",
+          "in": "query",
+          "key": "applicationName__contains",
+          "required": true
+        }
+      },
+      "query": {
+        "limit": "50"
+      },
+      "response": {
+        "format": "json",
+        "rows": "data",
+        "line": "{applicationName} by {applicationVendor}",
+        "empty": "No such application is in the fleet inventory.",
+        "limit": 30
+      }
+    },
+    {
+      "id": "app_endpoints",
+      "summary": "Which endpoints run an application, and at what version.",
+      "ask_when": "the question asks where a named application is installed, on which hosts, or what versions of it are running.",
+      "method": "GET",
+      "path": "/web/api/v2.1/application-management/inventory/endpoints",
+      "params": {
+        "application": {
+          "type": "string",
+          "description": "an application name, e.g. OpenSSL",
+          "in": "query",
+          "key": "applicationName",
+          "required": true
+        }
+      },
+      "query": {
+        "limit": "100"
+      },
+      "response": {
+        "format": "json",
+        "rows": "data",
+        "line": "{endpointName}: {applicationName} {applicationVersion} ({osType})",
+        "empty": "No endpoint is recorded as running that application.",
+        "limit": 40
+      }
+    },
+    {
+      "id": "agents",
+      "summary": "The agents in the fleet: how many, and their state.",
+      "ask_when": "the question asks how many agents or endpoints there are, the size of the fleet, or the state of a named host's agent.",
+      "method": "GET",
+      "path": "/web/api/v2.1/agents",
+      "params": {
+        "host": {
+          "type": "string",
+          "description": "optional: a computer name to narrow to",
+          "in": "query",
+          "key": "computerName__contains"
+        }
+      },
+      "query": {
+        "limit": "50"
+      },
+      "response": {
+        "format": "json",
+        "rows": "data",
+        "line": "{computerName} \u2014 agent {id}",
+        "empty": "No agent matched.",
+        "limit": 40
+      }
+    }
+  ]
+}

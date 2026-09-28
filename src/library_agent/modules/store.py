@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from library_agent.config import settings
-from library_agent.modules.builtin import BUILTIN
 from library_agent.modules.manifest import Module
 
 
@@ -20,7 +19,8 @@ from library_agent.modules.manifest import Module
 class ModuleConfig:
     id: str
     base_url: str = ""
-    token: str = ""
+    token: str = ""  # the secret: API key, bearer token, password, or OAuth client secret
+    username: str = ""  # basic auth's user, or an OAuth client id; not secret
     seated: bool = False  # consulted during a question, the way a seated cartridge scopes
     extra_headers: dict[str, str] = field(default_factory=dict)
     # The module as an object: which of the bay's sockets its token sits in (seated means
@@ -34,8 +34,8 @@ class ModuleConfig:
             "base_url": self.base_url,
             "seated": self.seated,
             "has_token": bool(self.token),
+            "username": self.username,
             "token_tail": self.token[-4:] if len(self.token) >= 8 else "",
-            "configured": bool(self.base_url and self.token),
             "socket": self.socket,
             "design": self.design,
         }
@@ -66,11 +66,12 @@ def load() -> dict[str, ModuleConfig]:
     except (OSError, ValueError):
         return {}
     for mid, v in (raw.get("modules") or {}).items():
-        if mid in BUILTIN and isinstance(v, dict):
+        if isinstance(v, dict):
             out[mid] = ModuleConfig(
                 id=mid,
                 base_url=str(v.get("base_url") or "").rstrip("/"),
                 token=str(v.get("token") or ""),
+                username=str(v.get("username") or ""),
                 seated=bool(v.get("seated")),
                 extra_headers={str(k): str(x) for k, x in (v.get("extra_headers") or {}).items()},
                 socket=v.get("socket") if isinstance(v.get("socket"), int) else None,
@@ -94,6 +95,7 @@ def save(configs: dict[str, ModuleConfig]) -> None:
             c.id: {
                 "base_url": c.base_url,
                 "token": c.token,
+                "username": c.username,
                 "seated": c.seated,
                 "extra_headers": c.extra_headers,
                 "socket": c.socket,
@@ -119,12 +121,27 @@ def config_for(mid: str) -> ModuleConfig:
     return load().get(mid, ModuleConfig(id=mid))
 
 
+def is_configured(module: Module, cfg: ModuleConfig) -> bool:
+    """Whether a connector has what its auth needs: a base URL (its own or the manifest's
+    suggestion), and the secret -- plus a user or client id for basic and OAuth."""
+    if not (cfg.base_url or module.base_url):
+        return False
+    kind = module.auth_spec().type
+    if kind == "none":
+        return True
+    if kind in ("basic", "oauth2_client"):
+        return bool(cfg.username and cfg.token)
+    return bool(cfg.token)
+
+
 def seated_modules() -> list[tuple[Module, ModuleConfig]]:
     """The modules the librarian should consult: seated, with a base URL and a token."""
     cfgs = load()
     out = []
-    for mid, mod in BUILTIN.items():
+    from library_agent.modules.registry import all_modules
+
+    for mid, mod in all_modules().items():
         c = cfgs.get(mid)
-        if c and c.seated and c.base_url and c.token:
+        if c and c.seated and is_configured(mod, c):
             out.append((mod, c))
     return out

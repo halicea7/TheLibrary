@@ -2,31 +2,63 @@
 question without ever writing a URL or code.
 
 A module is not a shelf of documents; it is a small, curated set of read-only operations.
-Each operation declares the parameters it takes (a JSON schema the picker fills), when it
-applies (a sentence for the planner), the GET it maps to (a path template and a mapping of
-declared parameters to query keys), and how the JSON that comes back becomes passage text
-(a row selector and a line format). Everything the model touches is a declared field; the
-transport is built from the manifest, not from anything the model emits.
+Each operation declares the parameters it takes (typed; the picker fills them), when it
+applies (a sentence for the planner), the request it maps to (a path template, query and
+optionally a JSON body for a read-only search endpoint), how to page through results, and
+how what comes back becomes passage text. Everything the model touches is a declared
+field; the transport is built from the manifest, not from anything the model emits.
 
-Only the base URL and the auth token are the operator's to set, and the token never lives
-here — it is held beside the provider keys, 0600, and never shown."""
+A module can be code (the built-ins) or data: a JSON manifest in
+`~/.library-agent/connectors/`, parsed and checked here by `from_dict`. The operator's
+secrets are never in a manifest -- they are held beside the provider keys, 0600."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
+
+FORMAT = "library-connector/1"
+
+AUTH_TYPES = ("none", "bearer", "header", "query", "basic", "oauth2_client")
+PARAM_TYPES = ("string", "int", "number", "bool", "enum", "date")
+PAGINATION = ("none", "page", "offset", "cursor", "link")
+RESPONSE_FORMATS = ("json", "xml", "csv", "text")
+
+# Ceilings no manifest can raise: one question must not crawl or flood.
+HARD_MAX_PAGES = 10
+HARD_MAX_BYTES = 5_000_000
+HARD_TIMEOUT = 60.0
+
+
+class ManifestError(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
 class Render:
-    """How one JSON response becomes passage text: the array to walk, the fields to pull,
-    and the line each row prints as. No model call -- a citation must trace to what came
-    back."""
+    """How a response becomes passage text: where the rows are, the line each prints as
+    (fields by name, nested with dots, with filters: `{created_at|date}`), what to say
+    when there are none, and how many to print. No model call -- a citation must trace to
+    what came back."""
 
-    rows: str  # dotted path to the array of rows, e.g. "data"
-    line: str  # a format string over a row's fields, e.g. "{cveId}: {applicationName} on {endpointName} ({severity})"
-    empty: str = "nothing matched"  # printed when the array is empty
-    limit: int = 20  # rows rendered at most
+    rows: str  # path to the rows: "data", "data.items[*]", "" for the whole response
+    line: str  # e.g. "{title} by {user.login} ({created_at|date})"
+    empty: str = "nothing matched"
+    limit: int = 20
+    format: str = "json"  # json | xml | csv | text
+
+
+@dataclass(frozen=True)
+class Pagination:
+    type: str = "none"  # none | page | offset | cursor | link
+    param: str = ""  # the query key for the page number, offset or cursor
+    size_param: str = ""  # the query key for the page size, if any
+    size: int = 0  # page size to ask for (and, for offset, the step)
+    start: int = 1  # the first page number (page) or offset (offset)
+    cursor_path: str = ""  # cursor: where the next cursor is in the response
+    max_pages: int = 3
 
 
 @dataclass(frozen=True)
@@ -34,13 +66,39 @@ class Operation:
     id: str
     summary: str  # what it answers, one line
     ask_when: str  # for the picker: when this operation applies
-    path: str  # a GET path template, e.g. "/web/api/v2.1/application-management/risks"
-    params: dict[str, Any]  # JSON schema for the operation's parameters
-    query: dict[str, str]  # declared-parameter -> query-key, e.g. {"cve": "cveId__contains"}
+    path: str  # a path template, e.g. "/repos/{owner}/{repo}/issues"
+    params: dict[str, Any]  # JSON schema the picker fills (properties / required)
+    query: dict[str, str]  # declared-parameter -> query key
     render: Render
-    const_query: dict[str, str] = field(
-        default_factory=dict
-    )  # fixed query keys, e.g. {"limit": "50"}
+    const_query: dict[str, str] = field(default_factory=dict)  # fixed query keys
+    method: str = "GET"  # GET, or POST only for a read-only search endpoint
+    body: Any = None  # POST: a JSON template; "{param}" strings are replaced by values
+    pagination: Pagination = field(default_factory=Pagination)
+    # Per parameter: where it goes ("path", "query", "body") and how it is checked.
+    param_specs: dict[str, dict] = field(default_factory=dict)
+
+    def path_params(self) -> list[str]:
+        return re.findall(r"\{(\w+)\}", self.path)
+
+
+@dataclass(frozen=True)
+class Auth:
+    """How the secret is attached. The secret itself is the operator's, never here."""
+
+    type: str = "header"  # none | bearer | header | query | basic | oauth2_client
+    header: str = "Authorization"  # bearer / header
+    prefix: str = ""  # header: e.g. "ApiToken " ; bearer implies "Bearer "
+    param: str = ""  # query: the parameter the key goes in
+    token_url: str = ""  # oauth2_client: where to exchange the client credentials
+    scope: str = ""  # oauth2_client: optional scope
+
+
+@dataclass(frozen=True)
+class Limits:
+    timeout: float = 30.0
+    max_bytes: int = 2_000_000
+    rate_per_minute: int = 30
+    cache_seconds: float = 90.0
 
 
 @dataclass(frozen=True)
@@ -49,14 +107,374 @@ class Module:
     name: str
     kind: str  # a short noun for the object/label, e.g. "endpoint security"
     colour: str  # the live-result pigment on this module's citations
-    auth_scheme: str  # "apitoken" or "bearer"
-    auth_header: str  # the header the token goes in, e.g. "Authorization"
+    auth_scheme: str  # legacy: "apitoken" or "bearer" (see `auth`)
+    auth_header: str  # legacy: the header the token goes in
     operations: tuple[Operation, ...]
     local_only: bool = True  # refuse to consult when chat is on a remote provider
     description: str = ""
+    auth: Auth | None = None
+    headers: dict[str, str] = field(default_factory=dict)  # fixed request headers
+    limits: Limits = field(default_factory=Limits)
+    allowed_hosts: tuple[str, ...] = ()  # besides the base URL's own host
+    base_url: str = ""  # a suggested base URL; the operator's setting wins
+    builtin: bool = False
+    source: str = ""  # where a data manifest was loaded from
 
     def op(self, op_id: str) -> Operation | None:
         return next((o for o in self.operations if o.id == op_id), None)
 
     def token_prefix(self) -> str:
         return {"apitoken": "ApiToken ", "bearer": "Bearer "}.get(self.auth_scheme, "")
+
+    def auth_spec(self) -> Auth:
+        """The effective auth, for built-ins written before `auth` existed."""
+        if self.auth:
+            return self.auth
+        return Auth(type="header", header=self.auth_header, prefix=self.token_prefix())
+
+
+# ------------------------------------------------------------------ data manifests
+
+_ID = re.compile(r"^[a-z][a-z0-9_-]{1,39}$")
+_KEY = re.compile(r"^[A-Za-z0-9_.\-\[\]]{1,80}$")
+_COLOUR = re.compile(r"^#[0-9a-fA-F]{6}$")
+_HEADER = re.compile(r"^[A-Za-z0-9-]{1,60}$")
+# Headers a manifest may not set: they belong to the transport or to the secret.
+_RESERVED_HEADERS = {"host", "content-length", "transfer-encoding", "connection", "cookie"}
+
+
+def _s(d: dict, k: str, default: str = "", n: int = 400) -> str:
+    v = d.get(k, default)
+    if v is None:
+        return default
+    if not isinstance(v, str):
+        raise ManifestError(f"{k} must be text")
+    return v.strip()[:n]
+
+
+def _int(d: dict, k: str, default: int, lo: int, hi: int) -> int:
+    v = d.get(k, default)
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise ManifestError(f"{k} must be a number")
+    return int(min(hi, max(lo, v)))
+
+
+def _host_of(url: str) -> str:
+    u = urlparse(url)
+    if u.scheme not in ("http", "https") or not u.hostname:
+        raise ManifestError(f"not an http(s) URL: {url!r}")
+    return u.hostname
+
+
+def _param(name: str, spec: dict, path_names: set[str]) -> tuple[dict, dict]:
+    """One declared parameter -> (its JSON schema, its placement spec)."""
+    if not isinstance(spec, dict):
+        raise ManifestError(f"parameter {name}: a parameter is an object")
+    t = spec.get("type", "string")
+    if t not in PARAM_TYPES:
+        raise ManifestError(f"parameter {name}: type must be one of {', '.join(PARAM_TYPES)}")
+    where = spec.get("in") or ("path" if name in path_names else "query")
+    if where not in ("path", "query", "body"):
+        raise ManifestError(f"parameter {name}: 'in' is path, query or body")
+    schema: dict[str, Any] = {"description": _s(spec, "description", n=300)}
+    if t == "enum":
+        values = spec.get("values")
+        if (
+            not isinstance(values, list)
+            or not values
+            or not all(isinstance(v, str) for v in values)
+        ):
+            raise ManifestError(f"parameter {name}: an enum lists its values")
+        schema.update(type="string", enum=values[:50])
+    elif t == "int":
+        schema["type"] = "integer"
+    elif t == "number":
+        schema["type"] = "number"
+    elif t == "bool":
+        schema["type"] = "boolean"
+    elif t == "date":
+        schema.update(type="string", description=(schema["description"] + " (YYYY-MM-DD)").strip())
+    else:
+        schema.update(type="string", maxLength=_int(spec, "max_length", 200, 1, 2000))
+    for bound in ("min", "max"):
+        if bound in spec and t in ("int", "number"):
+            schema["minimum" if bound == "min" else "maximum"] = spec[bound]
+    placement = {
+        "type": t,
+        "in": where,
+        "key": _s(spec, "key", name, 80) or name,
+        "required": bool(spec.get("required")) or where == "path",
+        "default": spec.get("default"),
+        "min": spec.get("min"),
+        "max": spec.get("max"),
+        "values": schema.get("enum"),
+        "max_length": schema.get("maxLength"),
+    }
+    return schema, placement
+
+
+def _operation(o: dict, seen: set[str]) -> Operation:
+    if not isinstance(o, dict):
+        raise ManifestError("an operation is an object")
+    oid = _s(o, "id", n=40)
+    if not _ID.match(oid) or oid in seen:
+        raise ManifestError(f"operation id {oid!r} must be unique, lowercase, 2-40 characters")
+    seen.add(oid)
+    method = _s(o, "method", "GET", 8).upper()
+    if method not in ("GET", "POST"):
+        raise ManifestError(f"{oid}: only GET, or POST for a read-only search")
+    if method == "POST" and o.get("read_only_post") is not True:
+        raise ManifestError(
+            f"{oid}: a POST must be marked read_only_post: true -- for search endpoints that "
+            "take a query body, never for anything that changes data"
+        )
+    path = _s(o, "path", n=400)
+    if not path.startswith("/") or "://" in path or ".." in path:
+        raise ManifestError(f"{oid}: path must be absolute on the base URL (start with /)")
+    path_names = set(re.findall(r"\{(\w+)\}", path))
+    raw_params = o.get("params") or {}
+    if not isinstance(raw_params, dict):
+        raise ManifestError(f"{oid}: params is an object of name -> spec")
+    props, placements, required = {}, {}, []
+    for name, spec in raw_params.items():
+        if not re.match(r"^[a-zA-Z_]\w{0,39}$", name):
+            raise ManifestError(f"{oid}: parameter name {name!r}")
+        schema, place = _param(name, spec, path_names)
+        props[name], placements[name] = schema, place
+        if place["required"]:
+            required.append(name)
+    missing = path_names - set(props)
+    if missing:
+        raise ManifestError(f"{oid}: path uses undeclared {', '.join(sorted(missing))}")
+    const = o.get("query") or {}
+    if not isinstance(const, dict) or not all(
+        isinstance(v, (str, int, float)) for v in const.values()
+    ):
+        raise ManifestError(f"{oid}: query is fixed key -> value")
+    r = o.get("response") or {}
+    fmt = _s(r, "format", "json", 8)
+    if fmt not in RESPONSE_FORMATS:
+        raise ManifestError(f"{oid}: response format is one of {', '.join(RESPONSE_FORMATS)}")
+    line = _s(r, "line", n=400)
+    if not line:
+        raise ManifestError(f"{oid}: response.line says how a row prints")
+    render = Render(
+        rows=_s(r, "rows", "", 200),
+        line=line,
+        empty=_s(r, "empty", "nothing matched", 300),
+        limit=_int(r, "limit", 20, 1, 200),
+        format=fmt,
+    )
+    p = o.get("pagination") or {}
+    ptype = _s(p, "type", "none", 10)
+    if ptype not in PAGINATION:
+        raise ManifestError(f"{oid}: pagination is one of {', '.join(PAGINATION)}")
+    if ptype in ("page", "offset", "cursor") and not _s(p, "param", n=80):
+        raise ManifestError(f"{oid}: {ptype} pagination names its query parameter")
+    if ptype == "cursor" and not _s(p, "cursor_path", n=200):
+        raise ManifestError(f"{oid}: cursor pagination says where the next cursor is")
+    pagination = Pagination(
+        type=ptype,
+        param=_s(p, "param", n=80),
+        size_param=_s(p, "size_param", n=80),
+        size=_int(p, "size", 0, 0, 1000),
+        start=_int(p, "start", 1 if ptype == "page" else 0, 0, 10_000),
+        cursor_path=_s(p, "cursor_path", n=200),
+        max_pages=_int(p, "max_pages", 3, 1, HARD_MAX_PAGES),
+    )
+    return Operation(
+        id=oid,
+        summary=_s(o, "summary", n=300),
+        ask_when=_s(o, "ask_when", n=400),
+        path=path,
+        params={"type": "object", "properties": props, "required": required},
+        query={n: pl["key"] for n, pl in placements.items() if pl["in"] == "query"},
+        const_query={str(k): str(v) for k, v in const.items()},
+        render=render,
+        method=method,
+        body=o.get("body") if method == "POST" else None,
+        pagination=pagination,
+        param_specs=placements,
+    )
+
+
+def from_dict(d: dict, *, source: str = "", builtin: bool = False) -> Module:
+    """A data manifest, checked field by field. Raises ManifestError naming what is wrong."""
+    if not isinstance(d, dict):
+        raise ManifestError("a connector is a JSON object")
+    if d.get("format") not in (None, FORMAT):
+        raise ManifestError(f"unknown format {d.get('format')!r}; this library reads {FORMAT}")
+    mid = _s(d, "id", n=40)
+    if not _ID.match(mid):
+        raise ManifestError("id must be lowercase letters, digits, - or _, 2-40 characters")
+    name = _s(d, "name", n=60)
+    if not name:
+        raise ManifestError("a connector has a name")
+    colour = _s(d, "colour", "#4f9186", 7) or "#4f9186"
+    if not _COLOUR.match(colour):
+        raise ManifestError("colour is #rrggbb")
+    a = d.get("auth") or {"type": "none"}
+    if not isinstance(a, dict) or a.get("type") not in AUTH_TYPES:
+        raise ManifestError(f"auth.type is one of {', '.join(AUTH_TYPES)}")
+    auth = Auth(
+        type=a["type"],
+        header=_s(a, "header", "Authorization", 60) or "Authorization",
+        # Verbatim: the trailing space in "ApiToken " is part of the scheme.
+        prefix=(a.get("prefix") or "")[:40]
+        if a["type"] == "header" and isinstance(a.get("prefix"), str)
+        else "",
+        param=_s(a, "param", "", 80),
+        token_url=_s(a, "token_url", "", 400),
+        scope=_s(a, "scope", "", 200),
+    )
+    if auth.type in ("bearer", "header") and not _HEADER.match(auth.header):
+        raise ManifestError("auth.header is a header name")
+    if auth.type == "query" and not auth.param:
+        raise ManifestError("auth.param names the query parameter the key goes in")
+    if auth.type == "oauth2_client" and not auth.token_url:
+        raise ManifestError("auth.token_url is where client credentials are exchanged")
+    headers = d.get("headers") or {}
+    if not isinstance(headers, dict):
+        raise ManifestError("headers is name -> value")
+    for h, v in headers.items():
+        if not _HEADER.match(str(h)) or h.lower() in _RESERVED_HEADERS or not isinstance(v, str):
+            raise ManifestError(f"header {h!r} cannot be set by a connector")
+        if h.lower() == auth.header.lower() and auth.type in ("bearer", "header"):
+            raise ManifestError(f"header {h!r} carries the secret; it is set by auth")
+    lim = d.get("limits") or {}
+    if not isinstance(lim, dict):
+        raise ManifestError("limits is an object")
+    limits = Limits(
+        timeout=float(min(HARD_TIMEOUT, max(1.0, lim.get("timeout", 30)))),
+        max_bytes=_int(lim, "max_bytes", 2_000_000, 10_000, HARD_MAX_BYTES),
+        rate_per_minute=_int(lim, "rate_per_minute", 30, 1, 600),
+        cache_seconds=float(min(3600, max(0, lim.get("cache_seconds", 90)))),
+    )
+    hosts = d.get("allowed_hosts") or []
+    if not isinstance(hosts, list) or not all(
+        isinstance(h, str) and re.match(r"^[a-z0-9.-]+$", h) for h in hosts
+    ):
+        raise ManifestError("allowed_hosts lists host names")
+    base = _s(d, "base_url", "", 400)
+    if base:
+        _host_of(base)
+    if auth.type == "oauth2_client" and "://" in auth.token_url:
+        th = _host_of(auth.token_url)
+        if base and th != _host_of(base) and th not in hosts:
+            raise ManifestError("auth.token_url's host must be the base URL's or in allowed_hosts")
+    ops = d.get("operations") or []
+    if not isinstance(ops, list) or not ops:
+        raise ManifestError("a connector has at least one operation")
+    if len(ops) > 25:
+        raise ManifestError("at most 25 operations: a connector is a curated set, not a whole API")
+    seen: set[str] = set()
+    operations = tuple(_operation(o, seen) for o in ops)
+    return Module(
+        id=mid,
+        name=name,
+        kind=_s(d, "kind", "live source", 40) or "live source",
+        colour=colour.lower(),
+        auth_scheme="",
+        auth_header=auth.header,
+        operations=operations,
+        local_only=d.get("clearance", "local") != "any",
+        description=_s(d, "description", n=600),
+        auth=auth,
+        headers={str(k): str(v) for k, v in headers.items()},
+        limits=limits,
+        allowed_hosts=tuple(h.lower() for h in hosts),
+        base_url=base.rstrip("/"),
+        builtin=builtin,
+        source=source,
+    )
+
+
+def to_dict(m: Module) -> dict:
+    """A module back to its manifest -- for sharing (never carries a secret) and editing."""
+    a = m.auth_spec()
+    ops = []
+    for o in m.operations:
+        params = {}
+        for name, schema in (o.params.get("properties") or {}).items():
+            pl = o.param_specs.get(name) or {}
+            t = pl.get("type") or {"integer": "int", "number": "number", "boolean": "bool"}.get(
+                schema.get("type"), "enum" if schema.get("enum") else "string"
+            )
+            spec = {"type": t, "description": schema.get("description", "")}
+            where = pl.get("in") or ("path" if name in o.path_params() else "query")
+            spec["in"] = where
+            key = pl.get("key") or o.query.get(name) or name
+            if key != name:
+                spec["key"] = key
+            if name in (o.params.get("required") or []):
+                spec["required"] = True
+            if schema.get("enum"):
+                spec["values"] = schema["enum"]
+            for k in ("default", "min", "max"):
+                if pl.get(k) is not None:
+                    spec[k] = pl[k]
+            params[name] = spec
+        op: dict[str, Any] = {
+            "id": o.id,
+            "summary": o.summary,
+            "ask_when": o.ask_when,
+            "method": o.method,
+            "path": o.path,
+            "params": params,
+            "query": dict(o.const_query),
+            "response": {
+                "format": o.render.format,
+                "rows": o.render.rows,
+                "line": o.render.line,
+                "empty": o.render.empty,
+                "limit": o.render.limit,
+            },
+        }
+        if o.method == "POST":
+            op["read_only_post"] = True
+            op["body"] = o.body
+        if o.pagination.type != "none":
+            p = o.pagination
+            op["pagination"] = {
+                k: v
+                for k, v in {
+                    "type": p.type,
+                    "param": p.param,
+                    "size_param": p.size_param,
+                    "size": p.size,
+                    "start": p.start,
+                    "cursor_path": p.cursor_path,
+                    "max_pages": p.max_pages,
+                }.items()
+                if v not in ("", None)
+            }
+        ops.append(op)
+    auth: dict[str, Any] = {"type": a.type}
+    if a.type in ("bearer", "header"):
+        auth["header"] = a.header
+    if a.type == "header" and a.prefix:
+        auth["prefix"] = a.prefix
+    if a.type == "query":
+        auth["param"] = a.param
+    if a.type == "oauth2_client":
+        auth.update(token_url=a.token_url, scope=a.scope)
+    return {
+        "format": FORMAT,
+        "id": m.id,
+        "name": m.name,
+        "kind": m.kind,
+        "colour": m.colour,
+        "description": m.description,
+        "base_url": m.base_url,
+        "clearance": "local" if m.local_only else "any",
+        "auth": auth,
+        "headers": dict(m.headers),
+        "limits": {
+            "timeout": m.limits.timeout,
+            "max_bytes": m.limits.max_bytes,
+            "rate_per_minute": m.limits.rate_per_minute,
+            "cache_seconds": m.limits.cache_seconds,
+        },
+        "allowed_hosts": list(m.allowed_hosts),
+        "operations": ops,
+    }

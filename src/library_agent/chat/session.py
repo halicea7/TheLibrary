@@ -32,6 +32,7 @@ from library_agent.llm import providers
 from library_agent.llm.client import LLM
 from library_agent.llm.lease import mark_chat_active, mark_chat_done, redis_client
 from library_agent.llm.liveness import Busy, gate, liveness
+from library_agent.llm.openai_compat import split_reasoning
 from library_agent.ops.incidents import record_exception
 from library_agent.retrieval.hybrid import SearchHit
 from library_agent.retrieval.pipeline import hits_for_chunks, retrieve
@@ -433,7 +434,8 @@ async def run_turn(
         finally:
             heartbeat.cancel()
 
-        raw = "".join(buffer)
+        # Reasoning a server sent inline, if any slipped through as answer, is not the answer.
+        raw = split_reasoning("".join(buffer))[1]
         cleaned, used = validate(raw, state.sources)
         metrics = citation_validity(raw, state.sources)
         state.answer = cleaned

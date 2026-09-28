@@ -239,3 +239,74 @@ async def test_settings_routes(pfile, served, monkeypatch):
         r = await c.delete("/api/settings/providers/acme")
         assert r.json()["roles_reset"] == ["threads"]
         assert not providers.load().providers and not providers.load().models
+
+
+# --- reasoning inline in content (as a vLLM or Ollama /v1 behind a router sends it) -----
+
+
+def inline_server(chunks: list[str], reply: str) -> FastAPI:
+    app = FastAPI()
+
+    @app.post("/v1/chat/completions")
+    async def chat(req: Request):
+        body = await req.json()
+        if body.get("stream"):
+
+            async def gen():
+                for piece in chunks:
+                    yield (
+                        "data: " + json.dumps({"choices": [{"delta": {"content": piece}}]}) + "\n\n"
+                    )
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(gen(), media_type="text/event-stream")
+        return {"choices": [{"message": {"role": "assistant", "content": reply}}]}
+
+    return app
+
+
+async def _stream(model):
+    async with LLM() as c:
+        return [p async for p in c.chat_stream(model, [{"role": "user", "content": "q"}])]
+
+
+def _joined(pieces, kind):
+    return "".join(t for k, t in pieces if k == kind)
+
+
+async def test_reasoning_inline_is_thinking_not_the_answer(pfile, served):
+    openai_compat._INLINE_THINKERS.clear()
+    # No opening tag, and the closing one split across chunks.
+    chunks = ["We are to compute 17", " * 3 = 51.\n So 51.\n</thi", "nk>\n\n", "51"]
+    served(inline_server(chunks, 'Let me think. {"x": 1} is wrong\n</think>\n{"title": "T"}'))
+    _configure(pfile)
+    pieces = await _stream("acme:qwen3:30b-a3b")
+    assert _joined(pieces, "content") == "51"
+    assert "17 * 3 = 51" in _joined(pieces, "thinking") and "</" not in _joined(pieces, "thinking")
+    async with LLM() as c:
+        out = await c.structured(
+            "acme:qwen3:30b-a3b",
+            "title it",
+            {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
+        )
+    assert out == {"title": "T"}  # the braces in the reasoning did not confuse it
+
+
+async def test_an_unknown_model_that_reasons_inline_is_learned(pfile, served):
+    openai_compat._INLINE_THINKERS.clear()
+    served(inline_server(["reasoning here\n</think>\n\n", "The answer."], ""))
+    _configure(pfile)
+    first = await _stream("acme:mystery-7b")
+    assert "The answer." in _joined(first, "content")
+    assert "acme:mystery-7b" in openai_compat._INLINE_THINKERS
+    second = await _stream("acme:mystery-7b")
+    assert _joined(second, "content") == "The answer."
+    assert _joined(second, "thinking").strip() == "reasoning here"
+
+
+async def test_a_thinking_family_model_that_did_not_think_still_answers(pfile, served):
+    openai_compat._INLINE_THINKERS.clear()
+    served(inline_server(["Just the answer, ", "no reasoning."], ""))
+    _configure(pfile)
+    pieces = await _stream("acme:qwen3:30b-a3b")
+    assert _joined(pieces, "content") == "Just the answer, no reasoning."

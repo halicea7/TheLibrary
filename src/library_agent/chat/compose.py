@@ -50,6 +50,7 @@ from library_agent.llm.embed import prime_queries
 from library_agent.llm.lease import mark_chat_active, mark_chat_done, redis_client
 from library_agent.llm.liveness import Busy, gate, liveness
 from library_agent.llm.ollama import is_placeholder
+from library_agent.llm.openai_compat import split_reasoning
 from library_agent.reading.prompts import SYSTEM_LIBRARIAN
 from library_agent.retrieval.hybrid import SearchHit
 from library_agent.retrieval.pipeline import RetrievalConfig, diversify, retrieve
@@ -1051,7 +1052,7 @@ async def compose(
                 buf.append(piece)
                 yield {"event": "token", "data": piece}
             clock.stop(t_write)
-            raw = "".join(buf)
+            raw = split_reasoning("".join(buf))[1]
             # Told not to, the model still often opens with the heading. Drop it.
             first, _, rest = raw.lstrip().partition("\n")
             if first.strip("# *").strip().lower() == sec["heading"].strip().lower():

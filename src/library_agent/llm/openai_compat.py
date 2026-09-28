@@ -14,12 +14,39 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 from collections.abc import AsyncIterator
 from typing import Any, Self
 
 import httpx
 
 from library_agent.llm.ollama import OllamaError, clean, parse_structured
+
+# Reasoning inline. Some servers (vLLM and Ollama's /v1 behind a router, among them)
+# return a thinking model's reasoning inside `content`, closed by </think> -- often with
+# no opening tag, since the chat template put that in the prompt -- instead of in
+# `reasoning_content`. Left alone it is shown and saved as the answer, and it sits in
+# front of the JSON of every structured reply.
+_CLOSE, _OPEN = "</think>", "<think>"
+_THINKING_FAMILY = re.compile(r"qwen3(?!-coder)|deepseek-r1|qwq|thinking|reasoner", re.IGNORECASE)
+# Models seen reasoning inline, so their next stream is read that way from its first token.
+_INLINE_THINKERS: set[str] = set()
+
+
+def split_reasoning(text: str) -> tuple[str, str]:
+    """(reasoning, answer) from a reply that may carry its reasoning inline."""
+    if _CLOSE in text:
+        head, _, tail = text.partition(_CLOSE)
+        return head.replace(_OPEN, "", 1).strip(), tail.lstrip()
+    if text.lstrip().startswith(_OPEN):  # opened and never closed: all reasoning
+        return text.replace(_OPEN, "", 1).strip(), ""
+    return "", text
+
+
+def _expects_inline(provider_id: str, model: str) -> bool:
+    return f"{provider_id}:{model}" in _INLINE_THINKERS or bool(_THINKING_FAMILY.search(model))
+
+
 from library_agent.llm.providers import Provider
 
 # Per provider: does it accept response_format=json_schema? Learned from the first 4xx.
@@ -82,7 +109,7 @@ class OpenAICompat:
         content = msg.get("content")
         if isinstance(content, list):  # some servers return content parts
             content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
-        return clean(content or "")
+        return clean(split_reasoning(content or "")[1])
 
     async def generate(
         self,
@@ -214,6 +241,9 @@ class OpenAICompat:
         }
         if seed is not None:
             payload["seed"] = seed
+        key = f"{self.provider.id}:{model}"
+        inline = _expects_inline(self.provider.id, model)
+        held, shown, separate, thought = "", [], False, False
         async with self._client.stream(
             "POST", "/chat/completions", json=payload, timeout=900.0
         ) as r:
@@ -226,7 +256,7 @@ class OpenAICompat:
                 data = line[5:].strip()
                 if not data or data == "[DONE]":
                     if data == "[DONE]":
-                        return
+                        break
                     continue
                 try:
                     chunk = json.loads(data)
@@ -235,9 +265,45 @@ class OpenAICompat:
                 for choice in chunk.get("choices") or []:
                     delta = choice.get("delta") or {}
                     if piece := (delta.get("reasoning_content") or delta.get("reasoning")):
+                        separate = True
                         yield "thinking", clean(piece)
                     if piece := delta.get("content"):
-                        yield "content", clean(piece)
+                        if not inline:
+                            if _CLOSE in piece:  # reasoning inline after all: learn it
+                                _INLINE_THINKERS.add(key)
+                                before, _, after = piece.partition(_CLOSE)
+                                if before:
+                                    yield "content", clean(before)
+                                if after.strip():
+                                    yield "content", clean(after.lstrip())
+                                continue
+                            yield "content", clean(piece)
+                            continue
+                        # Reasoning until </think>: shown as thinking as it comes, with a
+                        # tail held back in case the tag is split across two chunks.
+                        held += piece
+                        if _CLOSE in held:
+                            before, _, after = held.partition(_CLOSE)
+                            before = before.replace(_OPEN, "", 1)
+                            if before:
+                                yield "thinking", clean(before)
+                            thought = True
+                            inline, held = False, ""
+                            if after.lstrip():
+                                yield "content", clean(after.lstrip())
+                            continue
+                        if not separate and not thought and len(held) > len(_CLOSE):
+                            out, held = held[: -len(_CLOSE)], held[-len(_CLOSE) :]
+                            shown.append(out)
+                            yield "thinking", clean(out.replace(_OPEN, "", 1))
+                        elif separate:  # the server does split reasoning: this is answer
+                            inline = False
+                            yield "content", clean(held)
+                            held = ""
+        # The stream ended while still waiting for </think>: the model did not reason
+        # this time, and what looked like reasoning was the answer.
+        if inline and (shown or held):
+            yield "content", clean("".join(shown) + held)
 
     async def describe_image(
         self,

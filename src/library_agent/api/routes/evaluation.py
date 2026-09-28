@@ -5,9 +5,11 @@ library."""
 
 from __future__ import annotations
 
+import json
 import uuid
+from collections import Counter
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -45,7 +47,7 @@ async def cases() -> dict:
         "judged": sum(c.judged for c in cs),
         "by_type": {t: sum(c.type == t for c in cs if c.judged) for t in judged.TYPES},
         "by_split": {s: sum(c.split == s for c in cs if c.judged) for s in ("tune", "test")},
-        "by_judge": {j: sum(c.judge == j for c in cs if c.judged) for j in ("human", "model")},
+        "by_judge": dict(Counter(c.judge for c in cs if c.judged)),
         "file": str(judged.set_path()),
     }
 
@@ -146,3 +148,41 @@ async def auto(n: int = 10) -> dict:
 @router.get("/agreement")
 async def agreement() -> dict:
     return judged.agreement()
+
+
+@router.get("/export")
+async def export() -> Response:
+    """The judged set as one file to hand to a reviewer (see judged.export_bundle)."""
+    bundle = await judged.export_bundle()
+    stamp = bundle["exported_at"][:10]
+    return Response(
+        json.dumps(bundle, indent=1, ensure_ascii=False),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="library-eval-{stamp}.json"'},
+    )
+
+
+@router.get("/packet")
+async def packet(n: int = 40) -> Response:
+    """Unjudged questions with their pooled passages, for an outside reviewer to judge.
+    Pooling runs retrieval per question, so a large packet takes a minute or two."""
+    bundle = await judged.export_packet(n)
+    stamp = bundle["exported_at"][:10]
+    return Response(
+        json.dumps(bundle, indent=1, ensure_ascii=False),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="library-judging-packet-{stamp}.json"'
+        },
+    )
+
+
+class ImportIn(BaseModel):
+    packet: dict
+    answers: dict
+
+
+@router.post("/import")
+async def import_answers(body: ImportIn) -> dict:
+    """A reviewer's answers to a packet, saved as that reviewer's cases."""
+    return await judged.import_judgements(body.packet, body.answers)

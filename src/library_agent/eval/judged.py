@@ -19,6 +19,7 @@ ran against (volume and passage counts, embedding model, prompt versions)."""
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import logging
@@ -256,8 +257,16 @@ async def run(split: str | None = "tune", setups: list[str] | None = None) -> di
         }
     summary: dict[str, dict] = {}
     by_model: dict[str, dict] = {}
+    by_judge: dict[str, dict] = {}
     for name in names:
-        for judge_, into in (("human", summary), ("model", by_model)):
+        for judge_ in sorted({c.judge for c in cases}):
+            into = (
+                summary
+                if judge_ == "human"
+                else by_model
+                if judge_ == "model"
+                else by_judge.setdefault(judge_, {})
+            )
             mine = [c for c in cases if c.judge == judge_]
             for group, rows in _groups(mine, per_case, name):
                 into.setdefault(name, {})[group] = _summarise(rows)
@@ -266,11 +275,14 @@ async def run(split: str | None = "tune", setups: list[str] | None = None) -> di
         "split": split or "all",
         "cases": sum(c.judge == "human" for c in cases),
         "model_cases": sum(c.judge == "model" for c in cases),
+        "reviewer_cases": sum(c.judge not in ("human", "model") for c in cases),
         "seconds": round(time.time() - started, 1),
         "snapshot": snapshot,
         # The owner's cases; the model's are scored apart until agreement earns them a place.
         "summary": summary,
         "summary_model_judged": by_model,
+        # Each outside reviewer's cases, scored apart as well (e.g. "astra").
+        "summary_by_judge": by_judge,
         "agreement": agreement(),
         "per_case": per_case,
     }
@@ -491,3 +503,216 @@ def agreement(cases: list[Case] | None = None) -> dict:
 
 if __name__ == "__main__":
     main()
+
+
+# ------------------------------------------------------------------- sharing
+
+
+async def export_bundle() -> dict:
+    """The judged set as a reviewer can read it without the library: every case with the
+    text of the passages it marked (title, page, section), the owner's marks beside the
+    model's (with its reasons), the agreement table, and the latest run's scores. It quotes
+    the library -- share it only with someone who may read those passages."""
+    cases = [c for c in load() if c.judged]
+    ids = {
+        x
+        for c in cases
+        for x in (
+            *c.supporting,
+            *c.distractors,
+            *(c.model_marks.get("supporting") or []),
+            *(c.model_marks.get("distractors") or []),
+        )
+    }
+    passages: dict[str, dict] = {}
+    if ids:
+        async with session_scope() as db:
+            rows = (
+                await db.execute(
+                    text(
+                        "select c.id, d.title, s.path, c.page_start, c.text from chunk c"
+                        " join document d on d.id = c.document_id"
+                        " left join section s on s.id = c.section_id where c.id = any(:ids)"
+                    ),
+                    {"ids": [uuid.UUID(x) for x in ids]},
+                )
+            ).all()
+        for cid, title, path, page, body in rows:
+            passages[str(cid)] = {
+                "title": title,
+                "section": path,
+                "page": page,
+                "text": " ".join(body.split())[:1500],
+            }
+    runs = sorted((eval_dir() / "runs").glob("*.json"))
+    latest = json.loads(runs[-1].read_text()) if runs else None
+    if latest:
+        latest.pop("per_case", None)
+
+    def side(xs: list[str]) -> list[dict]:
+        return [{"id": x, **passages.get(x, {"missing": True})} for x in xs]
+
+    return {
+        "library_eval": 1,
+        "exported_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "note": "Hand-judged questions for The Library's retrieval. 'supporting' passages answer "
+        "the question; 'distractors' look relevant but do not. judge='model' cases were marked by "
+        "the local model unattended and have not been checked by the owner.",
+        "counts": {
+            "cases": len(cases),
+            "by_judge": dict(collections.Counter(c.judge for c in cases)),
+            "by_type": dict(collections.Counter(c.type for c in cases)),
+            "by_split": dict(collections.Counter(c.split for c in cases)),
+        },
+        "agreement": agreement(cases),
+        "latest_run": latest,
+        "cases": [
+            {
+                "id": c.id,
+                "question": c.question,
+                "type": c.type,
+                "judge": c.judge,
+                "split": c.split,
+                "source": c.source,
+                "answerable": c.answerable,
+                "judged_at": c.judged_at,
+                "notes": c.notes,
+                "supporting": side(c.supporting),
+                "distractors": side(c.distractors),
+                "pooled": len(c.pooled),
+                "model": {
+                    "model": c.model_marks.get("model"),
+                    "supporting": c.model_marks.get("supporting") or [],
+                    "distractors": c.model_marks.get("distractors") or [],
+                    "reasons": c.model_marks.get("reasons") or {},
+                }
+                if c.model_marks
+                else None,
+            }
+            for c in cases
+        ],
+    }
+
+
+# ------------------------------------------------------------------- a reviewer judges
+
+PACKET_INSTRUCTIONS = """You are judging search results for a private research library.
+
+For each item there is a question someone actually asked the library, and the passages its
+search setups returned for it, numbered P1, P2, ... Judge each passage on its own text:
+
+- supporting: the passage itself states something that answers the question, or a
+  necessary part of it (partial support of a multi-part question counts).
+- distractor: on the same topic or sharing the question's words, but it does not answer it
+  -- a neighbouring mechanism, a different protocol, product or version, the general case
+  when the question asks a specific one, or a control working as intended when the question
+  asks about a failure.
+- leave the rest unmarked.
+
+Also give the question a type -- one of: exact, concept, mechanism, multi_hop, synthesis,
+negation, conflict -- or mark it unanswerable if no passage supports an answer. Notes are
+optional (one line: anything the library should know about the question or the results).
+
+Answer with JSON exactly in the `answer_format` shape, one entry per item, using the item's
+id and the passage labels (P1, P2, ...)."""
+
+
+async def export_packet(n: int = 40) -> dict:
+    """Questions actually asked, not yet judged, each with its pooled passages as text --
+    for someone outside the library to judge. Labels P1.. map back to passages on import."""
+    items = []
+    for sd in (await seeds(limit=400))[: max(1, min(200, n))]:
+        passages = await pool(sd["question"])
+        if not passages:
+            continue
+        items.append(
+            {
+                "id": uuid.uuid5(uuid.NAMESPACE_URL, sd["question"]).hex[:12],
+                "question": sd["question"],
+                "source": sd["source"],
+                "passages": [
+                    {
+                        "label": f"P{i}",
+                        "chunk_id": p["chunk_id"],
+                        "title": p["title"],
+                        "section": p["section"],
+                        "page": p["page"],
+                        "text": " ".join(str(p["text"]).split())[:2000],
+                    }
+                    for i, p in enumerate(passages, 1)
+                ],
+            }
+        )
+    return {
+        "library_judging_packet": 1,
+        "exported_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "instructions": PACKET_INSTRUCTIONS,
+        "types": [t for t in TYPES if t != "unanswerable"],
+        "answer_format": {
+            "judge": "astra",
+            "judgements": [
+                {
+                    "id": "the item's id",
+                    "type": "concept",
+                    "unanswerable": False,
+                    "supporting": ["P1", "P4"],
+                    "distractors": ["P2"],
+                    "notes": "",
+                }
+            ],
+        },
+        "items": items,
+    }
+
+
+async def import_judgements(packet: dict, answers: dict) -> dict:
+    """A reviewer's answers to a packet, saved as cases judged by that reviewer. Labels
+    are mapped back to passages through the packet; an item or label the packet does not
+    have is skipped and counted, never guessed."""
+    judge_name = str(answers.get("judge") or "reviewer").strip().lower()[:20] or "reviewer"
+    if judge_name in ("human", "model"):
+        judge_name = f"{judge_name}-reviewer"
+    by_id = {it["id"]: it for it in packet.get("items") or [] if isinstance(it, dict)}
+    saved = skipped = bad_labels = 0
+    existing = {c.question.strip().lower(): c for c in load()}
+    for j in answers.get("judgements") or []:
+        it = by_id.get(str(j.get("id")))
+        if not it:
+            skipped += 1
+            continue
+        labels = {p["label"]: p["chunk_id"] for p in it["passages"]}
+
+        def pick(xs, labels=labels) -> list[str]:
+            nonlocal bad_labels
+            out = []
+            for x in xs or []:
+                if str(x) in labels:
+                    out.append(labels[str(x)])
+                else:
+                    bad_labels += 1
+            return out
+
+        sup, dis = pick(j.get("supporting")), pick(j.get("distractors"))
+        t = str(j.get("type") or "concept")
+        if j.get("unanswerable") or not sup:
+            t, sup = "unanswerable", []
+        if t not in TYPES:
+            t = "concept"
+        prev = existing.get(it["question"].strip().lower())
+        if prev and prev.judge == "human":
+            skipped += 1  # the owner's own judgement stands
+            continue
+        case = Case(
+            question=it["question"],
+            type=t,
+            supporting=sup,
+            distractors=[x for x in dis if x not in sup],
+            source=it.get("source", "ask"),
+            notes=str(j.get("notes") or "")[:500],
+            judge=judge_name,
+            pooled=list(labels.values()),
+            **({"id": prev.id} if prev else {}),
+        )
+        await judge(case)
+        saved += 1
+    return {"judge": judge_name, "saved": saved, "skipped": skipped, "unknown_labels": bad_labels}

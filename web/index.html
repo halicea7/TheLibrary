@@ -909,6 +909,7 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
 #inspect { position:absolute; right:24px; top:60px; width:400px; height:520px; z-index:4; pointer-events:none; opacity:0; transition:opacity .25s ease; }
 #inspect[data-on=true] { opacity:1; }
 #inspect canvas { width:100%; height:440px; display:block; }
+#inspect canvas[hidden] { display:none; }
 #inspect .who { text-align:center; font:600 15px/1.4 var(--serif); color:var(--fg); }
 #inspect .meta { text-align:center; font:10.5px/1.6 var(--mono); color:var(--faint); }
 .make .locked { font:11px/1.5 var(--mono); color:var(--faint); }
@@ -1052,7 +1053,7 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
       <div id="view-write" hidden></div>
     </div>
     <div id="mk-stage" hidden><canvas id="mk-canvas" aria-label="Cartridge preview — drag to rotate" title="Drag to rotate the cartridge"></canvas></div>
-    <div id="inspect" data-on="false" aria-hidden="true"><canvas id="inspect-canvas"></canvas><div class="who" id="inspect-who"></div><div class="meta" id="inspect-meta"></div></div>
+    <div id="inspect" data-on="false" aria-hidden="true"><canvas id="inspect-canvas"></canvas><canvas id="inspect-token" hidden></canvas><div class="who" id="inspect-who"></div><div class="meta" id="inspect-meta"></div></div>
 
     <form class="composer" id="composer" autocomplete="off">
       <div class="tray" id="tray" hidden></div>
@@ -1849,12 +1850,36 @@ async function inspectShow(id) {
     let points = [];
     try { points = (await (await fetch(`/api/cartridges/${id}/constellation`)).json()).points || []; } catch {}
     inspect.ctrl.set({ design: c.design || {}, colour: c.colour, name: c.name, level: c.level, sub: `${c.level} · ${c.document_count} volumes`, points, artUrl: `/api/cartridges/${id}/art?c=${c.colour.slice(1)}`, lit: cartridges.has(id), flip: fresh });
+    $('#inspect-token').hidden = true; $('#inspect-canvas').hidden = false; tokenInspectStop();
+    el.dataset.on = 'true';
+  }, 140);
+}
+// Hovering a seated token does what hovering a cartridge does: it rises into the reading
+// pane, turning, with its name and state beneath it.
+const tokInspect = { view: null, id: null };
+function tokenInspectStop() { tokInspect.view?.dispose(); tokInspect.view = null; tokInspect.id = null; }
+function tokenInspect(id) {
+  clearTimeout(inspect.timer); clearTimeout(tokInspect.stop);
+  const m = tokens.list.find(x => x.id === id); if (!m || !window.Token3D) return;
+  inspect.timer = setTimeout(() => {
+    const el = $('#inspect');
+    $('#inspect-canvas').hidden = true; $('#inspect-token').hidden = false;
+    if (!tokInspect.view) tokInspect.view = window.Token3D.mountToken($('#inspect-token'), { spin: true });
+    if (tokInspect.id !== id) { tokInspect.id = id; tokInspect.view.set(tokenDesign(m)); }
+    tokInspect.view.state(m.configured ? 'ready' : 'error');
+    $('#inspect-who').textContent = m.name;
+    $('#inspect-meta').textContent = `socket ${m.socket + 1} · ${m.kind || 'live source'} · ${m.configured ? 'live' : 'needs its connection'}`;
+    inspect.id = null;
     el.dataset.on = 'true';
   }, 140);
 }
 function inspectHide() {
   clearTimeout(inspect.timer);
-  inspect.timer = setTimeout(() => { $('#inspect').dataset.on = 'false'; }, 260);
+  inspect.timer = setTimeout(() => {
+    $('#inspect').dataset.on = 'false';
+    // A turning token keeps drawing; let it go once the pane has faded.
+    clearTimeout(tokInspect.stop); tokInspect.stop = setTimeout(() => { if ($('#inspect').dataset.on === 'false') tokenInspectStop(); }, 400);
+  }, 260);
 }
 
 // Under the socket: which cartridge is in view, of how many, and eject.
@@ -1960,7 +1985,7 @@ async function loadTokens() {
   $('#tok-row').innerHTML = bySocket.map((m, i) => {
     const f = faces[i];
     const ring = !m ? '' : m.configured ? f.rim : 'var(--amber)';
-    return `<span class="sk" data-on="${!!m}" style="--ring:${esc(ring)}" title="${m ? `${esc(m.name)} in socket ${i + 1}${m.configured ? '' : ' — needs its connection'}` : `Socket ${i + 1}: empty`}">
+    return `<span class="sk" data-on="${!!m}" style="--ring:${esc(ring)}" ${m ? `onmouseenter="tokenInspect('${m.id}')" onmouseleave="inspectHide()"` : ''} title="${m ? `${esc(m.name)} in socket ${i + 1}${m.configured ? '' : ' — needs its connection'}` : `Socket ${i + 1}: empty`}">
       <span class="hx" ${f ? `data-finish="${esc(f.finish)}"` : ''}><span class="b" ${f ? `style="--c:${esc(f.body)}"` : ''}>${f ? `<i style="--lc:${esc(f.logo)};--m:url('${f.mask}')"></i>` : ''}</span></span></span>`;
   }).join('');
   if (tokens.bay) { bayRender(); tokens.bay.setSockets(bayWants()); }

@@ -433,7 +433,7 @@ function drag(canvas, target, wake, { pitch = [-.9, .9] } = {}) {
 }
 
 /* ── the customizer's view of one token ──────────────────────────────── */
-export function mountToken(canvas) {
+export function mountToken(canvas, { spin = false } = {}) {
   const v = viewport(canvas, { z: 7.4 });
   const tok = makeToken({ anisotropy: v.renderer.capabilities.getMaxAnisotropy() });
   tok.group.rotation.set(-.3, -.4, 0); v.scene.add(tok.group); tok.onChange(v.wake);
@@ -441,7 +441,12 @@ export function mountToken(canvas) {
   // Close enough to read the identity strip and the etched planets on the back.
   let dist = 7.4;
   const unzoom = zoomer(canvas, () => dist, x => { dist = x; v.camera.position.z = x; }, [2.2, 12], v.wake);
-  v.frames(now => tok.tick(now));
+  // Inspecting (hover in the sidebar): the token turns slowly, as a cartridge does.
+  let last = 0;
+  v.frames(now => {
+    if (spin) { const dt = last ? Math.min(.05, (now - last) / 1000) : 0; last = now; tok.group.rotation.y += dt * .6; }
+    return tok.tick(now) || spin;
+  });
   return {
     set(design) { const p = tok.set(design); v.wake(); return p; },
     state(s, opts) { tok.state(s, opts); v.wake(); },

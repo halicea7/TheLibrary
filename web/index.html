@@ -547,7 +547,7 @@ select, .toggle {
 
 /* ── tokens: the row under the rack, and the bay ─────────────────────── */
 .tokens-h { align-items:baseline; gap:10px; }
-.tok-count { font:10.5px/1 var(--mono); color:var(--faint); letter-spacing:.04em; margin-left:auto; }
+.tok-count { font:10.5px/1 var(--mono); color:var(--faint); letter-spacing:.04em; margin-left:auto; white-space:nowrap; }
 .tok-count b { color:var(--fg); font-weight:500; }
 .tok-row { display:flex; gap:8px; margin:6px 0 10px; cursor:pointer; }
 /* A socket: a hex ring (lit in the token's rim colour when it is live, amber when it
@@ -571,7 +571,7 @@ select, .toggle {
 .bay-tabs button[aria-selected="true"] { color:var(--fg); border-bottom-color:var(--gilt); }
 .bay-pane { overflow-y:auto; padding:12px 16px 18px; font:12.5px/1.55 var(--sans); color:var(--dim); scrollbar-width:thin; }
 .tok-card { display:grid; grid-template-columns:34px 1fr auto; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid var(--rule-soft); }
-.tok-card .hx { width:30px; height:26px; clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); background:var(--c); }
+.tok-card .tok-row.face { margin:0; cursor:default; }
 .tok-card[data-armed="true"] { box-shadow:inset 3px 0 0 var(--gilt); padding-left:8px; }
 .tok-card b { color:var(--fg); font:600 13px/1.3 var(--serif); }
 .tok-card .m { font:10.5px/1.4 var(--mono); color:var(--faint); }
@@ -1991,11 +1991,13 @@ async function loadTokens() {
   const on = bySocket.filter(Boolean).length;
   $('#tok-count').innerHTML = `Active modules <b>${on}/${tokens.sockets}</b>`;
   const faces = await Promise.all(bySocket.map(m => m ? tokenFace(tokenDesign(m)) : null));
+  // The bay's list shows the same faces, unseated modules included.
+  tokens.faces = new Map(await Promise.all(tokens.list.map(async m => [m.id, await tokenFace(tokenDesign(m))])));
   $('#tok-row').innerHTML = bySocket.map((m, i) => {
     const f = faces[i];
     const ring = !m ? '' : m.configured ? f.rim : 'var(--amber)';
     return `<span class="sk" data-on="${!!m}" style="--ring:${esc(ring)}" ${m ? `onmouseenter="tokenInspect('${m.id}')" onmouseleave="inspectHide()"` : ''} title="${m ? `${esc(m.name)} in socket ${i + 1}${m.configured ? '' : ' — needs its connection'}` : `Socket ${i + 1}: empty`}">
-      <span class="hx" ${f ? `data-finish="${esc(f.finish)}"` : ''}><span class="b" ${f ? `style="--c:${esc(f.body)}"` : ''}>${f ? `<i style="--lc:${esc(f.logo)};--m:url('${f.mask}')"></i>` : ''}</span></span></span>`;
+      ${faceHtml(f)}</span>`;
   }).join('');
   if (tokens.bay) { bayRender(); tokens.bay.setSockets(bayWants()); }
 }
@@ -2031,6 +2033,7 @@ async function tokenFace(d) {
     || `color-mix(in srgb, ${d.color} 70%, white)`;
   return { body, logo, finish: d.logoFinish, rim: d.rimColor, mask: await alphaMask(d.mask) };
 }
+const faceHtml = f => `<span class="hx" ${f ? `data-finish="${esc(f.finish)}"` : ''}><span class="b" ${f ? `style="--c:${esc(f.body)}"` : ''}>${f ? `<i style="--lc:${esc(f.logo)};--m:url('${f.mask}')"></i>` : ''}</span></span>`;
 // The cartridge seated on the rack sits on the bay's pedestal too.
 function baySyncCartridge() {
   if (!tokens.bay) return;
@@ -2050,7 +2053,7 @@ function bayOpen() {
   const lock = document.createElement('div'); lock.className = 'drawer-lock'; lock.onclick = bayClose;
   const box = document.createElement('div'); box.className = 'drawer bay';
   box.innerHTML = `<div class="drawer-h"><h2>The bay</h2><span class="n" id="bay-n"></span><button class="linkish x" onclick="bayClose()">close</button></div>
-    <div class="bay-b"><div class="bay-stage"><canvas id="bay-canvas" aria-label="The pedestal's bay. Drag to turn; click an open socket to seat the chosen token."></canvas>
+    <div class="bay-b"><div class="bay-stage"><canvas id="bay-canvas" aria-label="The pedestal's bay. Drag to turn; click an open socket to seat the chosen module."></canvas>
       <div class="hint" id="bay-hint">Opening the panel…</div>
       <div class="views"><span class="linkish" style="cursor:default">drag to turn · scroll to zoom</span></div></div>
     <div class="bay-side"><div class="bay-tabs" role="tablist">
@@ -2067,7 +2070,7 @@ function bayOpen() {
     tokens.bay.setSockets(bayWants(), { animate: false });
     baySyncCartridge();
     // The closeup opens: the service panel comes forward and slides aside.
-    setTimeout(() => { tokens.bay?.open(); setTimeout(() => { const h = $('#bay-hint'); if (h) h.textContent = 'Choose a token, then click an empty socket — or use its seat button.'; }, 1350); }, 350);
+    setTimeout(() => { tokens.bay?.open(); setTimeout(() => { const h = $('#bay-hint'); if (h) h.textContent = 'Choose a module, then click an empty socket — or use its seat button.'; }, 1350); }, 350);
   } else $('#bay-hint').textContent = 'The 3D bay is unavailable here; the lists still work.';
   bayTab(tokens.tab);
 }
@@ -2100,7 +2103,7 @@ function bayRender() {
     tokens.list.map(m => {
       const d = tokenDesign(m), seated = m.socket !== null && m.socket !== undefined;
       return `<div class="tok-card" data-armed="${tokens.armed === m.id}" style="--c:${esc(d.rimColor)}">
-        <span class="hx"></span>
+        <span class="tok-row face" style="--ring:${esc(m.configured ? d.rimColor : 'var(--amber)')}">${faceHtml(tokens.faces?.get(m.id))}</span>
         <div><b>${esc(m.name)}</b><div class="m">${seated ? `socket ${m.socket + 1}` : 'not seated'} · ${m.configured ? 'configured' : 'needs its connection'}${m.local_only ? ' · local models only' : ''}</div></div>
         <div class="acts">${seated ? `<button onclick="tokenOut('${m.id}')">take out</button>` : `<button class="go" onclick="tokenArm('${m.id}')" title="Then click a socket, or it goes in the first free one">${tokens.armed === m.id ? 'choose a socket' : 'seat'}</button>`}
           <button onclick="custOpen('${m.id}')">customize</button>
@@ -2489,7 +2492,7 @@ function makeRender() {
     ${a.type !== 'none' && T.type !== 'mcp_stdio' ? `<div class="grid2">
       ${['basic', 'oauth2_client'].includes(a.type) ? `<label>${a.type === 'basic' ? 'Username' : 'Client id'}<input type="text" id="mk-user" value="${esc2(maker.conn.username)}" autocomplete="off"></label>` : ''}
       <label>${secretLabel}<input type="password" id="mk-secret" value="${esc2(maker.conn.token)}" placeholder="${maker.editing ? 'blank keeps the saved one' : ''}" autocomplete="off"></label></div>
-      <p class="nt">The secret is kept on this machine (0600), never in the token's file, never sent to a model.</p>` : ''}
+      <p class="nt">The secret is kept on this machine (0600), never in the module's file, never sent to a model.</p>` : ''}
     <details><summary class="nt">Headers, hosts and limits</summary><div class="grid2">
       ${txt('_headers', 'Fixed headers', m._headers, 'Accept: application/json')}
       ${inp('_hosts', 'Other hosts', m._hosts, { ph: 'uploads.example.com — for multi-host APIs', wide: true })}

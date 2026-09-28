@@ -1,8 +1,8 @@
 <h1 align="center">The Library</h1>
 
 <p align="center">
-  A personal research library that has actually read its books.<br/>
-  Drop in papers, talk to the collection, and see in the margin exactly which page each claim came from.
+  <b>A personal research library that has actually read its books.</b><br/>
+  Drop in papers, books, runbooks or a wiki export. Ask the collection anything,<br/>and see in the margin exactly which page each claim came from.
 </p>
 
 <p align="center">
@@ -10,12 +10,36 @@
 </p>
 
 <p align="center">
-  <img src="docs/day.jpg" alt="The day room, inside a cartridge's room: papyrus and ink, gilt on the edges, the cartridge seated on a limestone pedestal, and the nebula closed in on that cartridge's volumes as coloured inks." width="900"/>
+  <em>Runs entirely on your own hardware. No cloud, no API keys, no telemetry.</em><br/>
+  <a href="https://halicea7.github.io/TheLibrary/"><b>See it work →</b></a> — the interface over placeholder material, with a guided walk through how each part works. Nothing runs there; it is the shape of the thing.
 </p>
 
 <p align="center">
-  <em>Runs entirely on your own hardware. No cloud, no API keys, no telemetry.</em><br/>
-  <a href="https://halicea7.github.io/TheLibrary/"><b>See it work →</b></a> — the interface over placeholder material, with a guided walk through how each part works. Nothing runs there; it is the shape of the thing.
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#the-desk">The desk</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#cartridges">Cartridges</a> ·
+  <a href="#classification">Classification</a> ·
+  <a href="#modules">Modules</a> ·
+  <a href="#connecting-other-tools">API &amp; MCP</a> ·
+  <a href="#what-was-measured">Measurements</a>
+</p>
+
+---
+
+**What's inside**
+
+- **It reads.** Every volume gets section summaries, claims and subjects in the background; the ones you care about get marginalia — what a thoughtful reader thinks beside each passage.
+- **It cites, and checks.** Every `[n]` in an answer is a note in the margin naming volume, page and section, verified after generation. An invented citation is stripped, never shown.
+- **It connects.** Claims are clustered across volumes into *threads*, and where two sources genuinely disagree it quotes both, side by side.
+- **Ask, Find, Threads, Write.** Answer a question, find a passage, browse what the collection agrees and argues about, or compose a whole cited document — up to a thesis in chapters.
+- **Cartridges.** Share a slice of your library with another one — the text, only your reading of it, or just a catalogue — and threads form *between* collections.
+- **Classification.** Levels on volumes and passages, ceilings on what a question, a remote model or an export may touch, and every answer portion-marked.
+- **Modules.** Read-only live connectors (SentinelOne, any HTTP API, any MCP server) consulted mid-question, their results cited beside the passages.
+- **Two rooms.** A night room and a day room, with the library drawn behind every view as a nebula of its volumes.
+
+<p align="center">
+  <img src="docs/day.jpg" alt="The day room: papyrus and ink, gilt on the edges, a cartridge above its limestone pedestal on the rack, the modules row beneath it, and the whole library drawn as a chart of coloured inks." width="900"/>
 </p>
 
 ---
@@ -58,7 +82,7 @@ ssh -N -L 11434:localhost:11434 you@gpu-box &   # tunnel; or set LIBRARY_OLLAMA_
 
 It opens at `http://localhost:8077`. `./library stop`, `restart` and `status` do what they say; Ctrl-C closes everything.
 
-**4. Use it.** Drop a PDF (or Markdown, HTML, text) onto the shelf. It's **searchable within seconds**; click *have it read* for summaries and subjects, then *annotate it* for marginalia. Ask a question in the **Ask** tab — every claim from the shelf carries a citation you can check. The first visit is walked by a short tour.
+**4. Use it.** Drop a PDF (or Markdown, HTML, text) onto the shelf. It's **searchable within seconds**; click *have it read* for summaries and subjects, then *annotate it* for marginalia. Ask a question in the **Ask** tab — every claim from the shelf carries a citation you can check. The first visit is walked by a short tour of the room.
 
 To check everything works end to end: `uv run python scripts/verify.py` exercises every surface against the running instance and reports pass/fail per check.
 
@@ -75,12 +99,18 @@ Then the collection is treated as one thing. Claims are clustered *across* docum
 And when you ask it something, the answer is a reading column with an apparatus: each `[n]` resolves into a note in the margin naming the volume, page, and section it came from. Those markers are **verified after generation** — a citation the model invents is stripped rather than shown — so a flash of red always means provenance. Anything unmarked is the librarian's own reasoning, and it's meant to reason: the answering policy is deliberately open.
 
 <p align="center">
-  <img src="docs/ask.jpg" alt="An answer. A reading column with markdown rendered; every citation resolves into a note in the margin beside the block that cites it, naming the volume, page and section. Six of six citations verified against the shelf." width="900"/>
+  <img src="docs/ask.jpg" alt="An answer about BERT's masked language modelling. Each paragraph opens with its classification mark, (I), under an INTERNAL banner; every citation resolves into a note in the margin beside the block that cites it, naming the volume, page and section, one of them marked as the library's reading of a section. Eight of eight citations verified against the shelf." width="900"/>
 </p>
 
 ## Using it
 
-Drop PDFs, Markdown, HTML, or text onto the shelf — folders are walked. An HTML page is read as the Markdown it converts to: the page body found (Confluence's `#main-content`, MediaWiki's, `<article>`, `<main>`), breadcrumbs, metadata and footers dropped, headings, lists, code blocks and tables kept, the page title as its H1 — so a **Confluence space export** drops straight in, one volume per page. A document is **searchable within seconds**. Click *have it read* for section summaries and subjects (a couple of minutes), then *annotate it* for marginalia — or use the buttons under the shelf header: *read the N unread* and *annotate the N read* queue everything in view (the whole shelf, a subject, or a seated cartridge), skip what is already queued, and say how long it will take first; *re-shelve these N* appears when one shelf is chosen and places its volumes again from what they say rather than where they sit. For a first load from the terminal:
+Drop PDFs, Markdown, HTML, or text onto the shelf — folders are walked. A document is **searchable within seconds**.
+
+- **Wikis drop straight in.** An HTML page is read as the Markdown it converts to: the page body found (Confluence's `#main-content`, MediaWiki's, `<article>`, `<main>`), breadcrumbs, metadata and footers dropped, headings, lists, code and tables kept, the page title as its H1. A **Confluence space export** becomes one volume per page.
+- **Reading is a click.** *have it read* writes section summaries and subjects (a couple of minutes); *annotate it* writes marginalia. Under the shelf header, *read the N unread* and *annotate the N read* queue everything in view — the whole shelf, a subject, or a seated cartridge — skip what's already queued, and say how long it will take first.
+- **Re-shelving.** *re-shelve these N* appears when one shelf is chosen, and places its volumes again from what they say rather than where they sit.
+
+For a first load from the terminal:
 
 ```sh
 ./library import ~/papers ~/books --read     # walks directories, skips what's already shelved
@@ -91,11 +121,11 @@ curl -X POST 'localhost:8077/api/read/backfill?tier=2'   # annotate everything o
 
 **Books read as books.** A PDF bookmarked by chapter only would hand the reader 40–60k-character sections, of which Tier 1 reads a fraction. So any section over ~9k characters is cut into parts of about one read at paragraph boundaries (*Chapter 3 (cont. 2)*), and a long document's summary is written from a digest of each stretch rather than from its opening chapters. A 700-page book reads fully — both tiers — in under twenty minutes.
 
-Background work shows under **In hand** in the left column, with a bar — a reading, an annotation, a threads rebuild counting its clusters — and a **pause**: the piece in progress finishes (a section, a cluster), nothing new starts until you resume, the queue keeps its order. Chat is never paused; it already has priority over reading.
+**Background work** shows under **In hand** in the left column, with a bar — a reading, an annotation, a threads rebuild counting its clusters — and a **pause**: the piece in progress finishes, nothing new starts until you resume, and the queue keeps its order. Chat is never paused; it already has priority over reading.
 
-The hosted demo at the top of this page is the same `web/` directory served from GitHub Pages: on a `github.io` host (or with `?demo` on a local instance) the page loads `web/demo.js` first, a stand-in for the server that answers every API call with placeholder material and replaces the first-visit tour with a longer one that explains how each part works while doing it on screen. Nothing to update: it is always the current UI.
+**The first visit is walked.** A tour lights one part of the room at a time — the drop zone, the read and annotate buttons, *reshelve*, the rack, each tab, effort, stance, the two rooms — with a card saying what it's for and everything else dimmed. Esc or *skip* ends it; *show the tour* in Settings brings it back.
 
-The first visit is walked: a **tour** lights one part of the room at a time — the drop zone, the read and annotate buttons, *reshelve*, the rack, each tab, effort, stance, the two rooms — with a card saying what it is for, everything else dimmed and held until you go on. Esc or *skip* ends it; *show the tour* in Settings brings it back.
+**The hosted demo** is this same `web/` directory served from GitHub Pages: on a `github.io` host (or with `?demo` locally) the page loads `web/demo.js` first, a stand-in for the server that answers every call with placeholder material and runs a longer tour. It's always the current UI.
 
 ## The desk
 
@@ -105,15 +135,23 @@ An answer draws on two kinds of source. **Passages** are the exact words of a pa
 
 **Effort** — a dial in the tab bar. *quick*: three passages, no reranker, a lookup (~3 s). *normal*: five passages and four section readings, reranked, follow-ups rewritten (~10 s). *deep*: the question is broken into two to four searches, each retrieved, the union reranked to sixteen passages beside eight readings, a larger context — for comparisons, multi-part questions, and "what does this work say across its chapters" (~25 s). The model has no clean effort knob of its own, so effort is the work around it, which is where answers actually change: on *compare SSTI and SQL injection*, quick and normal cite only the SSTI volumes; deep is the first level with both sides in hand. Deep answers are then **reviewed** against the passages they were given, the same audit Write runs on each section: a sentence that adopts a paper's case for its own design as fact (*Raft is simpler, so its tail latency is more predictable*), drops a benchmark's conditions, or chains passages into a mechanism none of them states comes back flagged in amber under the answer, and the flags are kept with the conversation. Also `effort` on `/api/v1/ask` and the MCP tool.
 
-**Find** — retrieval reranked by the cross-encoder (the top 20, at most three passages per volume), showing each passage's dense and lexical rank. On 38 questions from real use it puts the right passage first 74% of the time, against 58% unreranked. A query that names something exactly — `O_DIRECT`, `--no-verify`, `RFC 7231`, `SSTable`, a `"quoted phrase"`, or a single word — is also looked up literally, and passages holding every such term come first, marked *exact*. **hold** on a hit keeps that passage in hand: the next answer starts from the passages you hold and retrieval fills the rest of its budget around them, and their margin notes say *held*, so an answer shows which of its evidence was yours and which the library found. The tray under the composer lists what is in hand; follow-ups keep it until you let go. Whole volumes can be held too — **hold** on a shelf row — and then the answer reads only the volumes in hand (held passages from elsewhere still lead). Your words are lit in each passage, marker-pen style, and the **sentence nearest your question** is lifted — the passages that matter most are often the ones found by meaning, with none of your words in them, and that sentence is why they came up. When it was chosen by meaning alone and shares none of your words, it is labelled *related excerpt* — a lead, not proof the passage answers you. The nebula stays up behind it: when results land, the camera dives on each finding in turn with a spin and a large label; hovering a row takes over, and clicking opens the volume.
+**Find** — passages, reranked by the cross-encoder (the top 20, at most three per volume), each with its dense and lexical rank. On 38 questions from real use it puts the right passage first 74% of the time, against 58% unreranked.
+
+- **Exact names first.** A query that names something exactly — `O_DIRECT`, `--no-verify`, `RFC 7231`, `SSTable`, a `"quoted phrase"`, or a single word — is also looked up literally, and passages holding every such term come first, marked *exact*.
+- **Why it came up.** Your words are lit in each passage, marker-pen style, and the **sentence nearest your question** is lifted — the passages that matter most are often found by meaning, with none of your words in them. When that sentence shares none of your words it's labelled *related excerpt*: a lead, not proof.
+- **Hold.** **hold** on a hit keeps that passage in hand: the next answer starts from what you hold and retrieval fills the rest of its budget around it, and those margin notes say *held*, so an answer shows which evidence was yours and which the library found. Whole volumes can be held too — **hold** on a shelf row — and then the answer reads only the volumes in hand. The tray under the composer lists what's held; follow-ups keep it until you let go.
+- **The nebula follows.** When results land, the camera dives on each finding in turn with a spin and a large label; hovering a row takes over, and clicking opens the volume.
 
 <p align="center">
   <img src="docs/find.jpg" alt="Find. The query's words lit in each passage and the sentence nearest the question underlined; behind, the camera has dived on the finding under the eye, ringed and named." width="900"/>
 </p>
 
-Threads are rebuilt on their own — once, ten minutes after the last read of a batch finishes, or when a cartridge is inserted or ejected — never by opening the tab.
+**Threads** — themes spanning volumes, ranked by reach: the wide ones get a card, the long tail folds to a line each, and a word in the filter box narrows both and lights it wherever it appears.
 
-**Threads** — themes spanning volumes, ranked by reach: the wide ones get a card, the long tail folds to a line each, and a word in the filter box narrows both and lights it wherever it appears. Where sources disagree, **the two claims are quoted side by side** with the words they share lit — that is the pivot the disagreement turns on. **hold both** under a disagreement puts the passage behind each claim in hand — opened from what the library stored (the claim's own section, and the passage in it nearest the claim), not searched for again — then ask which is right for your setup. A thread keeps its membership claim by claim, so the chips scope it properly: inside a scope a thread shows only what its in-scope volumes claim ("2 of its 3 volumes are in scope"), a thread with fewer than two volumes in scope isn't shown, and a disagreement appears only when both sides are in scope. Write uses the same rule, so a whole-library summary never speaks for volumes outside a scoped document. Every thread talks to the nebula: hover to light its volumes, click to dive on them. Rebuilt automatically a few minutes after the last read finishes, so a folder of forty papers produces one rebuild rather than forty — and incrementally: a theme whose claims have not changed keeps its entry and its verdict, so the rebuild costs what the new volumes changed, not the whole shelf.
+- **Disagreements.** Where sources disagree, **the two claims are quoted side by side** with the words they share lit — the pivot the disagreement turns on. **hold both** puts the passage behind each claim in hand, opened from what the library stored rather than searched for again; then ask which is right for your setup.
+- **Scoped honestly.** A thread keeps its membership claim by claim, so inside a scope it shows only what its in-scope volumes claim ("2 of its 3 volumes are in scope"); one with fewer than two in scope isn't shown, and a disagreement appears only when both sides are. Write uses the same rule.
+- **Rebuilt on its own**, never by opening the tab: once, ten minutes after the last read of a batch, or when a cartridge is inserted or ejected — so a folder of forty papers is one rebuild, not forty. It's incremental: a theme whose claims haven't changed keeps its entry and its verdict.
+- Hover a thread to light its volumes in the nebula; click to dive on them.
 
 <p align="center">
   <img src="docs/threads.jpg" alt="Threads in the day room. Where sources disagree: each conflict as two quoted claims side by side with their shared words lit, the explanation beneath; the nebula behind as a chart of coloured inks." width="900"/>
@@ -125,7 +163,12 @@ Threads are rebuilt on their own — once, ten minutes after the last read of a 
   <img src="docs/reader.jpg" alt="Reading BERT. The passage about WordPiece embeddings with the library's reflection beside it in the margin, and Figure 1 set into the section with its caption from the page." width="900"/>
 </p>
 
-**Write** — a brief in, a document out. Before it outlines, the librarian pulls the **threads** nearest the brief — the cross-document clusters the library already found, with the disagreements it judged among them — and builds the sections on those, giving each contradiction its due; a *woven from N threads* line says what went in. First the brief is split into the **parts** it cannot be answered without — each thing it names, compares or asks to be evaluated — and the plan must develop every part under its own name, so a brief on *Raft vs Paxos* cannot quietly become one on EPaxos. Then it writes each section retrieving the way a deep Ask does: the section's need split into several searches, each run, the union cut to sixteen passages beside eight of the library's readings (favouring a volume the brief names; index and bibliography pages never count as evidence), so every paragraph keeps its `[n]` margin notes, numbered across the whole document and verified per section.
+**Write** — a brief in, a document out.
+
+1. **The brief's parts.** It's split into the parts it can't be answered without — each thing it names, compares or asks to be evaluated — and the plan must develop every part under its own name, so a brief on *Raft vs Paxos* can't quietly become one on EPaxos.
+2. **Threads first.** Before outlining, the librarian pulls the threads nearest the brief, with the disagreements judged among them, and builds the sections on those; a *woven from N threads* line says what went in.
+3. **Each section researched like a deep Ask.** The section's need is split into several searches, the union cut to sixteen passages beside eight of the library's readings (favouring a volume the brief names; index and bibliography pages never count as evidence). Every paragraph keeps its `[n]` margin notes, numbered across the whole document and verified per section.
+4. **Reviewed.** Each section is read back against its own passages, and claims that reach past them are flagged in amber.
 
 A long document holds its argument rather than drifting: when a section finishes, a structured call distils **what it established** — one claim, not a summary — and that running ledger is fed into every later section, which is told to build on it rather than repeat it. The **thesis** length plans in two levels, chapters each with sections, and the ledger works at both: a through-line per closed chapter plus the sections of the one in progress. Every composition is stamped with a **uuid** and closed by a **seal** — a small nebula of exactly what it drew on, one star per cited volume, coloured by provenance, lines where two were used together — ringed like a wax stamp with its id and date.
 
@@ -149,7 +192,7 @@ Save it as `.md` (the seal travels as inline SVG), print it to PDF, or **shelve 
 
 This is what makes a 500-document backfill a single overnight rather than the ~260 GPU-hours a per-chunk deep pass would cost.
 
-**Retrieval** is dense + lexical fused with reciprocal rank fusion, in one Postgres query, then reranked by a cross-encoder — every stage measured against a generated question set and switchable. Chat reranks; keyword search doesn't, because the eval showed the cross-encoder *hurts* short keyword queries. After fusion, passages are capped per document (two in chat, three in deep) so a question that spans two volumes reaches the model with both in hand — unless the question names a volume, which lifts the cap for it. Alongside the passages, Ask and Write also retrieve **readings** — the Tier 1 section summaries, embedded like everything else — so a whole work's argument reaches the model, not only the pages it quotes. A reading is a source in its own right, cited with the page range of the section it summarises (*pp. 150–163*), never under the number of the passage it opens on. Find does neither, staying plain passage search. Index, bibliography and contents pages are never retrieved as evidence unless the question is about them.
+**Retrieval** is dense + lexical fused with reciprocal rank fusion, in one Postgres query, then reranked by a cross-encoder — every stage measured against a generated question set and switchable. Ask, Write and Find all rerank: a generated question set said the cross-encoder didn't help keyword-like queries, but a hand-judged set of real questions showed it does (see [What was measured](#what-was-measured)). After fusion, passages are capped per document (two in chat, three in deep) so a question that spans two volumes reaches the model with both in hand — unless the question names a volume, which lifts the cap for it. Alongside the passages, Ask and Write also retrieve **readings** — the Tier 1 section summaries, embedded like everything else — so a whole work's argument reaches the model, not only the pages it quotes. A reading is a source in its own right, cited with the page range of the section it summarises (*pp. 150–163*), never under the number of the passage it opens on. Find stays plain passage search. Index, bibliography and contents pages are never retrieved as evidence unless the question is about them.
 
 **Every claim is tied to its passage.** Tier 1 writes claims per section; each is compared with the passages of that section (its kept vector against theirs, no model call) and the nearest is kept with how near it is: *anchored*, *weak*, or *unsupported*, meaning nothing in its own section says it and the reader may have overreached. Thresholds were set from the library's own distribution. *hold both* opens the anchored passage, anchors are rebuilt after every threads rebuild, and `./library anchors --report` (or `/api/library/anchors`) lists the volumes with the most unsupported claims and the weakest claims beside their nearest passage.
 
@@ -171,7 +214,15 @@ This is what makes a 500-document backfill a single overnight rather than the ~2
 
 ## Settings and incidents
 
-The Settings tab opens with **About you** — a note on who the library is for, in your own words, read into every answer — then shows what the library is running on: services, models, retrieval and library configuration, each with the environment variable that changes it, and a maintenance row (collect garbage, rebuild threads, reshelve, judge the library). Below it is the **incident log**: anything that escapes a route, fails a background job or a chat turn, or is logged at `ERROR` is recorded there, deduplicated within a window.
+The Settings tab opens with **About you** — a note on who the library is for, in your own words, read into every answer. Then:
+
+- **Services** — Postgres, Redis, Ollama, whether the model is actually answering, the reranker.
+- **Providers** and **Models** — other model endpoints, and which model plays each role (see [Models](#models)).
+- **Modules** and **Classification** — see [Modules](#modules) and [Classification](#classification).
+- **Configuration** — retrieval and library settings, each with the environment variable that changes it.
+- **Maintenance** — collect garbage, rebuild threads, reshelve, show the tour, judge the library.
+
+Below it is the **incident log**: anything that escapes a route, fails a background job or a chat turn, or is logged at `ERROR` is recorded there, deduplicated within a window.
 
 *Troubleshoot* asks the model to read an incident against the library's own documentation — [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md), this README, the devlog, the launcher and ops scripts — and answer with a diagnosis, the likely cause (environment, configuration, data, model, or a defect in the library itself), steps with commands for *you* to run, and the sections it leaned on. Nothing is executed: it says what to do; you do it. Every suggested command is checked against the commands the docs actually show, and anything the model appears to have invented is marked. When the cause looks like a defect, it drafts a GitHub issue — what happened, the error, what was tried, the environment — and offers it as a pre-filled link, with home paths and anything key-shaped scrubbed.
 
@@ -199,20 +250,32 @@ At `readings`, each section's summary stands in as its passage, so retrieval, th
 ```
 
 <p align="center">
-  <img src="docs/pedestal.jpg" alt="The socket in both rooms: a cartridge seated on a basalt pedestal at night, and lifted above a limestone one by day." width="700"/>
-</p>
-
-<p align="center">
   <img src="docs/cartridge.jpg" alt="Making a cartridge: name, colour, material and dials, clearance, art, level — and the object itself turning on the right: a clear green shell with the constellation of its thousand volumes floating inside, the label a sticker on the front with CONFIDENTIAL across its top." width="900"/>
 </p>
 
-**A cartridge is an object.** Built the way the real thing is: a front plate with the grip grooves, three level pips, a power light and a screw cut into it, a PCB inside with an edge of gold contacts, and the label a sticker on the front. The colour is one of eight from a palette that contrasts with the room's pigments, or any colour at all from the wheel beside them. The label has a **finish** of its own — paper, gloss, holographic, prism, gold or chrome foil, with a strength dial — and the preview can be dragged to turn it and watch the foil catch the light. The shell and label surfaces are shaders ported from a decompiled set of cartridge materials, contributed by a second assistant. The label carries art — an image you upload, or by default the cartridge's own *constellation*, its volumes laid out from their vectors in its colour. The plastic is one of six materials — solid, clear, frosted, smoke, glitter, metallic — with dials for tint, opacity, sparkle and roughness. What tells them apart is what light does: solid stops it, metallic mirrors it, clear passes it straight (the board and the constellation sharp inside), frosted scatters it at the surface so the inside is a soft shadow and the shell glows with the colour, smoke absorbs it on the way through, glitter throws it back in points from flakes suspended in the body and flecks on the surface. The pips light by level; the power light comes on when the cartridge is in use. A **clearance** — open, internal, confidential, restricted — prints as a band across the label; a receiving library will not re-export the volumes of a restricted cartridge. The whole design is sealed into the manifest, so a cartridge looks the same on every rack it lands on; only its maker sets it — and a cartridge made *here*, from a folder, is yours to change: *edit* on its plaque opens the panel filled from it, **save to the rack** changes how it looks, and **make it** exports it as itself (same id, next version) so a receiver who already has it upgrades in place rather than gaining a twin. Lit by a studio HDRI, rendered with one vendored library (three.js), nothing fetched from a network. Uploaded and shipped art is re-encoded on the way in.
+**A cartridge is an object**, built the way the real thing is: a front plate with grip grooves, three level pips, a power light and a screw, a PCB inside with an edge of gold contacts, and the label a sticker on the front.
 
-**The rack is one socket, and the socket is a pedestal** — a stepped base, a fluted drum, a Doric capital whose abacus carries the bronze mouth, gilt at the lip; limestone by day, basalt by night. Step or scroll through your cartridges; the one in view hangs above it until you click, then it drops in with a bounce and the light comes on — you are in its room: the composer becomes *Ask HackTricks's shelf*, and Find, the shelf and follow-ups stay inside it. Click again to lift it out; hovering lifts the cartridge up large beside the nebula. *all* opens the **drawer**: every cartridge as a card — its label, colour band, level pips, clearance, volume count, origin — with the chosen one turning live beside its particulars (drag to turn it), and *seat it*, *show on the rack*, *edit* to hand. Double-click a card to seat it.
+- **Shell.** Six plastics — solid, clear, frosted, smoke, glitter, metallic — with dials for tint, opacity, sparkle and roughness. What tells them apart is what light does: solid stops it, metallic mirrors it, clear passes it straight (the board and constellation sharp inside), frosted scatters it so the shell glows with its colour, smoke absorbs it, glitter throws it back in points. The colour is one of eight chosen to contrast with the room's pigments, or anything from the wheel.
+- **Label.** Art you upload, or by default the cartridge's own *constellation* — its volumes laid out from their vectors in its colour — with a **finish**: paper, gloss, holographic, prism, gold or chrome foil. Drag the preview to watch the foil catch the light. The shell and label shaders are ported from a decompiled set of cartridge materials, contributed by a second assistant.
+- **Clearance** — open, internal, confidential, restricted — prints as a band across the label. A receiving library won't re-export the volumes of a restricted cartridge, and the clearance sets the volumes' [classification](#classification).
+- **Sealed.** The design is sealed into the manifest, so a cartridge looks the same on every rack. A cartridge made *here* is yours to change: *edit* opens the panel filled from it, **save to the rack** changes how it looks, and **make it** exports it as itself (same id, next version) so a receiver upgrades in place rather than gaining a twin.
+
+Lit by a studio HDRI and rendered with one vendored library (three.js); nothing is fetched from a network, and uploaded or shipped art is re-encoded on the way in.
+
+**The rack is one socket, and the socket is a pedestal** — a stepped base, a fluted drum with a service panel, and a Doric capital whose abacus carries the bronze mouth, gilt at the lip; limestone by day, basalt by night.
+
+- **Seat one to walk into its room.** Step or scroll through your cartridges; the one in view hangs above the pedestal until you click, then it drops in with a bounce and the light comes on. The composer becomes *Ask HackTricks's shelf*, and Find, the shelf and follow-ups stay inside it. Click again to lift it out; hovering lifts it up large beside the nebula.
+- **The drawer.** *all* lays out every cartridge as a card — label, colour band, level pips, clearance, volume count, origin — with the chosen one turning live beside its particulars, and *seat it*, *show on the rack* and *edit* to hand. Double-click a card to seat it.
 
 A folder can also arrive as a cartridge directly: `./library import ~/hacktricks --cartridge "HackTricks"` — or a wiki: export the Confluence space as HTML and `./library import ./export --cartridge "Ops Docs" --read`, then `./library export` it for the person who will plug it in. Read it before you export it: readings travel with the cartridge, so their shelf is organised and Threads has something to show on day one.
 
-Inside a room, eject removes what the cartridge brought and leaves what was already yours. A document that arrives from two cartridges is one document with two memberships; subjects merge by name; vectors ship as float16 and are loaded directly when the embedding model matches, re-embedded from the shipped text when it doesn't. Clusters and contradictions are never shipped — the receiver recomputes them across the new whole, which is the point. Content is hash-verified; there is no signing.
+**What happens on arrival.**
+
+- A document that arrives from two cartridges is one document with two memberships; subjects merge by name.
+- Vectors ship as float16 and load directly when the embedding model matches, re-embedded from the shipped text when it doesn't. A 391-volume cartridge with 3,913 vectors inserts in about eight seconds.
+- Clusters and contradictions are never shipped — the receiver recomputes them across the new whole, which is the point.
+- Content is hash-verified; there is no signing. A cartridge that was unzipped and zipped again (Safari, then Finder's *Compress*) is still read as it was made.
+- Eject removes what the cartridge brought and leaves what was already yours.
 
 ## Classification
 
@@ -224,6 +287,12 @@ Every volume has a **level** on a scale you choose in **Settings › Classificat
 - otherwise, the scale's default.
 
 A passage opening with a portion mark such as `(S)` or `(C)` carries that level itself, and a volume is never lower than its highest passage.
+
+<p align="center">
+  <img src="docs/classification.jpg" alt="Settings › Classification: the company scale with its four level chips, the default for unmarked volumes, the remote and export ceilings, strict or cited-only marking, and the switch for portion marks and banners." width="640"/>
+</p>
+
+The answer at the top of this page is marked this way: each paragraph opens with `(I)`, under an *Internal* banner.
 
 **Enforcement.**
 
@@ -242,7 +311,11 @@ This labels and enforces a policy you set. It isn't an accredited system for han
 
 A **module** is a live connector as an object: a read-only line to an API the librarian can consult during a question. SentinelOne is the first: CVE exposure, whether an indicator has been seen, the application inventory and where an application runs, and agent status. Nothing is ingested. When a question calls for it, the librarian picks one declared operation and fills in its parameters (never a URL, never code), makes one GET to the configured host, and the result joins the passages. It's cited and verified like them, and marked *live* in the module's colour.
 
-Under the rack, **Modules** shows the pedestal's four sockets and *Active modules n/4*. **bay** opens a close-up: the pedestal's front panel comes forward and slides aside to reveal the connector array, four hex sockets with gold contacts and a status light each. Choose a module and click an empty socket (or press *seat* for the first free one), and it drops in, its rim lights sweep round, and it's live. A module in a socket is what gets consulted; take it out and it isn't.
+Under the rack, **Modules** shows the pedestal's four sockets and *Active modules n/4*. **bay** opens a close-up: the pedestal's service panel comes forward and slides aside to reveal the connector array, four hex sockets with gold contacts and a status light each, and the seated cartridge on top. Choose a module and click an empty socket (or press *seat* for the first free one), and it drops in, its rim lights sweep round, and it's live. A module in a socket is what gets consulted; take it out and it isn't.
+
+<p align="center">
+  <img src="docs/bay.jpg" alt="The bay: the pedestal's service panel drawn aside to show the connector array, four hex sockets, the SentinelOne module seated in the first with its rim lit; beside it, the module list with take out, customize and duplicate, and Make a module." width="900"/>
+</p>
 
 Hovering a seated module in the sidebar raises it into the reading pane, turning, as hovering a cartridge does. **Customize** turns the module in close-up and changes every part of it: the body (moulded plastic, brushed metal, gold, clear, frosted or glitter resin, glazed ceramic), a raised logo traced from any image you give it (only the traced mask is kept, and it's re-encoded on the server), foil finishes for the logo, face and the etched solar back, the rim-light colours, the identity strip, contacts, edge and circuit colours, and the planet inlays. **Connection** holds its base URL and API token. The module is kept 0600 in `~/.library-agent/modules.json`, never sent to a model or back to the browser. A module in a socket without a connection glows amber. A module marked *local models only* refuses to run when chat is on a remote provider, and the desk says so.
 
@@ -326,7 +399,7 @@ Retrieval is evaluated on a generated question set (a question per gold passage,
 | hybrid + router | 0.61 | 0.81 | 0.86 | 0.70 | 0.23 |
 | hybrid + reranker | 0.58 | 0.82 | 0.89 | 0.69 | 1.50 |
 
-Two days earlier, at 176 volumes, hybrid RRF measured MRR 0.65 and recall@10 0.94 — so a sevenfold larger corpus cost almost nothing. Lexical search alone collapses on this material (short technical titles, heavy overlap between documents); dense carries it and fusion adds a little on top. The reranker does not help on generated questions, which read like keyword queries; it is kept for chat, where questions are sentences. The router hurts slightly and stays off by default.
+Two days earlier, at 176 volumes, hybrid RRF measured MRR 0.65 and recall@10 0.94 — so a sevenfold larger corpus cost almost nothing. Lexical search alone collapses on this material (short technical titles, heavy overlap between documents); dense carries it and fusion adds a little on top. The reranker does not help on generated questions, which read like keyword queries; on real questions, judged by hand, it does, so Ask, Write and Find all use it. The router hurts slightly and stays off by default.
 
 Answer quality is checked separately by `scripts/consistency.py`: questions with known answers in the collection, each asked three times without memory, scored on whether the right volume was cited, whether the answer contains what a correct answer must, whether every emitted citation resolved, and whether the runs agree — plus a question the library cannot know, to confirm it says so rather than inventing a source. On the current corpus, both chat models:
 
@@ -353,16 +426,19 @@ src/library_agent/
   ingest/               extraction, section tree, chunking, dedup, bulk import
   reading/              tier 1 and tier 2 passes, versioned prompts
   retrieval/            hybrid search, router, reranked pipeline; readings and threads for compose
-  library/              clusters, citation graph, contradictions, taxonomy, shelving, cartridges
+  library/              clusters, citation graph, contradictions, taxonomy, shelving, cartridges, claim anchors
+  modules/              live connectors: manifests, the executor, OpenAPI / curl / Postman / MCP importers
+  classification.py     the scale, markings, ceilings, and portion-marking output
   ops/                  incidents and troubleshooting against the docs
   api/routes/v1.py      plain JSON for other programs; api/auth.py the door
   llm/liveness.py       the one-token probe and the generation gate
   mcp_server.py         the library as MCP tools
   chat/                 citations, query rewriting, stances, streaming, composing (threads, argument memory, chapters, the seal)
-  eval/                 question generation, recall@k harness
+  eval/                 question generation, recall@k harness, the hand-judged set
   api/  worker/  db/
 web/index.html          the UI, one file, no build step
-web/cartridge3d.js      the cartridge as an object, and the socket (three.js)
+web/cartridge3d.js      the cartridge as an object, and the pedestal (three.js)
+web/token3d.js          modules as objects, and the bay
 web/vendor/             three.js, RGBELoader, one studio HDRI — all vendored
 docs/TROUBLESHOOTING.md what the troubleshooter reads
 ops/                    launchd units, backup and restore

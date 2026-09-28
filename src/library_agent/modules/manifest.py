@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 FORMAT = "library-connector/1"
 
 AUTH_TYPES = ("none", "bearer", "header", "query", "basic", "oauth2_client")
+TRANSPORTS = ("http", "mcp_stdio", "mcp_http")
 PARAM_TYPES = ("string", "int", "number", "bool", "enum", "date")
 PAGINATION = ("none", "page", "offset", "cursor", "link")
 RESPONSE_FORMATS = ("json", "xml", "csv", "text")
@@ -74,8 +75,12 @@ class Operation:
     method: str = "GET"  # GET, or POST only for a read-only search endpoint
     body: Any = None  # POST: a JSON template; "{param}" strings are replaced by values
     pagination: Pagination = field(default_factory=Pagination)
-    # Per parameter: where it goes ("path", "query", "body") and how it is checked.
+    # Per parameter: where it goes ("path", "query", "body", "args") and how it is checked.
     param_specs: dict[str, dict] = field(default_factory=dict)
+    # An MCP token's operation is a tool, called with the parameters as its arguments; its
+    # author must declare it read-only, and a server that marks it otherwise is refused.
+    tool: str = ""
+    read_only: bool = False
 
     def path_params(self) -> list[str]:
         return re.findall(r"\{(\w+)\}", self.path)
@@ -91,6 +96,21 @@ class Auth:
     param: str = ""  # query: the parameter the key goes in
     token_url: str = ""  # oauth2_client: where to exchange the client credentials
     scope: str = ""  # oauth2_client: optional scope
+
+
+@dataclass(frozen=True)
+class Transport:
+    """How the token reaches its source. "http": the base URL, as everywhere above.
+    "mcp_stdio": an MCP server this machine starts (`command` + `args`), its secret handed
+    in the environment variable `secret_env`; nothing else of this machine's environment
+    but PATH, HOME and the locale goes with it. "mcp_http": an MCP server at `url`."""
+
+    type: str = "http"
+    command: str = ""
+    args: tuple[str, ...] = ()
+    env: dict[str, str] = field(default_factory=dict)
+    secret_env: str = ""
+    url: str = ""
 
 
 @dataclass(frozen=True)
@@ -119,6 +139,11 @@ class Module:
     base_url: str = ""  # a suggested base URL; the operator's setting wins
     builtin: bool = False
     source: str = ""  # where a data manifest was loaded from
+    transport: Transport = field(default_factory=Transport)
+
+    @property
+    def is_mcp(self) -> bool:
+        return self.transport.type != "http"
 
     def op(self, op_id: str) -> Operation | None:
         return next((o for o in self.operations if o.id == op_id), None)
@@ -213,13 +238,67 @@ def _param(name: str, spec: dict, path_names: set[str]) -> tuple[dict, dict]:
     return schema, placement
 
 
-def _operation(o: dict, seen: set[str]) -> Operation:
+def _mcp_operation(o: dict, oid: str) -> Operation:
+    tool = _s(o, "tool", n=100)
+    if not re.match(r"^[A-Za-z0-9_.\-/]{1,100}$", tool):
+        raise ManifestError(f"{oid}: an MCP operation names its tool")
+    if o.get("read_only") is not True:
+        raise ManifestError(
+            f"{oid}: mark it read_only: true -- only tools that look things up, never ones "
+            "that change anything"
+        )
+    raw_params = o.get("params") or {}
+    if not isinstance(raw_params, dict):
+        raise ManifestError(f"{oid}: params is an object of name -> spec")
+    props, placements, required = {}, {}, []
+    for name, spec in raw_params.items():
+        if not re.match(r"^[a-zA-Z_][\w\-]{0,63}$", name):
+            raise ManifestError(f"{oid}: parameter name {name!r}")
+        schema, place = _param(
+            name, {**spec, "in": "query"} if isinstance(spec, dict) else spec, set()
+        )
+        place["in"] = "args"
+        props[name], placements[name] = schema, place
+        if place["required"]:
+            required.append(name)
+    const = o.get("args") or {}
+    if not isinstance(const, dict):
+        raise ManifestError(f"{oid}: args is fixed name -> value")
+    r = o.get("response") or {}
+    fmt = _s(r, "format", "json", 8)
+    if fmt not in ("json", "text"):
+        raise ManifestError(f"{oid}: an MCP tool's result is read as json or text")
+    return Operation(
+        id=oid,
+        summary=_s(o, "summary", n=300),
+        ask_when=_s(o, "ask_when", n=400),
+        path="",
+        params={"type": "object", "properties": props, "required": required},
+        query={},
+        const_query={str(k): v for k, v in const.items()},
+        render=Render(
+            rows=_s(r, "rows", "", 200),
+            line=_s(r, "line", "{text}", 400) or "{text}",
+            empty=_s(r, "empty", "nothing matched", 300),
+            limit=_int(r, "limit", 20, 1, 200),
+            format=fmt,
+        ),
+        method="MCP",
+        param_specs=placements,
+        tool=tool,
+        read_only=True,
+    )
+
+
+def _operation(o: dict, seen: set[str], *, mcp: bool = False) -> Operation:
     if not isinstance(o, dict):
         raise ManifestError("an operation is an object")
     oid = _s(o, "id", n=40)
     if not _ID.match(oid) or oid in seen:
         raise ManifestError(f"operation id {oid!r} must be unique, lowercase, 2-40 characters")
     seen.add(oid)
+    if mcp:
+        return _mcp_operation(o, oid)
     method = _s(o, "method", "GET", 8).upper()
     if method not in ("GET", "POST"):
         raise ManifestError(f"{oid}: only GET, or POST for a read-only search")
@@ -362,13 +441,41 @@ def from_dict(d: dict, *, source: str = "", builtin: bool = False) -> Module:
         th = _host_of(auth.token_url)
         if base and th != _host_of(base) and th not in hosts:
             raise ManifestError("auth.token_url's host must be the base URL's or in allowed_hosts")
+    t = d.get("transport") or {"type": "http"}
+    if not isinstance(t, dict) or t.get("type", "http") not in TRANSPORTS:
+        raise ManifestError(f"transport.type is one of {', '.join(TRANSPORTS)}")
+    ttype = t.get("type", "http")
+    targs = t.get("args") or []
+    if not isinstance(targs, list) or not all(isinstance(a, str) and len(a) < 500 for a in targs):
+        raise ManifestError("transport.args is a list of strings")
+    tenv = t.get("env") or {}
+    if not isinstance(tenv, dict) or not all(
+        re.match(r"^[A-Z_][A-Z0-9_]{0,63}$", str(k)) and isinstance(v, str) for k, v in tenv.items()
+    ):
+        raise ManifestError("transport.env is NAME -> value")
+    transport = Transport(
+        type=ttype,
+        command=_s(t, "command", n=300),
+        args=tuple(targs[:40]),
+        env={str(k): v for k, v in tenv.items()},
+        secret_env=_s(t, "secret_env", n=64),
+        url=_s(t, "url", n=400),
+    )
+    if ttype == "mcp_stdio":
+        # A program, not a shell line: no pipes, no substitutions, arguments given apart.
+        if not re.match(r"^[A-Za-z0-9_./\-]{1,300}$", transport.command):
+            raise ManifestError("transport.command is a program name or path, without a shell")
+        if transport.secret_env and not re.match(r"^[A-Z_][A-Z0-9_]{0,63}$", transport.secret_env):
+            raise ManifestError("transport.secret_env is an environment variable name")
+    if ttype == "mcp_http":
+        _host_of(transport.url or "x")
     ops = d.get("operations") or []
     if not isinstance(ops, list) or not ops:
         raise ManifestError("a connector has at least one operation")
     if len(ops) > 25:
         raise ManifestError("at most 25 operations: a connector is a curated set, not a whole API")
     seen: set[str] = set()
-    operations = tuple(_operation(o, seen) for o in ops)
+    operations = tuple(_operation(o, seen, mcp=ttype != "http") for o in ops)
     return Module(
         id=mid,
         name=name,
@@ -386,6 +493,7 @@ def from_dict(d: dict, *, source: str = "", builtin: bool = False) -> Module:
         base_url=base.rstrip("/"),
         builtin=builtin,
         source=source,
+        transport=transport,
     )
 
 
@@ -414,6 +522,29 @@ def to_dict(m: Module) -> dict:
                 if pl.get(k) is not None:
                     spec[k] = pl[k]
             params[name] = spec
+        if o.method == "MCP":
+            for spec in params.values():
+                spec.pop("in", None)
+                spec.pop("key", None)
+            ops.append(
+                {
+                    "id": o.id,
+                    "summary": o.summary,
+                    "ask_when": o.ask_when,
+                    "tool": o.tool,
+                    "read_only": True,
+                    "params": params,
+                    "args": dict(o.const_query),
+                    "response": {
+                        "format": o.render.format,
+                        "rows": o.render.rows,
+                        "line": o.render.line,
+                        "empty": o.render.empty,
+                        "limit": o.render.limit,
+                    },
+                }
+            )
+            continue
         op: dict[str, Any] = {
             "id": o.id,
             "summary": o.summary,
@@ -476,5 +607,23 @@ def to_dict(m: Module) -> dict:
             "cache_seconds": m.limits.cache_seconds,
         },
         "allowed_hosts": list(m.allowed_hosts),
+        **(
+            {
+                "transport": {
+                    k: v
+                    for k, v in {
+                        "type": m.transport.type,
+                        "command": m.transport.command,
+                        "args": list(m.transport.args),
+                        "env": dict(m.transport.env),
+                        "secret_env": m.transport.secret_env,
+                        "url": m.transport.url,
+                    }.items()
+                    if v not in ("", [], {})
+                }
+            }
+            if m.is_mcp
+            else {}
+        ),
         "operations": ops,
     }

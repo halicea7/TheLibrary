@@ -349,6 +349,30 @@ async def call(
             "pages": 0,
         }
 
+    if module.is_mcp:
+        # An MCP server: one tool call, read-only by the manifest and by the server's word.
+        from library_agent.modules.mcp_transport import MCPError, call_tool
+
+        _rate(module)
+        try:
+            rows, raw = await call_tool(module, cfg, op, args)
+        except MCPError as exc:
+            raise ModuleError(str(exc)) from exc
+        rows = rows[: max(op.render.limit * 5, op.render.limit)]
+        if not debug:
+            _cache[key] = (now, rows, len(rows))
+        out = {
+            "ok": True,
+            "rows": rows,
+            "count": len(rows),
+            "when": now,
+            "cached": False,
+            "pages": 1,
+        }
+        if debug:
+            out["sample"] = raw[:20_000]
+        return out
+
     base = (cfg.base_url or module.base_url).rstrip("/")
     host = urlparse(base).hostname
     if not host or urlparse(base).scheme not in ("http", "https"):

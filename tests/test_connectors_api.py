@@ -97,7 +97,9 @@ async def test_an_import_is_described_before_it_is_approved(home):
 async def test_try_never_sends_a_saved_secret_to_another_host(home, monkeypatch):
     await api.save(api.SaveIn(manifest=manifest()))
     cfgs = mod_store.load()
-    cfgs["acme"] = mod_store.ModuleConfig(id="acme", base_url="https://api.acme.test", token="s3cret")
+    cfgs["acme"] = mod_store.ModuleConfig(
+        id="acme", base_url="https://api.acme.test", token="s3cret"
+    )
     mod_store.save(cfgs)
     seen = {}
 

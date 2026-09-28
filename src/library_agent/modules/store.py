@@ -124,7 +124,10 @@ def config_for(mid: str) -> ModuleConfig:
 def is_configured(module: Module, cfg: ModuleConfig) -> bool:
     """Whether a connector has what its auth needs: a base URL (its own or the manifest's
     suggestion), and the secret -- plus a user or client id for basic and OAuth."""
-    if not (cfg.base_url or module.base_url):
+    t = module.transport
+    if t.type == "mcp_stdio":
+        return bool(cfg.token) if t.secret_env else True
+    if not (cfg.base_url or module.base_url or (t.type == "mcp_http" and t.url)):
         return False
     kind = module.auth_spec().type
     if kind == "none":

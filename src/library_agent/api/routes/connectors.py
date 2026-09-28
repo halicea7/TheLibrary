@@ -25,16 +25,20 @@ router = APIRouter(prefix="/api/connectors", tags=["connectors"])
 def describe(m: Module, base_url: str = "") -> dict:
     """What a token can do, in the words of an approval: where it reaches, how it signs
     in, what it asks, and whether anything it does is not a plain read."""
-    base = base_url or m.base_url
+    base = base_url or m.base_url or m.transport.url
+    t = m.transport
     return {
         "id": m.id,
         "name": m.name,
+        "transport": t.type,
+        # Said plainly in an approval: this starts a program on your machine.
+        "runs": " ".join([t.command, *t.args]) if t.type == "mcp_stdio" else None,
         "host": urlparse(base).hostname if base else None,
         "other_hosts": list(m.allowed_hosts),
         "auth": m.auth_spec().type,
         "clearance": "local models only" if m.local_only else "any model",
         "operations": [
-            {"id": o.id, "method": o.method, "path": o.path, "summary": o.summary}
+            {"id": o.id, "method": o.method, "path": o.tool or o.path, "summary": o.summary}
             for o in m.operations
         ],
         "searches_by_post": sum(o.method == "POST" for o in m.operations),
@@ -209,6 +213,11 @@ async def try_it(body: TryIn) -> dict:
     same_host = (
         bool(saved.base_url) and urlparse(saved.base_url).hostname == urlparse(base).hostname
     )
+    if m.is_mcp:
+        # No host to compare: the saved secret goes only to the very server it was saved
+        # for -- the same command, arguments and environment, or the same URL.
+        known = registry.get(m.id)
+        same_host = bool(known) and known.transport == m.transport
     cfg = mod_store.ModuleConfig(
         id=m.id,
         base_url=base,
@@ -312,3 +321,66 @@ async def draft_curl(body: CurlIn) -> dict:
     except ManifestError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"manifest": manifest, "credentials": creds, "notes": notes}
+
+
+class PostmanIn(BaseModel):
+    collection: str
+    pick: list[str] | None = None
+
+
+@router.post("/draft/postman")
+async def draft_postman(body: PostmanIn) -> dict:
+    """From a Postman collection (v2.x): without `pick`, its requests; with `pick`, a
+    draft manifest of those, credentials found (for the connection), and notes."""
+    from library_agent.modules import importers
+
+    if len(body.collection) > 5_000_000:
+        raise HTTPException(413, "that collection is over 5 MB")
+    try:
+        col = importers.load_postman(body.collection)
+        if not body.pick:
+            return {
+                "title": (col.get("info") or {}).get("name", ""),
+                "requests": importers.postman_requests(col)[:500],
+            }
+        manifest, creds, notes = importers.draft_from_postman(col, body.pick)
+    except ManifestError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"manifest": manifest, "credentials": creds, "notes": notes}
+
+
+class MCPIn(BaseModel):
+    name: str = ""
+    transport: dict
+    token: str | None = None  # for this probe only; saved with the connection, not here
+    pick: list[str] | None = None
+
+
+@router.post("/draft/mcp")
+async def draft_mcp(body: MCPIn) -> dict:
+    """From an MCP server: without `pick`, its tools (and which may be used: the server's
+    own read-only / destructive marks); with `pick`, a draft manifest of those. Starting a
+    stdio server runs its command on this machine -- the command is shown before this is
+    called, and nothing is kept."""
+    from library_agent.modules import importers
+    from library_agent.modules.mcp_transport import MCPError, list_tools
+
+    probe_manifest = {
+        "id": "probe",
+        "name": body.name or "MCP server",
+        "transport": body.transport,
+        "auth": {"type": "bearer"}
+        if body.token and body.transport.get("type") == "mcp_http"
+        else {"type": "none"},
+        "operations": [{"id": "probe", "tool": "probe", "read_only": True}],
+    }
+    probe = _check(probe_manifest)
+    cfg = mod_store.ModuleConfig(id="probe", token=body.token or "")
+    try:
+        tools = await list_tools(probe, cfg)
+        if not body.pick:
+            return {"tools": tools}
+        manifest, notes = importers.draft_from_mcp(body.name, body.transport, tools, body.pick)
+    except (MCPError, ManifestError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"manifest": manifest, "notes": notes}

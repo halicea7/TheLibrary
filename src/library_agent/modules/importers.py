@@ -369,3 +369,356 @@ def draft_from_curl(cmd: str) -> tuple[dict, dict, list[str]]:
         creds,
         notes,
     )
+
+
+# --------------------------------------------------------------------- Postman
+
+_VAR = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
+_SECRET_NAME = re.compile(r"api[-_]?key|token|secret|password|access_key|bearer", re.IGNORECASE)
+
+
+def load_postman(text: str) -> dict:
+    try:
+        col = json.loads(text)
+    except ValueError as exc:
+        raise ManifestError("not a JSON Postman collection") from exc
+    info = col.get("info") if isinstance(col, dict) else None
+    if not isinstance(info, dict) or not isinstance(col.get("item"), list):
+        raise ManifestError("not a Postman collection (v2.x)")
+    return col
+
+
+def _pm_vars(col: dict) -> dict[str, str]:
+    return {
+        str(v.get("key")): str(v.get("value", ""))
+        for v in col.get("variable") or []
+        if isinstance(v, dict) and v.get("key")
+    }
+
+
+def _pm_items(items: list, folder: str = "") -> list[tuple[str, dict]]:
+    out = []
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        name = f"{folder}/{it.get('name', '')}".strip("/")
+        if isinstance(it.get("item"), list):
+            out += _pm_items(it["item"], name)
+        elif isinstance(it.get("request"), dict):
+            out.append((name, it))
+    return out
+
+
+def _pm_url(req: dict, vars_: dict) -> tuple[str, str, list[str], list[tuple[str, str]]]:
+    """(scheme://host, raw path, path segments, query pairs), variables resolved where the
+    collection gives them a value."""
+    url = req.get("url")
+    if isinstance(url, str):
+        url = {"raw": url}
+    url = url or {}
+    sub = lambda s: _VAR.sub(lambda m: vars_.get(m.group(1), m.group(0)), str(s))
+    raw = sub(url.get("raw", ""))
+    if url.get("host") is not None or url.get("path") is not None:
+        host = sub(
+            ".".join(url["host"]) if isinstance(url.get("host"), list) else url.get("host", "")
+        )
+        proto = url.get("protocol") or (urlparse(raw).scheme if "://" in raw else "https")
+        path = url.get("path") or []
+        segs = [
+            sub(p if isinstance(p, str) else p.get("value", ""))
+            for p in (path if isinstance(path, list) else str(path).split("/"))
+        ]
+        query = [
+            (str(q.get("key")), sub(q.get("value", "")))
+            for q in url.get("query") or []
+            if isinstance(q, dict) and not q.get("disabled")
+        ]
+        base = f"{proto}://{host}" if host and "://" not in host else host
+    else:
+        u = urlparse(raw)
+        base = f"{u.scheme}://{u.netloc}"
+        segs = [s for s in u.path.split("/") if s]
+        query = parse_qsl(u.query, keep_blank_values=True)
+    return base.rstrip("/"), raw, [s for s in segs if s], query
+
+
+def postman_requests(col: dict) -> list[dict]:
+    vars_ = _pm_vars(col)
+    out = []
+    for name, it in _pm_items(col.get("item")):
+        req = it["request"]
+        method = str(req.get("method", "GET")).upper()
+        base, _raw, segs, _query = _pm_url(req, vars_)
+        out.append(
+            {
+                "key": name,
+                "name": name,
+                "method": method,
+                "url": f"{base}/{'/'.join(segs)}",
+                "usable": method in ("GET", "POST"),
+                "note": ""
+                if method == "GET"
+                else "a POST: only if it only searches"
+                if method == "POST"
+                else "changes data; cannot be a token",
+            }
+        )
+    return out
+
+
+def _pm_auth(auth: dict | None, vars_: dict) -> tuple[dict, dict]:
+    if not isinstance(auth, dict):
+        return {"type": "none"}, {}
+    kind = auth.get("type")
+    fields = {
+        str(f.get("key")): str(f.get("value", ""))
+        for f in auth.get(kind) or []
+        if isinstance(f, dict)
+    }
+    val = lambda k: _VAR.sub(lambda m: vars_.get(m.group(1), ""), fields.get(k, ""))
+    if kind == "bearer":
+        return {"type": "bearer"}, {"token": val("token")}
+    if kind == "basic":
+        return {"type": "basic"}, {"username": val("username"), "token": val("password")}
+    if kind == "apikey":
+        where, key = fields.get("in", "header"), fields.get("key", "X-API-Key")
+        if where == "query":
+            return {"type": "query", "param": key}, {"token": val("value")}
+        return {"type": "header", "header": key}, {"token": val("value")}
+    if kind == "oauth2" and fields.get("grant_type", "").startswith("client"):
+        return {"type": "oauth2_client", "token_url": val("accessTokenUrl")}, {
+            "username": val("clientId"),
+            "token": val("clientSecret"),
+        }
+    return {"type": "none"}, {}
+
+
+def draft_from_postman(col: dict, keys: list[str]) -> tuple[dict, dict, list[str]]:
+    """(draft manifest, credentials, notes) from the picked requests. `:id` path segments
+    and unresolved {{variables}} become parameters; query values become parameters with
+    those values as defaults; a secret in a variable goes to the connection."""
+    vars_ = _pm_vars(col)
+    wanted = set(keys)
+    picked = [(n, it) for n, it in _pm_items(col.get("item")) if n in wanted]
+    if not picked:
+        raise ManifestError("pick at least one request")
+    if len(picked) > 25:
+        raise ManifestError("pick at most 25 requests")
+    auth, creds = _pm_auth(col.get("auth"), vars_)
+    bases, ops, notes, seen = set(), [], [], set()
+    headers: dict[str, str] = {}
+    for name, it in picked:
+        req = it["request"]
+        method = str(req.get("method", "GET")).upper()
+        if method not in ("GET", "POST"):
+            raise ManifestError(f"{name}: a {method} changes data; connectors only read")
+        if req.get("auth"):
+            auth, creds = _pm_auth(req["auth"], vars_)
+        base, _raw, segs, query = _pm_url(req, vars_)
+        bases.add(base)
+        params: dict[str, Any] = {}
+        path_parts = []
+        for seg in segs:
+            m = _VAR.fullmatch(seg) or re.fullmatch(r":(\w+)", seg)
+            if m:
+                pname = re.sub(r"\W", "_", m.group(1))[:40]
+                params[pname] = {
+                    "type": "string",
+                    "in": "path",
+                    "required": True,
+                    "description": "",
+                }
+                path_parts.append("{" + pname + "}")
+            else:
+                path_parts.append(seg)
+        for k, v in query:
+            if _SECRET_NAME.search(k):
+                auth, creds = (
+                    {"type": "query", "param": k},
+                    {"token": _VAR.sub(lambda m: vars_.get(m.group(1), ""), v)},
+                )
+                continue
+            pname = re.sub(r"\W", "_", k)[:40] or "param"
+            if not re.match(r"^[a-zA-Z_]", pname):
+                pname = "p_" + pname
+            spec: dict[str, Any] = {
+                "type": "int" if v.isdigit() else "string",
+                "in": "query",
+                "description": "",
+            }
+            if pname != k:
+                spec["key"] = k
+            if not _VAR.search(v) and v != "":
+                spec["default"] = int(v) if v.isdigit() else v
+            params[pname] = spec
+        for h in req.get("header") or []:
+            if not isinstance(h, dict) or h.get("disabled"):
+                continue
+            k, v = (
+                str(h.get("key", "")),
+                _VAR.sub(lambda m: vars_.get(m.group(1), ""), str(h.get("value", ""))),
+            )
+            if k.lower() == "authorization":
+                scheme, _, secret = v.partition(" ")
+                auth = (
+                    {"type": "bearer"}
+                    if scheme.lower() == "bearer"
+                    else {"type": "header", "header": k, "prefix": scheme + " "}
+                )
+                creds = {"token": secret or v}
+            elif _SECRET_NAME.search(k):
+                auth, creds = {"type": "header", "header": k}, {"token": v}
+            elif k.lower() in ("accept", "content-type") or k.lower().startswith("x-"):
+                headers[k] = v
+        oid = _slug(name.split("/")[-1])
+        while oid in seen:
+            oid = _slug(oid + "_2")
+        seen.add(oid)
+        desc = it.get("request", {}).get("description")
+        op: dict[str, Any] = {
+            "id": oid,
+            "method": method,
+            "summary": (desc if isinstance(desc, str) else "")[:200] or name,
+            "ask_when": f"the question asks for {name.split('/')[-1].lower()}.",
+            "path": "/" + "/".join(path_parts),
+            "params": params,
+            "response": {"rows": "", "line": "{value}", "empty": "nothing matched", "limit": 20},
+        }
+        if method == "POST":
+            body = (req.get("body") or {}).get("raw") or "{}"
+            body = _VAR.sub(lambda m: "{" + re.sub(r"\W", "_", m.group(1)) + "}", body)
+            try:
+                op["body"] = json.loads(body)
+            except ValueError as exc:
+                raise ManifestError(
+                    f"{name}: the body is not JSON; only JSON search bodies are read"
+                ) from exc
+            for var in re.findall(r"\{(\w+)\}", json.dumps(op["body"])):
+                params.setdefault(
+                    var, {"type": "string", "in": "body", "required": True, "description": ""}
+                )
+            notes.append(
+                f"{name} is a POST: mark it read-only only if it searches and changes nothing."
+            )
+        ops.append(op)
+    if len(bases) > 1:
+        notes.append(
+            f"The requests use more than one host ({', '.join(sorted(bases))}); the first is the base URL."
+        )
+    if any(creds.values()):
+        notes.append("Credentials were found; they go in the connection, not the connector file.")
+    title = str((col.get("info") or {}).get("name") or "Connector")
+    base = min(bases) if bases else ""
+    return (
+        {
+            "format": FORMAT,
+            "id": _slug(title, 30).replace("_", "-") or "connector",
+            "name": title[:60],
+            "kind": "live source",
+            "colour": "#4f9186",
+            "description": str((col.get("info") or {}).get("description") or "")[:600],
+            "base_url": base,
+            "clearance": "local",
+            "auth": auth,
+            "headers": headers,
+            "operations": ops,
+        },
+        {k: v for k, v in creds.items() if v},
+        notes,
+    )
+
+
+# --------------------------------------------------------------------- MCP
+
+
+def _schema_param(schema: dict) -> dict:
+    t = schema.get("type")
+    if isinstance(t, list):
+        t = next((x for x in t if x != "null"), "string")
+    spec: dict[str, Any] = {
+        "description": str(schema.get("description") or schema.get("title") or "")[:200]
+    }
+    if schema.get("enum"):
+        spec.update(type="enum", values=[str(v) for v in schema["enum"]][:50])
+    elif t == "integer":
+        spec["type"] = "int"
+    elif t == "number":
+        spec["type"] = "number"
+    elif t == "boolean":
+        spec["type"] = "bool"
+    elif schema.get("format") in ("date", "date-time"):
+        spec["type"] = "date"
+    else:
+        spec["type"] = "string"
+    if "default" in schema and isinstance(schema["default"], (str, int, float, bool)):
+        spec["default"] = schema["default"]
+    return spec
+
+
+def draft_from_mcp(
+    name: str, transport: dict, tools: list[dict], picks: list[str]
+) -> tuple[dict, list[str]]:
+    """(draft manifest, notes) from an MCP server's tools. Only tools the server does not
+    mark destructive or not-read-only can be picked; each becomes an operation whose
+    parameters are the tool's declared arguments."""
+    by = {t["name"]: t for t in tools}
+    ops, notes, seen = [], [], set()
+    for tname in picks:
+        t = by.get(tname)
+        if not t:
+            raise ManifestError(f"the server has no tool {tname!r}")
+        if t.get("refused"):
+            raise ManifestError(f"{tname} cannot be a token's operation: {t['refused']}")
+        if not t.get("read_only"):
+            notes.append(
+                f"{tname}: the server does not say it is read-only; include it only if it only looks things up."
+            )
+        schema = t.get("input_schema") or {}
+        required = set(schema.get("required") or [])
+        params = {}
+        for pname, ps in (schema.get("properties") or {}).items():
+            if not isinstance(ps, dict) or not re.match(r"^[a-zA-Z_][\w\-]{0,63}$", pname):
+                continue
+            spec = _schema_param(ps)
+            if pname in required:
+                spec["required"] = True
+            params[pname] = spec
+        oid = _slug(tname)
+        while oid in seen:
+            oid = _slug(oid + "_2")
+        seen.add(oid)
+        ops.append(
+            {
+                "id": oid,
+                "tool": tname,
+                "read_only": True,
+                "summary": t.get("description", "")[:300] or tname,
+                "ask_when": f"the question calls for {tname.replace('_', ' ')}.",
+                "params": params,
+                "response": {
+                    "format": "text",
+                    "rows": "",
+                    "line": "{text}",
+                    "empty": "nothing matched",
+                    "limit": 30,
+                },
+            }
+        )
+    if not ops:
+        raise ManifestError("pick at least one tool")
+    return (
+        {
+            "format": FORMAT,
+            "id": _slug(name or "mcp-server", 30).replace("_", "-"),
+            "name": (name or "MCP server")[:60],
+            "kind": "MCP server",
+            "colour": "#8a6bd1",
+            "clearance": "local",
+            "transport": transport,
+            "auth": {"type": "none"}
+            if transport.get("type") == "mcp_stdio"
+            else {"type": "bearer"},
+            "operations": ops,
+        },
+        notes,
+    )

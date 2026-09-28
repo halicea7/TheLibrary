@@ -1006,3 +1006,57 @@ function refinedLabelSurface(material) {
  }
  `);return u;
 }
+
+/* ── the connector bay ─────────────────────────────────────────────────── */
+// The rack's own pedestal, with its drum divided at the centre plane so the front half
+// comes away as a service panel. From the connector bay study (2026-09-24).
+export function bayPedestal(){
+  const socket = new THREE.Group(); socket.scale.setScalar(.9);
+  const stone = new THREE.MeshStandardMaterial({ color: 0x1c2027, roughness: .82, metalness: .05, normalMap: grainNormal(), normalScale: new THREE.Vector2(.25, .25) });
+  const bronze = new THREE.MeshStandardMaterial({ color: 0x6b4a26, roughness: .38, metalness: .95 });
+  const gilt = new THREE.MeshStandardMaterial({ color: 0xc9a24e, roughness: .28, metalness: 1 });
+  const TOP = 0;                                   // the slot's mouth sits at y = 0
+  const add = (geo, mat, y, cast = true) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.castShadow = cast; m.receiveShadow = true; socket.add(m); return m; };
+  const slab = (w, h, d, r = .04) => { const g = new THREE.ExtrudeGeometry(roundedRect(w, d, r), { depth: h, bevelEnabled: true, bevelThickness: .015, bevelSize: .015, bevelSegments: 2 }); g.rotateX(-Math.PI / 2); g.translate(0, 0, 0); return g; };
+  // base: two steps
+  add(slab(3.1, .14, 1.9), stone, TOP - 1.02);
+  add(slab(2.75, .12, 1.65), stone, TOP - .88);
+  // drum: twenty flutes, a scalloped section extruded upward
+  const flutes = new THREE.Shape(); const R = .95, N = 20, DEPTH = .045;
+  for (let i = 0; i <= 240; i++) { const a = i / 240 * Math.PI * 2, r = R - DEPTH * (.5 + .5 * Math.cos(a * N)); const x = Math.cos(a) * r * 1.35, y = Math.sin(a) * r * .72; i ? flutes.lineTo(x, y) : flutes.moveTo(x, y); }
+  const drum = new THREE.ExtrudeGeometry(flutes, { depth: .5, bevelEnabled: false }); drum.rotateX(-Math.PI / 2);
+  const drumMesh=add(drum, stone, TOP - .76);
+  // capital: an echinus (the flare) and the abacus slab
+  const echinus = new THREE.LatheGeometry([new THREE.Vector2(.9, 0), new THREE.Vector2(1.0, .05), new THREE.Vector2(1.12, .1), new THREE.Vector2(1.2, .14)], 48);
+  const ech = add(echinus, stone, TOP - .27); ech.scale.set(1.3, 1, .72);
+  add(slab(2.9, .13, 1.7, .03), stone, TOP - .13);
+  // the mouth: a bronze frame around the slot, the slot itself dark
+  const rim = new THREE.Shape(); const fw = W * .5 + .26, fd = D * .5 + .26; rim.moveTo(-fw / 2, -fd / 2); rim.lineTo(fw / 2, -fd / 2); rim.lineTo(fw / 2, fd / 2); rim.lineTo(-fw / 2, fd / 2); rim.closePath();
+  const hole = new THREE.Path(); const hw = W * .5 + .1, hd = D * .5 + .1; hole.moveTo(-hw / 2, -hd / 2); hole.lineTo(-hw / 2, hd / 2); hole.lineTo(hw / 2, hd / 2); hole.lineTo(hw / 2, -hd / 2); hole.closePath(); rim.holes.push(hole);
+  const mouth = new THREE.ExtrudeGeometry(rim, { depth: .05, bevelEnabled: true, bevelThickness: .012, bevelSize: .012, bevelSegments: 2 }); mouth.rotateX(-Math.PI / 2);
+  add(mouth, bronze, TOP - .005);
+  add(new THREE.BoxGeometry(hw, .3, hd), new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1 }), TOP - .15, false);
+  // the gilt fillet: a thin ring around the abacus edge, and one at the foot of the drum
+  const fillet = (w, d, y) => { const s = new THREE.Shape(); s.moveTo(-w / 2, -d / 2); s.lineTo(w / 2, -d / 2); s.lineTo(w / 2, d / 2); s.lineTo(-w / 2, d / 2); s.closePath(); const h = new THREE.Path(); h.moveTo(-w / 2 + .05, -d / 2 + .05); h.lineTo(-w / 2 + .05, d / 2 - .05); h.lineTo(w / 2 - .05, d / 2 - .05); h.lineTo(w / 2 - .05, -d / 2 + .05); h.closePath(); s.holes.push(h); const g = new THREE.ExtrudeGeometry(s, { depth: .025, bevelEnabled: false }); g.rotateX(-Math.PI / 2); add(g, gilt, y, false); };
+  fillet(2.9, 1.7, TOP - .005); fillet(2.75, 1.65, TOP - .76);
+  // a gilt band along the abacus face, the one line of gold you read from across the room
+  add(new THREE.BoxGeometry(2.92, .03, 1.72), gilt, TOP - .10, false);
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.1), new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false, opacity: .8 }));
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = TOP + .06; socket.add(shadow);
+
+  // Divide the existing drum at its center plane; all visible flutes remain original.
+  function halfGeometry(source,front){
+    const g=source.index?source.toNonIndexed():source;const pos=g.attributes.position;const vertices=[];
+    for(let i=0;i<pos.count;i+=3){let poly=[0,1,2].map(j=>new THREE.Vector3().fromBufferAttribute(pos,i+j));const clipped=[];
+      for(let j=0;j<poly.length;j++){const a=poly[j],b=poly[(j+1)%poly.length],insideA=front?a.z>=0:a.z<=0,insideB=front?b.z>=0:b.z<=0;if(insideA)clipped.push(a);if(insideA!==insideB)clipped.push(a.clone().lerp(b,-a.z/(b.z-a.z)));}
+      for(let j=1;j<clipped.length-1;j++)for(const p of [clipped[0],clipped[j],clipped[j+1]])vertices.push(p.x,p.y,p.z);
+    }
+    const out=new THREE.BufferGeometry();out.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));out.computeVertexNormals();if(g!==source)g.dispose();return out;
+  }
+  const panel=new THREE.Group();socket.add(panel);const front=new THREE.Mesh(halfGeometry(drumMesh.geometry,true),stone);front.position.copy(drumMesh.position);panel.add(front);
+  const rear=halfGeometry(drumMesh.geometry,false);drumMesh.geometry.dispose();drumMesh.geometry=rear;
+  return {group:socket,panel};
+}
+
+// Shared with token3d.js: one renderer set-up, one studio light, one environment.
+export { environment, makeRenderer, lights, refractionPlate };

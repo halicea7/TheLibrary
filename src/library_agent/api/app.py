@@ -132,31 +132,46 @@ async def health(db: SessionDep) -> HealthOut:
 app.mount("/vendor", StaticFiles(directory=WEB_DIR / "vendor"), name="vendor")
 
 
+# The page and its scripts are revalidated on every load (an unchanged file answers 304),
+# so an update is never met by a stale cached module missing a new export.
+FRESH = {"Cache-Control": "no-cache"}
+
+
 @app.get("/cartridge3d.js", include_in_schema=False)
 async def cartridge3d() -> FileResponse:
-    return FileResponse(WEB_DIR / "cartridge3d.js", media_type="text/javascript")
+    return FileResponse(WEB_DIR / "cartridge3d.js", media_type="text/javascript", headers=FRESH)
+
+
+@app.get("/token3d.js", include_in_schema=False)
+async def token3d() -> FileResponse:
+    return FileResponse(WEB_DIR / "token3d.js", media_type="text/javascript", headers=FRESH)
+
+
+@app.get("/tokenmask.js", include_in_schema=False)
+async def tokenmask() -> FileResponse:
+    return FileResponse(WEB_DIR / "tokenmask.js", media_type="text/javascript", headers=FRESH)
 
 
 @app.get("/nebula-gl.js", include_in_schema=False)
 async def nebula_gl() -> FileResponse:
-    return FileResponse(WEB_DIR / "nebula-gl.js", media_type="text/javascript")
+    return FileResponse(WEB_DIR / "nebula-gl.js", media_type="text/javascript", headers=FRESH)
 
 
 @app.get("/demo.js", include_in_schema=False)
 async def demo_js() -> FileResponse:
     """The stand-in server for the hosted demo; `?demo` on a local instance shows it."""
-    return FileResponse(WEB_DIR / "demo.js", media_type="text/javascript")
+    return FileResponse(WEB_DIR / "demo.js", media_type="text/javascript", headers=FRESH)
 
 
 @app.get("/", include_in_schema=False)
 async def index() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return FileResponse(WEB_DIR / "index.html", headers=FRESH)
 
 
 @app.get("/eval", include_in_schema=False)
 async def eval_page() -> FileResponse:
     """Judging the evaluation set: its own page, since it is used rarely and at length."""
-    return FileResponse(WEB_DIR / "eval.html")
+    return FileResponse(WEB_DIR / "eval.html", headers=FRESH)
 
 
 async def _warmup() -> None:

@@ -23,6 +23,10 @@ class ModuleConfig:
     token: str = ""
     seated: bool = False  # consulted during a question, the way a seated cartridge scopes
     extra_headers: dict[str, str] = field(default_factory=dict)
+    # The module as an object: which of the bay's sockets its token sits in (seated means
+    # in a socket), and how the token looks. Neither is secret.
+    socket: int | None = None
+    design: dict = field(default_factory=dict)
 
     def public(self) -> dict:
         return {
@@ -32,6 +36,8 @@ class ModuleConfig:
             "has_token": bool(self.token),
             "token_tail": self.token[-4:] if len(self.token) >= 8 else "",
             "configured": bool(self.base_url and self.token),
+            "socket": self.socket,
+            "design": self.design,
         }
 
 
@@ -67,7 +73,15 @@ def load() -> dict[str, ModuleConfig]:
                 token=str(v.get("token") or ""),
                 seated=bool(v.get("seated")),
                 extra_headers={str(k): str(x) for k, x in (v.get("extra_headers") or {}).items()},
+                socket=v.get("socket") if isinstance(v.get("socket"), int) else None,
+                design=v.get("design") if isinstance(v.get("design"), dict) else {},
             )
+            # Seated and socketed are one fact; a file from before sockets gets the first
+            # free socket for a seated module.
+            if out[mid].seated and out[mid].socket is None:
+                taken = {c.socket for c in out.values() if c.socket is not None}
+                out[mid].socket = next((i for i in range(SOCKETS) if i not in taken), None)
+                out[mid].seated = out[mid].socket is not None
     _cache = (p, mtime, out)
     return out
 
@@ -82,6 +96,8 @@ def save(configs: dict[str, ModuleConfig]) -> None:
                 "token": c.token,
                 "seated": c.seated,
                 "extra_headers": c.extra_headers,
+                "socket": c.socket,
+                "design": c.design,
             }
             for c in configs.values()
         }
@@ -94,6 +110,9 @@ def save(configs: dict[str, ModuleConfig]) -> None:
     os.replace(tmp, p)
     now = time.time()
     os.utime(p, (now, now))
+
+
+SOCKETS = 4  # the bay behind the pedestal's panel
 
 
 def config_for(mid: str) -> ModuleConfig:

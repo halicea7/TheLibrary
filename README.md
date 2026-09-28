@@ -62,7 +62,7 @@ It opens at `http://localhost:8077`. `./library stop`, `restart` and `status` do
 
 To check everything works end to end: `uv run python scripts/verify.py` exercises every surface against the running instance and reports pass/fail per check.
 
-Nothing leaves your machine: no cloud, no API keys, no telemetry. Other models and live connectors are opt-in under **Settings** (see [Models](#models) and Modules).
+Nothing leaves your machine: no cloud, no API keys, no telemetry. Other models and live connectors are opt-in under **Settings** (see [Models](#models) and [Tokens](#tokens)).
 
 ---
 
@@ -211,6 +211,14 @@ At `readings`, each section's summary stands in as its passage, so retrieval, th
 A folder can also arrive as a cartridge directly: `./library import ~/hacktricks --cartridge "HackTricks"` — or a wiki: export the Confluence space as HTML and `./library import ./export --cartridge "Ops Docs" --read`, then `./library export` it for the person who will plug it in. Read it before you export it: readings travel with the cartridge, so their shelf is organised and Threads has something to show on day one.
 
 Inside a room, eject removes what the cartridge brought and leaves what was already yours. A document that arrives from two cartridges is one document with two memberships; subjects merge by name; vectors ship as float16 and are loaded directly when the embedding model matches, re-embedded from the shipped text when it doesn't. Clusters and contradictions are never shipped — the receiver recomputes them across the new whole, which is the point. Content is hash-verified; there is no signing.
+
+## Tokens
+
+A **token** is a live connector as an object: a read-only line to an API the librarian can consult during a question. SentinelOne is the first: CVE exposure, whether an indicator has been seen, the application inventory and where an application runs, and agent status. Nothing is ingested. When a question calls for it, the librarian picks one declared operation and fills in its parameters (never a URL, never code), makes one GET to the configured host, and the result joins the passages. It's cited and verified like them, and marked *live* in the token's colour.
+
+Under the rack, **Tokens** shows the pedestal's four sockets and *Active tokens n/4*. **bay** opens a close-up: the pedestal's front panel comes forward and slides aside to reveal the connector array, four hex sockets with gold contacts and a status light each. Choose a token and click an empty socket (or press *seat* for the first free one), and it drops in, its rim lights sweep round, and it's live. A token in a socket is what gets consulted; take it out and it isn't.
+
+**Customize** turns the token in close-up and changes every part of it: the body (moulded plastic, brushed metal, gold, clear, frosted or glitter resin, glazed ceramic), a raised logo traced from any image you give it (only the traced mask is kept, and it's re-encoded on the server), foil finishes for the logo, face and the etched solar back, the rim-light colours, the identity strip, contacts, edge and circuit colours, and the planet inlays. **Connection** holds its base URL and API token. The token is kept 0600 in `~/.library-agent/modules.json`, never sent to a model or back to the browser. A token in a socket without a connection glows amber. A module marked *local models only* refuses to run when chat is on a remote provider, and the desk says so.
 
 ## Connecting other tools
 

@@ -329,6 +329,9 @@ class ModulePut(BaseModel):
     base_url: str | None = None
     token: str | None = None  # kept if omitted, so the UI never has to re-send it
     seated: bool | None = None
+    # The bay: 0-3 puts the token in that socket (seating it), -1 takes it out.
+    socket: int | None = None
+    design: dict | None = None
 
 
 def _module_public(mod, cfg) -> dict:
@@ -363,7 +366,7 @@ async def list_modules() -> dict:
         _module_public(mod, cfgs.get(mid) or mod_store.ModuleConfig(id=mid))
         for mid, mod in BUILTIN.items()
     ]
-    return {"modules": mods}
+    return {"modules": mods, "sockets": mod_store.SOCKETS}
 
 
 @router.put("/modules/{mid}")
@@ -379,8 +382,39 @@ async def put_module(mid: str, body: ModulePut) -> dict:
         cfg.base_url = body.base_url.strip().rstrip("/")
     if body.token is not None and body.token != "":
         cfg.token = body.token.strip()
-    if body.seated is not None:
-        cfg.seated = body.seated
+    taken = {c.socket: c.id for c in cfgs.values() if c.socket is not None and c.id != mid}
+    want = body.socket
+    if want is None and body.seated is not None:
+        # Seated from a checkbox: the first free socket, or out.
+        want = (
+            (
+                cfg.socket
+                if cfg.socket is not None
+                else next((i for i in range(mod_store.SOCKETS) if i not in taken), None)
+            )
+            if body.seated
+            else -1
+        )
+        if want is None:
+            raise HTTPException(
+                409, f"all {mod_store.SOCKETS} sockets are taken; take a token out first"
+            )
+    if want is not None:
+        if want == -1:
+            cfg.socket, cfg.seated = None, False
+        elif 0 <= want < mod_store.SOCKETS:
+            if want in taken:
+                raise HTTPException(409, f"socket {want + 1} holds {taken[want]}")
+            cfg.socket, cfg.seated = want, True
+        else:
+            raise HTTPException(422, f"socket is 0-{mod_store.SOCKETS - 1}, or -1 to take it out")
+    if body.design is not None:
+        from library_agent.modules.design import DesignError, clean
+
+        try:
+            cfg.design = clean(body.design)
+        except DesignError as exc:
+            raise HTTPException(422, str(exc)) from exc
     cfgs[mid] = cfg
     mod_store.save(cfgs)
     return _module_public(BUILTIN[mid], cfg)

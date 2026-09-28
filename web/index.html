@@ -538,6 +538,50 @@ select, .toggle {
 .drawer-info .empty { padding:24px 0; }
 @media (max-width: 860px) { .drawer-b { grid-template-columns:1fr; } .drawer-side { display:none; } }
 
+/* ── tokens: the row under the rack, and the bay ─────────────────────── */
+.tokens-h { align-items:baseline; gap:10px; }
+.tok-count { font:10.5px/1 var(--mono); color:var(--faint); letter-spacing:.04em; margin-left:auto; }
+.tok-count b { color:var(--fg); font-weight:500; }
+.tok-row { display:flex; gap:8px; margin:6px 0 10px; cursor:pointer; }
+.tok-row .hx { width:26px; height:23px; clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); background:var(--rule-soft); position:relative; }
+.tok-row .hx::after { content:""; position:absolute; inset:2px; clip-path:inherit; background:var(--sunk); }
+.tok-row .hx[data-on="true"] { background:var(--c); box-shadow:0 0 10px var(--c); }
+.tok-row .hx[data-on="true"]::after { background:color-mix(in srgb, var(--c) 30%, var(--panel)); }
+.tok-row .hx[data-err="true"] { background:var(--amber); }
+.drawer.bay { width:min(1120px, 96vw); height:min(720px, 92vh); }
+.bay-b { display:grid; grid-template-columns:minmax(0,1fr) 380px; min-height:0; }
+.bay-stage { position:relative; min-height:0; background:radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--rule) 60%, transparent), transparent 70%); }
+.bay-stage canvas { width:100%; height:100%; display:block; }
+.bay-stage .views { position:absolute; left:14px; bottom:12px; display:flex; gap:8px; }
+.bay-stage .hint { position:absolute; left:14px; top:12px; font:11px/1.4 var(--mono); color:var(--faint); max-width:46ch; }
+.bay-side { border-left:1px solid var(--rule-soft); display:grid; grid-template-rows:auto 1fr; min-height:0; }
+.bay-tabs { display:flex; gap:16px; padding:10px 16px 0; border-bottom:1px solid var(--rule-soft); }
+.bay-tabs button { background:none; border:0; border-bottom:2px solid transparent; padding:6px 0 8px; font:12px/1 var(--sans); color:var(--dim); cursor:pointer; }
+.bay-tabs button[aria-selected="true"] { color:var(--fg); border-bottom-color:var(--gilt); }
+.bay-pane { overflow-y:auto; padding:12px 16px 18px; font:12.5px/1.55 var(--sans); color:var(--dim); scrollbar-width:thin; }
+.tok-card { display:grid; grid-template-columns:34px 1fr auto; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid var(--rule-soft); }
+.tok-card .hx { width:30px; height:26px; clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); background:var(--c); }
+.tok-card[data-armed="true"] { box-shadow:inset 3px 0 0 var(--gilt); padding-left:8px; }
+.tok-card b { color:var(--fg); font:600 13px/1.3 var(--serif); }
+.tok-card .m { font:10.5px/1.4 var(--mono); color:var(--faint); }
+.tok-card .acts { display:flex; gap:8px; }
+.tok-card .acts button, .tok-cust .acts button { font:11.5px/1 var(--sans); padding:6px 10px; border-radius:3px; border:1px solid var(--rule); background:transparent; color:var(--dim); cursor:pointer; }
+.tok-card .acts button:hover, .tok-cust .acts button:hover { color:var(--fg); border-color:var(--faint); }
+.tok-card .acts button.go, .tok-cust .acts button.go { background:var(--gilt); border-color:var(--gilt); color:var(--bg); font-weight:600; }
+.tok-cust canvas { width:100%; height:230px; display:block; border-radius:4px; background:radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--rule) 70%, transparent), transparent 75%); }
+.tok-cust .views { display:flex; gap:10px; margin:4px 0 8px; }
+.tok-cust details { border-bottom:1px solid var(--rule-soft); padding:8px 0; }
+.tok-cust summary { cursor:pointer; color:var(--fg); font:600 12px/1.4 var(--sans); }
+.tok-cust label { display:grid; grid-template-columns:118px 1fr; gap:8px; align-items:center; margin:6px 0; font:11.5px/1.3 var(--sans); }
+.tok-cust label.chk { grid-template-columns:auto 1fr; }
+.tok-cust input[type=text], .tok-cust input[type=password], .tok-cust select { width:100%; background:var(--sunk); color:var(--fg); border:1px solid var(--rule); border-radius:3px; padding:5px 7px; font:12px/1.2 var(--sans); }
+.tok-cust input[type=color] { width:44px; height:24px; border:1px solid var(--rule); background:none; padding:0; }
+.tok-cust input[type=range] { width:100%; accent-color:var(--gilt); }
+.tok-cust .mask { width:72px; height:72px; border:1px solid var(--rule); background:#000; image-rendering:auto; }
+.tok-cust .acts { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+.tok-cust .msg { font:11px/1.4 var(--mono); color:var(--faint); margin-top:6px; min-height:1.4em; }
+@media (max-width: 860px) { .bay-b { grid-template-columns:1fr; grid-template-rows:46vh 1fr; } .bay-side { border-left:0; border-top:1px solid var(--rule-soft); } }
+
 /* ── the tracer: a point of gilt light travelling the outline of a control that wants
    attention. Not a glowing box -- one bright arc on a conic gradient, masked to the
    border, turning. Reduced motion: a still gilt ring. */
@@ -911,6 +955,12 @@ mark.hl { background:color-mix(in srgb, var(--amber) 26%, transparent); color:in
     </div>
     <div class="rack" id="rack"></div>
     <div class="rack-note" id="rack-note"></div>
+
+    <!-- Tokens: the live API connectors, seated in the pedestal's bay. -->
+    <div class="shelf-h tokens-h" style="padding:0"><p class="label spaced" style="margin-bottom:0">Tokens</p>
+      <span class="tok-count" id="tok-count" title="Tokens seated in the bay: each is a live source consulted during your questions">Active tokens 0/4</span>
+      <button class="linkish" onclick="bayToggle()" title="Open the pedestal's bay to seat, remove or customize tokens">bay</button></div>
+    <div class="tok-row" id="tok-row" onclick="bayToggle()" title="Open the bay"></div>
 
     <div class="shelf-h" style="padding:0"><p class="label spaced" style="margin-bottom:0">Shelf</p><button class="linkish" id="reshelve" onclick="reshelve(this)" title="Have the library organise its shelf: top shelves, sub-shelves, one place per volume">reshelve</button></div>
     <div class="acts" id="shelf-acts" style="gap:12px;margin:4px 0 2px;font:11px/1.5 var(--sans);color:var(--faint)"></div>
@@ -1849,6 +1899,223 @@ async function drawerPick(id) {
   if (drawer.id !== id || !drawer.ctrl) return;
   drawer.ctrl.set({ design, colour: c.colour, name: c.name, level: c.level, sub: `${c.level} · ${c.document_count} volumes`, points, artUrl: `/api/cartridges/${id}/art?c=${c.colour.slice(1)}`, lit: seated, face: true });
 }
+/* ── tokens ───────────────────────────────────────────────────────────── */
+// A token is a module -- a read-only line to a live API -- as an object. Seating it in
+// one of the bay's four sockets is what makes the librarian consult it during a
+// question. The row under the rack shows the sockets; the bay is where tokens go in,
+// come out, and are customized.
+const tokens = { list: [], sockets: 4, bay: null, view: null, armed: null, tab: 'seat', edit: null, image: null, draft: null };
+function tokenDesign(m) {
+  // A module's saved design, over defaults named for it.
+  const D = window.Token3D?.DEFAULT_DESIGN || {};
+  return { ...D, name: m.name.toUpperCase().slice(0, 24), serial: 'CN-' + String(tokens.list.indexOf(m) + 1).padStart(3, '0'), ...(m.design || {}) };
+}
+async function loadTokens() {
+  let d; try { d = await (await fetch('/api/settings/modules')).json(); } catch { return; }
+  tokens.list = d.modules || []; tokens.sockets = d.sockets || 4;
+  const bySocket = Array.from({ length: tokens.sockets }, (_, i) => tokens.list.find(m => m.socket === i) || null);
+  const on = bySocket.filter(Boolean).length;
+  $('#tok-count').innerHTML = `Active tokens <b>${on}/${tokens.sockets}</b>`;
+  $('#tok-row').innerHTML = bySocket.map((m, i) => {
+    const c = m ? tokenDesign(m).rimColor : '';
+    return `<span class="hx" data-on="${!!m && m.configured}" data-err="${!!m && !m.configured}" style="--c:${esc(c)}" title="${m ? `${esc(m.name)} in socket ${i + 1}${m.configured ? '' : ' — not configured yet'}` : `Socket ${i + 1}: empty`}"></span>`;
+  }).join('');
+  if (tokens.bay) { bayRender(); tokens.bay.setSockets(bayWants()); }
+}
+function bayWants() {
+  return Array.from({ length: tokens.sockets }, (_, i) => {
+    const m = tokens.list.find(x => x.socket === i);
+    return m ? { key: m.id, design: tokenDesign(m), error: !m.configured } : null;
+  });
+}
+function bayToggle() { tokens.els ? bayClose() : bayOpen(); }
+function bayOpen() {
+  if (tokens.els) return;
+  const lock = document.createElement('div'); lock.className = 'drawer-lock'; lock.onclick = bayClose;
+  const box = document.createElement('div'); box.className = 'drawer bay';
+  box.innerHTML = `<div class="drawer-h"><h2>The bay</h2><span class="n" id="bay-n"></span><button class="linkish x" onclick="bayClose()">close</button></div>
+    <div class="bay-b"><div class="bay-stage"><canvas id="bay-canvas" aria-label="The pedestal's bay. Drag to turn; click an open socket to seat the chosen token."></canvas>
+      <div class="hint" id="bay-hint">Opening the panel…</div>
+      <div class="views"><button class="linkish" onclick="tokens.bay?.front()">front</button><button class="linkish" onclick="tokens.bay?.angle()">three-quarter</button></div></div>
+    <div class="bay-side"><div class="bay-tabs" role="tablist">
+      <button role="tab" id="bay-t-seat" onclick="bayTab('seat')">Seat</button>
+      <button role="tab" id="bay-t-cust" onclick="bayTab('cust')">Customize</button></div>
+      <div class="bay-pane" id="bay-pane"></div></div></div>`;
+  document.body.append(lock, box);
+  tokens.els = { lock, box };
+  tokens.onKey = e => { if (e.key === 'Escape') bayClose(); };
+  addEventListener('keydown', tokens.onKey);
+  if (window.Token3D) {
+    tokens.bay = window.Token3D.mountBay($('#bay-canvas'), { onSocket: baySocket });
+    tokens.bay.setSockets(bayWants(), { animate: false });
+    // The closeup opens: the service panel comes forward and slides aside.
+    setTimeout(() => { tokens.bay?.open(); setTimeout(() => { const h = $('#bay-hint'); if (h) h.textContent = 'Choose a token, then click an empty socket — or use its seat button.'; }, 1350); }, 350);
+  } else $('#bay-hint').textContent = 'The 3D bay is unavailable here; the lists still work.';
+  bayTab(tokens.tab);
+}
+function bayClose() {
+  if (!tokens.els) return;
+  removeEventListener('keydown', tokens.onKey);
+  const els = tokens.els; tokens.els = null;
+  custClose();
+  const bay = tokens.bay; tokens.bay = null;
+  // The panel latches before the window goes.
+  if (bay && bay.isOpen()) { bay.close(); setTimeout(() => { bay.dispose(); for (const el of Object.values(els)) el.remove(); }, 900); }
+  else { bay?.dispose(); for (const el of Object.values(els)) el.remove(); }
+}
+function bayTab(t) {
+  tokens.tab = t;
+  $('#bay-t-seat')?.setAttribute('aria-selected', String(t === 'seat'));
+  $('#bay-t-cust')?.setAttribute('aria-selected', String(t === 'cust'));
+  if (t !== 'cust') custClose();
+  bayRender();
+}
+function bayRender() {
+  if (!tokens.els) return;
+  const on = tokens.list.filter(m => m.socket !== null && m.socket !== undefined).length;
+  $('#bay-n').textContent = `${on}/${tokens.sockets} active · ${tokens.list.length} token${tokens.list.length === 1 ? '' : 's'}`;
+  if (tokens.tab === 'cust') return custRender();
+  $('#bay-pane').innerHTML = `<p style="margin:0 0 6px">A seated token is consulted during your questions: its live results appear beside the passages, cited and marked live. Its credentials stay on this machine.</p>` +
+    tokens.list.map(m => {
+      const d = tokenDesign(m), seated = m.socket !== null && m.socket !== undefined;
+      return `<div class="tok-card" data-armed="${tokens.armed === m.id}" style="--c:${esc(d.rimColor)}">
+        <span class="hx"></span>
+        <div><b>${esc(m.name)}</b><div class="m">${seated ? `socket ${m.socket + 1}` : 'not seated'} · ${m.configured ? 'configured' : 'needs a URL and token'}${m.local_only ? ' · local models only' : ''}</div></div>
+        <div class="acts">${seated ? `<button onclick="tokenOut('${m.id}')">take out</button>` : `<button class="go" onclick="tokenArm('${m.id}')" title="Then click a socket, or it goes in the first free one">${tokens.armed === m.id ? 'choose a socket' : 'seat'}</button>`}
+          <button onclick="custOpen('${m.id}')">customize</button></div></div>`;
+    }).join('') + (tokens.list.length ? '' : '<div class="empty">No tokens yet.</div>');
+}
+function tokenArm(id) {
+  const free = Array.from({ length: tokens.sockets }, (_, i) => i).filter(i => !tokens.list.some(m => m.socket === i));
+  if (!free.length) { say(`All ${tokens.sockets} sockets are taken; take a token out first.`, true); return; }
+  if (tokens.armed === id || !tokens.bay?.isOpen()) { tokens.armed = null; return tokenIn(id, free[0]); }
+  tokens.armed = id; bayRender();
+  $('#bay-hint').textContent = 'Click an empty socket for it — or press seat again for the first free one.';
+}
+function baySocket(i) {
+  const m = tokens.list.find(x => x.socket === i);
+  if (m) { tokens.armed = null; custOpen(m.id); return; }
+  const id = tokens.armed || (tokens.list.find(x => x.socket === null || x.socket === undefined) || {}).id;
+  if (id) { tokens.armed = null; tokenIn(id, i); }
+}
+async function tokenPut(id, body) {
+  const r = await fetch('/api/settings/modules/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json(); if (!r.ok) throw new Error(j.detail || r.status); return j;
+}
+async function tokenIn(id, socket) {
+  try {
+    const m = await tokenPut(id, { socket });
+    say(m.configured ? `${m.name} seated in socket ${socket + 1} — consulted on your questions.` : `${m.name} is in socket ${socket + 1}, but it needs its URL and token before it can connect (Customize › Connection).`, !m.configured);
+  } catch (e) { say('Could not seat it: ' + e.message, true); }
+  await loadTokens();
+}
+async function tokenOut(id) {
+  try { const m = await tokenPut(id, { socket: -1 }); say(`${m.name} taken out.`); } catch (e) { say('Could not take it out: ' + e.message, true); }
+  await loadTokens();
+}
+
+// Customize: the token turning in a close view, and every part of it.
+function custOpen(id) { tokens.edit = id; tokens.draft = null; tokens.image = null; if (!tokens.els) bayOpen(); bayTab('cust'); }
+function custClose() { tokens.view?.dispose(); tokens.view = null; }
+function custRender() {
+  const m = tokens.list.find(x => x.id === tokens.edit) || tokens.list[0];
+  if (!m) { $('#bay-pane').innerHTML = '<div class="empty">No tokens to customize.</div>'; return; }
+  tokens.edit = m.id;
+  const d = tokens.draft || (tokens.draft = tokenDesign(m));
+  const T = window.Token3D || {};
+  const opt = (map, v) => Object.entries(map || {}).map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const col = (k, l) => `<label>${l}<input type="color" data-k="${k}" value="${esc(d[k])}"></label>`;
+  const chk = (k, l) => `<label class="chk"><input type="checkbox" data-k="${k}" ${d[k] ? 'checked' : ''}> ${l}</label>`;
+  const rng = (k, l, lo, hi, st) => `<label>${l}<input type="range" data-k="${k}" min="${lo}" max="${hi}" step="${st}" value="${d[k]}"></label>`;
+  const fin = (k, l, extra = {}) => `<label>${l}<select data-k="${k}">${opt({ ...extra, ...T.FINISHES }, d[k])}</select></label>`;
+  $('#bay-pane').innerHTML = `<div class="tok-cust">
+    <label>Token<select id="cust-which">${tokens.list.map(x => `<option value="${x.id}" ${x.id === m.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+    <canvas id="cust-canvas" title="Drag to turn it"></canvas>
+    <div class="views">${['front', 'angle', 'edge', 'back'].map(v => `<button class="linkish" onclick="tokens.view?.view('${v}')">${v === 'angle' ? 'three-quarter' : v === 'back' ? 'back · solar' : v}</button>`).join('')}
+      <button class="linkish" onclick="tokens.view?.state('connecting')" title="Play the connection sequence">connect</button></div>
+    <details open><summary>Identity</summary>
+      <label>Name<input type="text" data-k="name" maxlength="24" value="${esc(d.name)}"></label>
+      <label>Serial<input type="text" data-k="serial" maxlength="16" value="${esc(d.serial)}"></label>
+      ${col('identityColor', 'Lettering')}${chk('identity', 'Identity strip')}</details>
+    <details open><summary>Body</summary>
+      <label>Material<select data-k="material">${opt(T.MATERIALS, d.material)}</select></label>
+      ${col('color', 'Color')}${rng('tint', 'Resin tint', 0, 1, .01)}</details>
+    <details><summary>Logo</summary>
+      <label>Image<input type="file" id="cust-logo" accept="image/png,image/jpeg,image/webp,image/svg+xml"></label>
+      <label>Mask from<select id="cust-src"><option value="auto">Automatic</option><option value="alpha">Transparency</option><option value="background">Remove border color</option><option value="dark">Dark shapes</option><option value="light">Light shapes</option></select></label>
+      <label>Threshold<input type="range" id="cust-thr" min="1" max="254" value="110"></label>
+      <label class="chk"><input type="checkbox" id="cust-inv"> Invert the selection</label>
+      <label>Mask<img class="mask" id="cust-mask" alt="White is raised" ${d.mask ? `src="${esc(d.mask)}"` : ''}></label>
+      <button class="linkish" onclick="custLogoReset()">the link mark</button>
+      ${fin('logoFinish', 'Logo finish')}${col('logoColor', 'Logo color')}${rng('height', 'Relief', .025, .2, .005)}</details>
+    <details><summary>Faces</summary>
+      ${fin('faceFinish', 'Recessed face')}${col('faceColor', 'Face color')}
+      ${fin('solarFinish', 'Solar etching', { etched: 'Etched into token' })}${col('solarColor', 'Solar color')}</details>
+    <details><summary>Lights</summary>
+      ${chk('rim', 'Rim lights')}${col('rimColor', 'Light color')}${col('errorColor', 'Error color')}${rng('brightness', 'Brightness', 0, 3, .05)}</details>
+    <details><summary>Hardware</summary>
+      ${chk('contacts', 'Connector contacts')}${chk('dockingKey', 'Keyed docking notch')}
+      <label>Edge<select data-k="edgeFinish">${opt({ satin: 'Satin', polished: 'Polished metal', none: 'No band' }, d.edgeFinish)}</select></label>
+      ${col('edgeColor', 'Edge color')}${col('boardColor', 'Circuit board')}${col('circuitColor', 'Traces')}</details>
+    <details><summary>Planets</summary>
+      ${chk('planets', 'Metal planet inlays')}
+      <label>Highlighted<select data-k="planet"><option value="-1">None</option>${(T.PLANETS || []).map((p, i) => `<option value="${i}" ${i === +d.planet ? 'selected' : ''}>${p}</option>`).join('')}</select></label></details>
+    <details ${m.configured ? '' : 'open'}><summary>Connection</summary>
+      <p style="margin:4px 0">${esc(m.description)}</p>
+      <label>Base URL<input type="text" id="cust-url" value="${esc(m.base_url || '')}" placeholder="https://your-tenant.example.net"></label>
+      <label>API token<input type="password" id="cust-tok" placeholder="${m.has_token ? '•••• ' + esc(m.token_tail) + ' (blank keeps it)' : 'API token'}" autocomplete="off"></label>
+      <div class="acts"><button onclick="custConnSave()">save connection</button><button onclick="custConnTest(this)">test</button></div></details>
+    <div class="acts"><button class="go" onclick="custSave()">Save design</button><button onclick="custRevert()">Revert</button></div>
+    <div class="msg" id="cust-msg"></div></div>`;
+  $('#cust-which').onchange = e => custOpen(e.target.value);
+  for (const el of document.querySelectorAll('.tok-cust [data-k]')) el.addEventListener('input', custInput);
+  $('#cust-logo').onchange = custLogo;
+  for (const id of ['#cust-src', '#cust-thr', '#cust-inv']) $(id).addEventListener('input', custTrace);
+  custClose();
+  if (T.mountToken) { tokens.view = T.mountToken($('#cust-canvas')); tokens.view.set(d); tokens.view.state(m.socket !== null && m.socket !== undefined ? (m.configured ? 'ready' : 'error') : 'off'); }
+}
+let custFrame = null;
+function custInput(e) {
+  const el = e.target, k = el.dataset.k, d = tokens.draft;
+  d[k] = el.type === 'checkbox' ? el.checked : el.type === 'range' || k === 'planet' ? +el.value : el.value;
+  cancelAnimationFrame(custFrame); custFrame = requestAnimationFrame(() => tokens.view?.set(d));
+}
+function custLogo(e) {
+  const f = e.target.files[0]; if (!f) return;
+  if (f.size > 12e6) { $('#cust-msg').textContent = 'Choose an image under 12 MB.'; return; }
+  const url = URL.createObjectURL(f), img = new Image();
+  img.onload = () => { URL.revokeObjectURL(url); if (img.width * img.height > 24e6) { $('#cust-msg').textContent = 'Resize the image under 24 megapixels.'; return; } tokens.image = img; custTrace(); };
+  img.onerror = () => { URL.revokeObjectURL(url); $('#cust-msg').textContent = 'Could not read that image; try PNG or WebP.'; };
+  img.src = url;
+}
+function custTrace() {
+  // The image never leaves the browser: only its traced mask is kept, white raised.
+  if (!tokens.image || !window.Token3D) return;
+  const mk = window.Token3D.traceLogo(tokens.image, { source: $('#cust-src').value, threshold: +$('#cust-thr').value, invert: $('#cust-inv').checked });
+  if (mk.empty) { $('#cust-msg').textContent = 'Nothing selected; change the source or the threshold.'; return; }
+  tokens.draft.mask = mk.canvas.toDataURL('image/png');
+  $('#cust-mask').src = tokens.draft.mask; $('#cust-msg').textContent = `Traced (${mk.mode === 'background' ? 'border color removed' : mk.mode}). White is raised.`;
+  tokens.view?.set(tokens.draft);
+}
+function custLogoReset() { tokens.image = null; tokens.draft.mask = null; $('#cust-mask').removeAttribute('src'); tokens.view?.set(tokens.draft); }
+async function custSave() {
+  try { await tokenPut(tokens.edit, { design: tokens.draft }); $('#cust-msg').textContent = 'Saved.'; await loadTokens(); }
+  catch (e) { $('#cust-msg').textContent = 'Not saved: ' + e.message; }
+}
+function custRevert() { tokens.draft = null; tokens.image = null; custRender(); }
+async function custConnSave() {
+  const body = { base_url: $('#cust-url').value.trim() }; const t = $('#cust-tok').value; if (t) body.token = t;
+  try { await tokenPut(tokens.edit, body); $('#cust-tok').value = ''; $('#cust-msg').textContent = 'Connection saved.'; await loadTokens(); tokens.draft && tokens.view?.state((tokens.list.find(m => m.id === tokens.edit) || {}).configured ? 'ready' : 'error'); }
+  catch (e) { $('#cust-msg').textContent = 'Not saved: ' + e.message; }
+}
+async function custConnTest(btn) {
+  btn.disabled = true; $('#cust-msg').textContent = 'reaching…'; tokens.view?.state('connecting');
+  try { const r = await (await fetch('/api/settings/modules/' + tokens.edit + '/test', { method: 'POST' })).json();
+    $('#cust-msg').textContent = r.ok ? `Reached (${r.count} rows from the probe).` : `✗ ${r.error}`; setTimeout(() => tokens.view?.state(r.ok ? 'ready' : 'error'), 2200); }
+  catch (e) { $('#cust-msg').textContent = String(e); tokens.view?.state('error'); }
+  btn.disabled = false;
+}
+
 function drawerSeat(id) { toggleCartridge(id); setTimeout(() => { drawerRender(); if (drawer.id === id) drawerPick(id); }, 50); }
 function toggleCartridge(id) {
   // One room at a time: seating a cartridge lifts whatever was seated.
@@ -3098,7 +3365,7 @@ async function saveModule(id) {
 }
 async function seatModule(id, seated) {
   try { const r = await (await fetch('/api/settings/modules/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seated }) })).json();
-    say(seated ? `${r.name} seated — it will be consulted on your questions.` : `${r.name} unseated.`); }
+    say(r.detail ? r.detail : seated ? `${r.name} seated in socket ${r.socket + 1} — it will be consulted on your questions.` : `${r.name} unseated.`, !!r.detail); loadTokens(); loadModules(); }
   catch (e) { say('Could not change it: ' + e.message, true); }
 }
 async function testModule(id, btn) {
@@ -3714,7 +3981,7 @@ function tourMaybe() {
   if (!done) setTimeout(tourStart, 1400);
 }
 
-setView('ask'); loadModels(); holdings(); loadRack().then(loadShelf).then(tourMaybe); loadSubjects(); loadJobs();
+setView('ask'); loadModels(); holdings(); loadRack().then(loadShelf).then(tourMaybe); loadSubjects(); loadJobs(); loadTokens();
 web.init();
 setInterval(loadJobs, 4000);
 incidentBadge();
@@ -3725,6 +3992,8 @@ setInterval(() => { holdings(); incidentBadge(); }, 30000);
   // The cartridge as an object. Loaded as a module (it imports three.js); if WebGL is
   // unavailable the rest of the library does not care.
   try { const m = await import('./cartridge3d.js'); window.Cartridge3D = m; loadRack(); } catch (e) { console.warn('3D cartridges unavailable', e); }
+  // Tokens and the bay; without WebGL the row of sockets and the lists still work.
+  try { window.Token3D = await import('./token3d.js'); loadTokens(); } catch (e) { console.warn('3D tokens unavailable', e); }
   // The nebula on the GPU; without WebGL the 2D drawing above stands.
   try { const g = await import('./nebula-gl.js'); const r = g.mount($('#web-gl')); if (r) { web.gl = r; web.wake(); } } catch (e) { console.warn('GPU nebula unavailable', e); }
 </script>

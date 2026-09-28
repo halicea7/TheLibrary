@@ -242,6 +242,11 @@ async def _library_passes(jid: uuid.UUID, kinds: list[str], out: dict[str, Any])
                             "clusters": r.clusters,
                             "cross_document": r.cross_document,
                         }
+                        # The claim vectors are fresh now: tie every claim to its passage.
+                        from library_agent.library.anchors import build_anchors
+
+                        a = await build_anchors(session_scope, progress=progress)
+                        out["anchors"] = a.states
                     elif k == "contradictions":
                         out["contradictions"] = await find_contradictions(
                             db, client=client, progress=progress, gate=_make_gate(jid)

@@ -341,6 +341,29 @@ async def evidence(db: SessionDep, cluster: uuid.UUID, source: str, claim: str) 
     best = max(rows, key=lambda r: closeness(r.text))
     exact = closeness(best.text) == 2.0
     h = best.claim_hash or _hash(best.text)
+    # The claim's anchor, when it has one: the passage already found to say it.
+    anchored = (
+        await db.execute(
+            text(
+                "select c.id, c.document_id, d.title, c.page_start, s.path, ca.state"
+                " from claim_anchor ca join chunk c on c.id = ca.chunk_id"
+                " join document d on d.id = c.document_id left join section s on s.id = c.section_id"
+                " where ca.artifact_id = :a and ca.claim_hash = :h and ca.chunk_id is not null limit 1"
+            ),
+            {"a": best.artifact_id, "h": h},
+        )
+    ).first()
+    if anchored:
+        return {
+            "chunk_id": str(anchored.id),
+            "document_id": str(anchored.document_id),
+            "document_title": anchored.title,
+            "page": anchored.page_start,
+            "section": anchored.path,
+            "claim": best.text,
+            "exact": exact,
+            "anchor": anchored.state,
+        }
     hit = (
         await db.execute(
             text(
@@ -379,3 +402,13 @@ async def evidence(db: SessionDep, cluster: uuid.UUID, source: str, claim: str) 
         "claim": best.text,
         "exact": exact,
     }
+
+
+@router.get("/anchors")
+async def anchors(db: SessionDep) -> dict:
+    """How well Tier 1's claims are supported by their own sections: counts by state, the
+    volumes with the most unsupported claims, and the weakest claims with their nearest
+    passage."""
+    from library_agent.library.anchors import report
+
+    return await report(db)

@@ -319,12 +319,22 @@ def main() -> None:
     ap.add_argument("split", nargs="?", default="tune", choices=["tune", "test", "all"])
     a = ap.parse_args()
     out = asyncio.run(run(None if a.split == "all" else a.split))
-    print(f"{out['cases']} cases, {out['seconds']}s -> {out['file']}")
-    for setup, groups in out["summary"].items():
-        g = groups.get("all", {})
-        print(
-            f"  {setup:24} mrr {g.get('mrr')}  hit@5 {g.get('hit@5')}  recall@10 {g.get('recall@10')}"
-        )
+    print(
+        f"{out['cases']} yours, {out['model_cases']} model-judged, {out.get('reviewer_cases', 0)} by "
+        f"reviewers; {out['seconds']}s -> {out['file']}"
+    )
+    tables = {"yours": out["summary"], "model-judged": out["summary_model_judged"]}
+    tables.update({f"by {j}": t for j, t in (out.get("summary_by_judge") or {}).items()})
+    for who, summary in tables.items():
+        if not summary:
+            continue
+        print(f"  {who}:")
+        for setup, groups in summary.items():
+            g = groups.get("all", {})
+            print(
+                f"    {setup:24} mrr {g.get('mrr')}  hit@1 {g.get('hit@1')}  hit@5 {g.get('hit@5')}"
+                f"  recall@10 {g.get('recall@10')}  distractors@5 {g.get('distractors@5')}"
+            )
 
 
 # ----------------------------------------------------------------- the model as judge

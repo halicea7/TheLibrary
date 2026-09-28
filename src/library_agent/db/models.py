@@ -465,6 +465,27 @@ class ClusterClaim(Base):
     text: Mapped[str] = mapped_column(Text)
 
 
+class ClaimAnchor(Base):
+    """A Tier 1 claim tied to the passage of its own section that supports it. See
+    library/anchors.py for how and what the states mean."""
+
+    __tablename__ = "claim_anchor"
+
+    artifact_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("artifact.id", ondelete="CASCADE"), primary_key=True
+    )
+    claim_index: Mapped[int] = mapped_column(Integer, primary_key=True)
+    claim_hash: Mapped[str] = mapped_column(String(32), index=True)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document.id", ondelete="CASCADE"), index=True
+    )
+    chunk_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("chunk.id", ondelete="CASCADE"), default=None
+    )
+    similarity: Mapped[float | None] = mapped_column(Float, default=None)
+    state: Mapped[str] = mapped_column(String(12), index=True)
+
+
 class Citation(Base):
     """Reference edges between documents. Free structure: no generation involved."""
 

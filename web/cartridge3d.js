@@ -774,44 +774,17 @@ export function mountRack(canvas, handlers = {}) {
   const renderer = makeRenderer(canvas);
   const scene = new THREE.Scene();
   environment(renderer).then(env => { scene.environment = env; wake(); });
-  const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 60); camera.position.set(0, 1.8, 6.8); camera.lookAt(0, 0.62, 0);
+  // Framed on what the rack is for: the cartridge and the pedestal's capital it drops
+  // into. The drum below, with the token cassette behind its panel, falls out of frame.
+  const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 60); camera.position.set(0, 1.9, 6.4); camera.lookAt(0, 0.7, 0);
   lights(scene);
   const backplate = refractionPlate(renderer, new THREE.PlaneGeometry(12, 8)); backplate.material.color.copy(panelBg()); backplate.position.set(0, 2, -2.2); scene.add(backplate);
-  // the socket: a pedestal -- stepped base, fluted drum, a Doric capital whose abacus
-  // carries the bronze mouth the cartridge drops into, a gilt fillet at the lip. Stone
-  // by the room: limestone by day, basalt by night.
-  const socket = new THREE.Group(); socket.scale.setScalar(.9); scene.add(socket);
-  const stone = new THREE.MeshStandardMaterial({ color: 0x1c2027, roughness: .82, metalness: .05, normalMap: grainNormal(), normalScale: new THREE.Vector2(.25, .25) });
-  const bronze = new THREE.MeshStandardMaterial({ color: 0x6b4a26, roughness: .38, metalness: .95 });
-  const gilt = new THREE.MeshStandardMaterial({ color: 0xc9a24e, roughness: .28, metalness: 1 });
-  const TOP = 0;                                   // the slot's mouth sits at y = 0
-  const add = (geo, mat, y, cast = true) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.castShadow = cast; m.receiveShadow = true; socket.add(m); return m; };
-  const slab = (w, h, d, r = .04) => { const g = new THREE.ExtrudeGeometry(roundedRect(w, d, r), { depth: h, bevelEnabled: true, bevelThickness: .015, bevelSize: .015, bevelSegments: 2 }); g.rotateX(-Math.PI / 2); g.translate(0, 0, 0); return g; };
-  // base: two steps
-  add(slab(3.1, .14, 1.9), stone, TOP - 1.02);
-  add(slab(2.75, .12, 1.65), stone, TOP - .88);
-  // drum: twenty flutes, a scalloped section extruded upward
-  const flutes = new THREE.Shape(); const R = .95, N = 20, DEPTH = .045;
-  for (let i = 0; i <= 240; i++) { const a = i / 240 * Math.PI * 2, r = R - DEPTH * (.5 + .5 * Math.cos(a * N)); const x = Math.cos(a) * r * 1.35, y = Math.sin(a) * r * .72; i ? flutes.lineTo(x, y) : flutes.moveTo(x, y); }
-  const drum = new THREE.ExtrudeGeometry(flutes, { depth: .5, bevelEnabled: false }); drum.rotateX(-Math.PI / 2);
-  add(drum, stone, TOP - .76);
-  // capital: an echinus (the flare) and the abacus slab
-  const echinus = new THREE.LatheGeometry([new THREE.Vector2(.9, 0), new THREE.Vector2(1.0, .05), new THREE.Vector2(1.12, .1), new THREE.Vector2(1.2, .14)], 48);
-  const ech = add(echinus, stone, TOP - .27); ech.scale.set(1.3, 1, .72);
-  add(slab(2.9, .13, 1.7, .03), stone, TOP - .13);
-  // the mouth: a bronze frame around the slot, the slot itself dark
-  const rim = new THREE.Shape(); const fw = W * .5 + .26, fd = D * .5 + .26; rim.moveTo(-fw / 2, -fd / 2); rim.lineTo(fw / 2, -fd / 2); rim.lineTo(fw / 2, fd / 2); rim.lineTo(-fw / 2, fd / 2); rim.closePath();
-  const hole = new THREE.Path(); const hw = W * .5 + .1, hd = D * .5 + .1; hole.moveTo(-hw / 2, -hd / 2); hole.lineTo(-hw / 2, hd / 2); hole.lineTo(hw / 2, hd / 2); hole.lineTo(hw / 2, -hd / 2); hole.closePath(); rim.holes.push(hole);
-  const mouth = new THREE.ExtrudeGeometry(rim, { depth: .05, bevelEnabled: true, bevelThickness: .012, bevelSize: .012, bevelSegments: 2 }); mouth.rotateX(-Math.PI / 2);
-  add(mouth, bronze, TOP - .005);
-  add(new THREE.BoxGeometry(hw, .3, hd), new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1 }), TOP - .15, false);
-  // the gilt fillet: a thin ring around the abacus edge, and one at the foot of the drum
-  const fillet = (w, d, y) => { const s = new THREE.Shape(); s.moveTo(-w / 2, -d / 2); s.lineTo(w / 2, -d / 2); s.lineTo(w / 2, d / 2); s.lineTo(-w / 2, d / 2); s.closePath(); const h = new THREE.Path(); h.moveTo(-w / 2 + .05, -d / 2 + .05); h.lineTo(-w / 2 + .05, d / 2 - .05); h.lineTo(w / 2 - .05, d / 2 - .05); h.lineTo(w / 2 - .05, -d / 2 + .05); h.closePath(); s.holes.push(h); const g = new THREE.ExtrudeGeometry(s, { depth: .025, bevelEnabled: false }); g.rotateX(-Math.PI / 2); add(g, gilt, y, false); };
-  fillet(2.9, 1.7, TOP - .005); fillet(2.75, 1.65, TOP - .76);
-  // a gilt band along the abacus face, the one line of gold you read from across the room
-  add(new THREE.BoxGeometry(2.92, .03, 1.72), gilt, TOP - .10, false);
-  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.1), new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false, opacity: .8 }));
-  shadow.rotation.x = -Math.PI / 2; shadow.position.y = TOP + .06; socket.add(shadow);
+  // the socket: the connector pedestal -- stepped base, a fluted drum stretched to house
+  // the token cassette behind its closed service panel, a Doric capital whose abacus
+  // carries the bronze mouth the cartridge drops into. Stone by the room: limestone by
+  // day, basalt by night. The same object the bay opens.
+  const cp = connectorPedestal(); scene.add(cp.group);
+  const stone = cp.stone, shadow = cp.shadow;
   // stone follows the room
   const dayStone = new THREE.Color(0xcfc3a6), nightStone = new THREE.Color(0x15171a);
   const restone = () => { const bg = panelBg(); const hsl = {}; bg.getHSL(hsl); stone.color.copy(hsl.l > .5 ? dayStone : nightStone); stone.roughness = hsl.l > .5 ? .9 : .82; };
@@ -1010,7 +983,7 @@ function refinedLabelSurface(material) {
 /* ── the connector bay ─────────────────────────────────────────────────── */
 // The rack's own pedestal, with its drum divided at the centre plane so the front half
 // comes away as a service panel. From the connector bay study (2026-09-24).
-export function bayPedestal(){
+function bayPedestal(){
   const socket = new THREE.Group(); socket.scale.setScalar(.9);
   const stone = new THREE.MeshStandardMaterial({ color: 0x1c2027, roughness: .82, metalness: .05, normalMap: grainNormal(), normalScale: new THREE.Vector2(.25, .25) });
   const bronze = new THREE.MeshStandardMaterial({ color: 0x6b4a26, roughness: .38, metalness: .95 });
@@ -1055,7 +1028,77 @@ export function bayPedestal(){
   }
   const panel=new THREE.Group();socket.add(panel);const front=new THREE.Mesh(halfGeometry(drumMesh.geometry,true),stone);front.position.copy(drumMesh.position);panel.add(front);
   const rear=halfGeometry(drumMesh.geometry,false);drumMesh.geometry.dispose();drumMesh.geometry=rear;
-  return {group:socket,panel};
+  return {group:socket,panel,shadow};
+}
+
+
+/* The connector pedestal: the rack's pedestal with its drum stretched to house a
+   machined cassette of four hex sockets behind a removable front panel. The rack shows it
+   closed; the bay opens it. Returns the pieces both need. */
+export function connectorPedestal() {
+  const ped = bayPedestal();
+  const group = new THREE.Group(); group.add(ped.group);
+  const panel = ped.panel;
+  // The drum stretched downward; capital and feet keep their profiles.
+  const stretchY = y => y >= -.26 ? y : y <= -.76 ? y - .8 : -.26 + (y + .26) * 2.6;
+  ped.group.traverse(o => {
+    if (!o.isMesh) return;
+    const a = o.geometry.attributes.position;
+    for (let i = 0; i < a.count; i++) { const y = a.getY(i) * o.scale.y + o.position.y; a.setY(i, (stretchY(y) - o.position.y) / o.scale.y); }
+    a.needsUpdate = true; o.geometry.computeVertexNormals(); o.geometry.computeBoundingSphere();
+  });
+  let stone = null;
+  ped.group.traverse(o => { if (!stone && o.isMesh && o.material?.normalMap) stone = o.material; });
+  const shadow = ped.shadow;
+  const hw = new THREE.Group(); hw.scale.setScalar(.9); group.add(hw);
+  const mats = [], texts = [];
+  const mk = (M, o) => { const m = new M(o); mats.push(m); return m; };
+  const graphite = mk(THREE.MeshStandardMaterial, { color: 0x252a2d, metalness: .65, roughness: .48 });
+  const gasket = mk(THREE.MeshStandardMaterial, { color: 0x080b0d, roughness: .92 });
+  const satinM = mk(THREE.MeshStandardMaterial, { color: 0x626c72, metalness: .85, roughness: .42 });
+  const dark = mk(THREE.MeshStandardMaterial, { color: 0x0c161c, roughness: .75 });
+  const gold = mk(THREE.MeshStandardMaterial, { color: 0xd4af68, metalness: .85, roughness: .3 });
+  const box = (w, h, d, x, y, z, mat, parent = hw) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); parent.add(m); return m; };
+  const precise = (shape, depth, mat, bevel = .003) => new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 3 }), mat);
+  const hex = r => { const sh = new THREE.Shape(); for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; i ? sh.lineTo(Math.cos(a) * r, Math.sin(a) * r) : sh.moveTo(Math.cos(a) * r, Math.sin(a) * r); } sh.closePath(); return sh; };
+  function label(str, w, h, x, y, z, parent = hw) {
+    const c = document.createElement('canvas'); c.width = 1024; c.height = 128; const g = c.getContext('2d');
+    g.fillStyle = '#adc4bc'; g.font = '500 64px monospace'; g.textAlign = 'center'; g.fillText(str, 512, 87, 1000);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; texts.push(t);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mk(THREE.MeshBasicMaterial, { map: t, transparent: true, depthWrite: false })); m.position.set(x, y, z); parent.add(m); return m;
+  }
+  box(1.82, 1.20, .055, 0, -.91, .025, gasket);
+  const face = new THREE.Shape(); face.moveTo(-.89, -1.49); face.lineTo(.89, -1.49); face.lineTo(.89, -.33); face.lineTo(-.89, -.33); face.closePath();
+  const at = i => [i % 2 ? .47 : -.47, i < 2 ? -.65 : -1.18];
+  for (let i = 0; i < 4; i++) { const [x, y] = at(i), h = new THREE.Path(); hex(.25).getPoints().forEach((p, j) => j ? h.lineTo(p.x + x, p.y + y) : h.moveTo(p.x + x, p.y + y)); face.holes.push(h); }
+  const fascia = precise(face, .065, graphite, .009); fascia.position.z = .155; hw.add(fascia);
+  label('INTERFACE  /  04', .56, .035, 0, -.383, .226); label('HOT SWAP    •    CONNECTOR ARRAY', .75, .025, 0, -1.451, .226);
+  for (const x of [-.83, .83]) for (const y of [-.395, -1.425]) {
+    const head = new THREE.Mesh(new THREE.CylinderGeometry(.018, .018, .007, 24), satinM); head.rotation.x = Math.PI / 2; head.position.set(x, y, .226); hw.add(head);
+    box(.020, .003, .002, x, y, .231, gasket);
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(.027, .006, 8, 24), graphite); collar.position.set(x, y, .63); panel.add(collar);
+  }
+  for (const x of [-.13, .13]) box(.08, .025, .018, x, -1.45, .672, satinM, panel);
+  label('PULL TO SERVICE', .54, .055, 0, -1.32, .677, panel);
+  box(.006, .88, .002, 0, -.925, .223, gasket);
+  for (const side of [-1, 1]) for (let i = 0; i < 7; i++) box(.055, .008, .002, side * .8, -.82 - i * .032, .223, gasket);
+  const sockets = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = at(i);
+    const bed = precise(hex(.249), .025, gasket); bed.position.set(x, y, .085); hw.add(bed); bed.userData.slot = i;
+    const ring = hex(.256); ring.holes.push(new THREE.Path(hex(.244).getPoints())); const rim = precise(ring, .012, satinM, .002); rim.position.set(x, y, .218); hw.add(rim);
+    const liner = hex(.244); liner.holes.push(new THREE.Path(hex(.230).getPoints())); const wall = precise(liner, .105, dark, .002); wall.position.set(x, y, .108); hw.add(wall);
+    box(.15, .05, .012, x, y - .13, .120, graphite);
+    for (let p = 0; p < 6; p++) box(.010, .032, .005, x - .050 + p * .02, y - .13, .130, gold);
+    for (const side of [-1, 1]) box(.018, .07, .016, x + side * .212, y, .176, satinM);
+    const light = mk(THREE.MeshStandardMaterial, { color: 0x24434b, emissive: 0x000000 }); box(.046, .009, .004, x + .17, y - .25, .225, light);
+    label('0' + (i + 1) + ' / LINK', .16, .024, x - .12, y - .25, .227);
+    sockets.push({ x, y, bed, light });
+  }
+  return {
+    group, panel, hw, sockets, stone, shadow,
+    dispose() { texts.forEach(t => t.dispose()); mats.forEach(m => m.dispose()); group.traverse(o => o.geometry?.dispose?.()); },
+  };
 }
 
 // Shared with token3d.js: one renderer set-up, one studio light, one environment.

@@ -543,13 +543,17 @@ select, .toggle {
 .tok-count { font:10.5px/1 var(--mono); color:var(--faint); letter-spacing:.04em; margin-left:auto; }
 .tok-count b { color:var(--fg); font-weight:500; }
 .tok-row { display:flex; gap:8px; margin:6px 0 10px; cursor:pointer; }
-.tok-row .hx { width:26px; height:23px; clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); background:var(--rule-soft); position:relative; }
-.tok-row .hx::after { content:""; position:absolute; inset:2px; clip-path:inherit; background:var(--sunk); }
-.tok-row .hx[data-on="true"] { background:var(--c); box-shadow:0 0 10px var(--c); }
-.tok-row .hx[data-on="true"]::after { background:color-mix(in srgb, var(--c) 30%, var(--panel)); }
-.tok-row .hx[data-err="true"] { background:var(--amber); }
-.drawer.bay { width:min(1120px, 96vw); height:min(720px, 92vh); }
-.bay-b { display:grid; grid-template-columns:minmax(0,1fr) 380px; min-height:0; }
+/* A socket: a hex ring (lit in the token's rim colour when it is live, amber when it
+   needs a connection) holding the token's face -- its body colour and its logo. */
+.tok-row .sk { display:inline-block; }
+.tok-row .sk[data-on="true"] { filter:drop-shadow(0 0 5px var(--ring)); }
+.tok-row .hx { display:block; width:30px; height:26px; clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); background:var(--ring, var(--rule-soft)); position:relative; }
+.tok-row .hx .b { position:absolute; inset:2px; clip-path:inherit; background:var(--c, var(--sunk)); }
+.tok-row .hx .b::before { content:""; position:absolute; inset:0; background:linear-gradient(160deg, rgba(255,255,255,.28), transparent 45%, rgba(0,0,0,.35)); }
+.tok-row .hx i { position:absolute; inset:4px 6px; background:var(--lc); -webkit-mask:var(--m) center / contain no-repeat; mask:var(--m) center / contain no-repeat; }
+.tok-row .hx[data-finish="holo"] i { background:conic-gradient(from 40deg, #e9a3c9, #a3d9e9, #c9e9a3, #e9d9a3, #e9a3c9); }
+.drawer.bay { width:min(1440px, 97vw); height:min(900px, 94vh); }
+.bay-b { display:grid; grid-template-columns:minmax(0,1fr) 460px; min-height:0; }
 .bay-stage { position:relative; min-height:0; background:radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--rule) 60%, transparent), transparent 70%); }
 .bay-stage canvas { width:100%; height:100%; display:block; }
 .bay-stage .views { position:absolute; left:14px; bottom:12px; display:flex; gap:8px; }
@@ -568,7 +572,7 @@ select, .toggle {
 .tok-card .acts button, .tok-cust .acts button { font:11.5px/1 var(--sans); padding:6px 10px; border-radius:3px; border:1px solid var(--rule); background:transparent; color:var(--dim); cursor:pointer; }
 .tok-card .acts button:hover, .tok-cust .acts button:hover { color:var(--fg); border-color:var(--faint); }
 .tok-card .acts button.go, .tok-cust .acts button.go { background:var(--gilt); border-color:var(--gilt); color:var(--bg); font-weight:600; }
-.tok-cust canvas { width:100%; height:230px; display:block; border-radius:4px; background:radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--rule) 70%, transparent), transparent 75%); }
+.tok-cust canvas { width:100%; height:min(46vh, 420px); display:block; border-radius:4px; background:radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--rule) 70%, transparent), transparent 75%); }
 .tok-cust .views { display:flex; gap:10px; margin:4px 0 8px; }
 .tok-cust details { border-bottom:1px solid var(--rule-soft); padding:8px 0; }
 .tok-cust summary { cursor:pointer; color:var(--fg); font:600 12px/1.4 var(--sans); }
@@ -1952,11 +1956,46 @@ async function loadTokens() {
   const bySocket = Array.from({ length: tokens.sockets }, (_, i) => tokens.list.find(m => m.socket === i) || null);
   const on = bySocket.filter(Boolean).length;
   $('#tok-count').innerHTML = `Active tokens <b>${on}/${tokens.sockets}</b>`;
+  const faces = await Promise.all(bySocket.map(m => m ? tokenFace(tokenDesign(m)) : null));
   $('#tok-row').innerHTML = bySocket.map((m, i) => {
-    const c = m ? tokenDesign(m).rimColor : '';
-    return `<span class="hx" data-on="${!!m && m.configured}" data-err="${!!m && !m.configured}" style="--c:${esc(c)}" title="${m ? `${esc(m.name)} in socket ${i + 1}${m.configured ? '' : ' — not configured yet'}` : `Socket ${i + 1}: empty`}"></span>`;
+    const f = faces[i];
+    const ring = !m ? '' : m.configured ? f.rim : 'var(--amber)';
+    return `<span class="sk" data-on="${!!m}" style="--ring:${esc(ring)}" title="${m ? `${esc(m.name)} in socket ${i + 1}${m.configured ? '' : ' — needs its connection'}` : `Socket ${i + 1}: empty`}">
+      <span class="hx" ${f ? `data-finish="${esc(f.finish)}"` : ''}><span class="b" ${f ? `style="--c:${esc(f.body)}"` : ''}>${f ? `<i style="--lc:${esc(f.logo)};--m:url('${f.mask}')"></i>` : ''}</span></span></span>`;
   }).join('');
   if (tokens.bay) { bayRender(); tokens.bay.setSockets(bayWants()); }
+}
+// A token's face, for the sidebar: its body colour by material, its logo's finish, and
+// its logo as an alpha mask (the stored mask is white-on-black; CSS masks read alpha).
+const faceMasks = new Map();
+function linkMarkUrl() {
+  const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
+  g.strokeStyle = '#fff'; g.lineWidth = 29; g.lineCap = 'round'; g.scale(.5, .5);
+  g.beginPath(); g.moveTo(175, 180); g.lineTo(145, 180); g.bezierCurveTo(65, 180, 65, 332, 145, 332); g.lineTo(205, 332); g.lineWidth = 58; g.stroke();
+  g.beginPath(); g.moveTo(337, 332); g.lineTo(367, 332); g.bezierCurveTo(447, 332, 447, 180, 367, 180); g.lineTo(307, 180); g.stroke();
+  g.beginPath(); g.moveTo(190, 256); g.lineTo(322, 256); g.stroke();
+  return c.toDataURL();
+}
+function alphaMask(src) {
+  if (!src) return Promise.resolve(faceMasks.get('') || (faceMasks.set('', linkMarkUrl()), faceMasks.get('')));
+  if (faceMasks.has(src)) return Promise.resolve(faceMasks.get(src));
+  return new Promise(ok => {
+    const img = new Image();
+    img.onload = () => {
+      const n = 96, c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d');
+      g.drawImage(img, 0, 0, n, n); const px = g.getImageData(0, 0, n, n);
+      for (let i = 0; i < px.data.length; i += 4) { const l = px.data[i]; px.data[i] = px.data[i + 1] = px.data[i + 2] = 255; px.data[i + 3] = l; }
+      g.putImageData(px, 0, 0); const url = c.toDataURL(); faceMasks.set(src, url); ok(url);
+    };
+    img.onerror = () => ok(alphaMask(null));
+    img.src = src;
+  });
+}
+async function tokenFace(d) {
+  const body = d.material === 'gold' ? '#d4aa55' : d.color;
+  const logo = { gold: '#eac477', chrome: '#d6e1eb', holo: '#c9d9e9', color: d.logoColor }[d.logoFinish]
+    || `color-mix(in srgb, ${d.color} 70%, white)`;
+  return { body, logo, finish: d.logoFinish, rim: d.rimColor, mask: await alphaMask(d.mask) };
 }
 function bayWants() {
   return Array.from({ length: tokens.sockets }, (_, i) => {
@@ -1972,7 +2011,7 @@ function bayOpen() {
   box.innerHTML = `<div class="drawer-h"><h2>The bay</h2><span class="n" id="bay-n"></span><button class="linkish x" onclick="bayClose()">close</button></div>
     <div class="bay-b"><div class="bay-stage"><canvas id="bay-canvas" aria-label="The pedestal's bay. Drag to turn; click an open socket to seat the chosen token."></canvas>
       <div class="hint" id="bay-hint">Opening the panel…</div>
-      <div class="views"><button class="linkish" onclick="tokens.bay?.front()">front</button><button class="linkish" onclick="tokens.bay?.angle()">three-quarter</button></div></div>
+      <div class="views"><span class="linkish" style="cursor:default">drag to turn · scroll to zoom</span></div></div>
     <div class="bay-side"><div class="bay-tabs" role="tablist">
       <button role="tab" id="bay-t-seat" onclick="bayTab('seat')">Seat</button>
       <button role="tab" id="bay-t-cust" onclick="bayTab('cust')">Customize</button>
@@ -2057,6 +2096,10 @@ async function tokenOut(id) {
 
 // Customize: the token turning in a close view, and every part of it.
 function custOpen(id) { tokens.edit = id; tokens.draft = null; tokens.image = null; if (!tokens.els) bayOpen(); bayTab('cust'); }
+function custStop() {
+  const m = tokens.list.find(x => x.id === tokens.edit) || {};
+  tokens.view?.state(m.socket !== null && m.socket !== undefined ? (m.configured ? 'ready' : 'error') : 'off');
+}
 function custClose() { tokens.view?.dispose(); tokens.view = null; }
 function custRender() {
   const m = tokens.list.find(x => x.id === tokens.edit) || tokens.list[0];
@@ -2072,8 +2115,9 @@ function custRender() {
   $('#bay-pane').innerHTML = `<div class="tok-cust">
     <label>Token<select id="cust-which">${tokens.list.map(x => `<option value="${x.id}" ${x.id === m.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
     <canvas id="cust-canvas" title="Drag to turn it"></canvas>
-    <div class="views">${['front', 'angle', 'edge', 'back'].map(v => `<button class="linkish" onclick="tokens.view?.view('${v}')">${v === 'angle' ? 'three-quarter' : v === 'back' ? 'back · solar' : v}</button>`).join('')}
-      <button class="linkish" onclick="tokens.view?.state('connecting')" title="Play the connection sequence">connect</button></div>
+    <div class="views"><button class="linkish" onclick="tokens.view?.state('connecting', { loop: true })" title="Run the connection sweep until stopped">connect</button>
+      <button class="linkish" onclick="custStop()" title="Stop the sweep: back to its real state">stop</button>
+      <span class="linkish" style="cursor:default;margin-left:auto">drag to turn · scroll to zoom</span></div>
     <details open><summary>Identity</summary>
       <label>Name<input type="text" data-k="name" maxlength="24" value="${esc(d.name)}"></label>
       <label>Serial<input type="text" data-k="serial" maxlength="16" value="${esc(d.serial)}"></label>

@@ -15,7 +15,7 @@
  * traced mask (a PNG, white raised), never the uploaded image. */
 import * as THREE from 'three';
 import { makeMask, contours } from './tokenmask.js';
-import { environment, makeRenderer, lights, refractionPlate, bayPedestal } from './cartridge3d.js';
+import { environment, makeRenderer, lights, refractionPlate, connectorPedestal } from './cartridge3d.js';
 
 export const SOCKETS = 4;
 export const DEFAULT_DESIGN = Object.freeze({
@@ -337,10 +337,11 @@ export function makeToken({ anisotropy = 8 } = {}) {
   }
 
   // Connection: off, connecting (the guides light one by one), ready, error.
-  let conn = 'off', connAt = 0;
+  let conn = 'off', connAt = 0, looping = false;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   function applyConnection(now = performance.now()) {
-    const elapsed = now - connAt;
+    // A looping sweep (the customizer's connect) runs until stopped; one sweep otherwise.
+    const elapsed = looping ? (now - connAt) % 2100 : now - connAt;
     guides.forEach((g, i) => {
       g.visible = !!d.rim;
       const hue = conn === 'error' ? d.errorColor : d.rimColor, m = guideMats[i];
@@ -359,10 +360,10 @@ export function makeToken({ anisotropy = 8 } = {}) {
       if (logo) rebuildLogo(); else scatterFlakes();
       return applyMask().then(() => { applyFinishes(); });
     },
-    /** 'off' | 'connecting' | 'ready' | 'error' */
-    state(s) { conn = s; connAt = performance.now(); applyConnection(); },
+    /** 'off' | 'connecting' | 'ready' | 'error'; `loop` keeps a connecting sweep going. */
+    state(s, { loop = false } = {}) { conn = s; looping = loop && s === 'connecting'; connAt = performance.now(); applyConnection(); },
     /** Advance the connecting sweep; true while it still wants frames. */
-    tick(now) { if (conn !== 'connecting') return false; applyConnection(now); return now - connAt < 2200; },
+    tick(now) { if (conn !== 'connecting') return false; applyConnection(now); return looping || now - connAt < 2200; },
     onChange(fn) { onChange = fn; },
     dispose() {
       if (logo) logo.geometry.dispose();
@@ -433,86 +434,49 @@ function drag(canvas, target, wake, { pitch = [-.9, .9] } = {}) {
 
 /* ── the customizer's view of one token ──────────────────────────────── */
 export function mountToken(canvas) {
-  const v = viewport(canvas);
+  const v = viewport(canvas, { z: 7.4 });
   const tok = makeToken({ anisotropy: v.renderer.capabilities.getMaxAnisotropy() });
   tok.group.rotation.set(-.3, -.4, 0); v.scene.add(tok.group); tok.onChange(v.wake);
-  const d = drag(canvas, tok.group, v.wake);
+  const d = drag(canvas, tok.group, v.wake, { pitch: [-Math.PI, Math.PI] });
+  // Close enough to read the identity strip and the etched planets on the back.
+  let dist = 7.4;
+  const unzoom = zoomer(canvas, () => dist, x => { dist = x; v.camera.position.z = x; }, [2.2, 12], v.wake);
   v.frames(now => tok.tick(now));
-  const VIEWS = { front: [0, 0], angle: [-.3, -.4], edge: [-.15, 1.2], back: [.16, Math.PI - .22] };
   return {
     set(design) { const p = tok.set(design); v.wake(); return p; },
-    state(s) { tok.state(s); v.wake(); },
-    view(name) { const [x, y] = VIEWS[name] || VIEWS.angle; tok.group.rotation.set(x, y, 0); v.wake(); },
-    dispose() { d.off(); tok.dispose(); v.dispose(); },
+    state(s, opts) { tok.state(s, opts); v.wake(); },
+    dispose() { d.off(); unzoom(); tok.dispose(); v.dispose(); },
   };
 }
 
-/* ── the bay: the pedestal, its panel, four sockets ──────────────────── */
+/* ── zoom: the wheel (and a trackpad pinch) moves the camera in and out ── */
+function zoomer(canvas, get, set, [near, far], wake) {
+  const onWheel = e => {
+    e.preventDefault();
+    const k = Math.exp((e.ctrlKey ? e.deltaY * 3 : e.deltaY) * .0012);
+    set(THREE.MathUtils.clamp(get() * k, near, far)); wake();
+  };
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+  return () => canvas.removeEventListener('wheel', onWheel);
+}
+
+/* ── the bay: the connector pedestal, its panel, four sockets ────────── */
 export function mountBay(canvas, { onSocket = () => {} } = {}) {
-  const v = viewport(canvas, { fov: 36, z: 6.8 });
+  const v = viewport(canvas, { fov: 34, z: 5.2 });
   v.renderer.setClearColor(0x000000, 0);
-  const assembly = new THREE.Group(); assembly.rotation.y = -.22; v.scene.add(assembly);
-  const ped = bayPedestal(); assembly.add(ped.group); const panel = ped.panel;
-  // The drum stretched downward to house the sockets; capital and feet keep their profiles.
-  const stretchY = y => y >= -.26 ? y : y <= -.76 ? y - .8 : -.26 + (y + .26) * 2.6;
-  ped.group.traverse(o => {
-    if (!o.isMesh) return;
-    const a = o.geometry.attributes.position;
-    for (let i = 0; i < a.count; i++) { const y = a.getY(i) * o.scale.y + o.position.y; a.setY(i, (stretchY(y) - o.position.y) / o.scale.y); }
-    a.needsUpdate = true; o.geometry.computeVertexNormals(); o.geometry.computeBoundingSphere();
-  });
-  const hw = new THREE.Group(); hw.scale.setScalar(.9); assembly.add(hw);
-  const mats = [];
-  const mk = (M, o) => { const m = new M(o); mats.push(m); return m; };
-  const graphite = mk(THREE.MeshStandardMaterial, { color: 0x252a2d, metalness: .65, roughness: .48 });
-  const gasket = mk(THREE.MeshStandardMaterial, { color: 0x080b0d, roughness: .92 });
-  const satinM = mk(THREE.MeshStandardMaterial, { color: 0x626c72, metalness: .85, roughness: .42 });
-  const dark = mk(THREE.MeshStandardMaterial, { color: 0x0c161c, roughness: .75 });
-  const gold = mk(THREE.MeshStandardMaterial, { color: 0xd4af68, metalness: .85, roughness: .3 });
-  const box = (w, h, dd, x, y, z, mat, parent = hw) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd), mat); m.position.set(x, y, z); parent.add(m); return m; };
-  const precise = (shape, depth, mat, bevel = .003) => new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 3 }), mat);
-  const hex = r => { const s = new THREE.Shape(); for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; i ? s.lineTo(Math.cos(a) * r, Math.sin(a) * r) : s.moveTo(Math.cos(a) * r, Math.sin(a) * r); } s.closePath(); return s; };
-  const texts = [];
-  function label(str, w, h, x, y, z, parent = hw) {
-    const c = document.createElement('canvas'); c.width = 1024; c.height = 128; const g = c.getContext('2d');
-    g.fillStyle = '#adc4bc'; g.font = '500 64px monospace'; g.textAlign = 'center'; g.fillText(str, 512, 87, 1000);
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; texts.push(t);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mk(THREE.MeshBasicMaterial, { map: t, transparent: true, depthWrite: false })); m.position.set(x, y, z); parent.add(m); return m;
-  }
-  // The machined cassette: four hex openings, deep liners, gold contacts, status lights.
-  box(1.82, 1.20, .055, 0, -.91, .025, gasket);
-  const faceShape = new THREE.Shape(); faceShape.moveTo(-.89, -1.49); faceShape.lineTo(.89, -1.49); faceShape.lineTo(.89, -.33); faceShape.lineTo(-.89, -.33); faceShape.closePath();
-  const at = i => [i % 2 ? .47 : -.47, i < 2 ? -.65 : -1.18];
-  for (let i = 0; i < SOCKETS; i++) { const [x, y] = at(i), h = new THREE.Path(); hex(.25).getPoints().forEach((p, j) => j ? h.lineTo(p.x + x, p.y + y) : h.moveTo(p.x + x, p.y + y)); faceShape.holes.push(h); }
-  const fascia = precise(faceShape, .065, graphite, .009); fascia.position.z = .155; hw.add(fascia);
-  label('INTERFACE  /  04', .56, .035, 0, -.383, .226); label('HOT SWAP    •    CONNECTOR ARRAY', .75, .025, 0, -1.451, .226);
-  for (const x of [-.83, .83]) for (const y of [-.395, -1.425]) {
-    const head = new THREE.Mesh(new THREE.CylinderGeometry(.018, .018, .007, 24), satinM); head.rotation.x = Math.PI / 2; head.position.set(x, y, .226); hw.add(head);
-    box(.020, .003, .002, x, y, .231, gasket);
-    const collar = new THREE.Mesh(new THREE.TorusGeometry(.027, .006, 8, 24), graphite); collar.position.set(x, y, .63); panel.add(collar);
-  }
-  for (const x of [-.13, .13]) box(.08, .025, .018, x, -1.45, .672, satinM, panel);
-  label('PULL TO SERVICE', .54, .055, 0, -1.32, .677, panel);
-  box(.006, .88, .002, 0, -.925, .223, gasket);
-  for (const side of [-1, 1]) for (let i = 0; i < 7; i++) box(.055, .008, .002, side * .8, -.82 - i * .032, .223, gasket);
-  const hits = [], slots = [];
-  for (let i = 0; i < SOCKETS; i++) {
-    const [x, y] = at(i);
-    const bed = precise(hex(.249), .025, gasket); bed.position.set(x, y, .085); hw.add(bed); bed.userData.slot = i; hits.push(bed);
-    const ring = hex(.256); ring.holes.push(new THREE.Path(hex(.244).getPoints())); const rim = precise(ring, .012, satinM, .002); rim.position.set(x, y, .218); hw.add(rim);
-    const liner = hex(.244); liner.holes.push(new THREE.Path(hex(.230).getPoints())); const wall = precise(liner, .105, dark, .002); wall.position.set(x, y, .108); hw.add(wall);
-    box(.15, .05, .012, x, y - .13, .120, graphite);
-    for (let p = 0; p < 6; p++) box(.010, .032, .005, x - .050 + p * .02, y - .13, .130, gold);
-    for (const side of [-1, 1]) box(.018, .07, .016, x + side * .212, y, .176, satinM);
-    const light = mk(THREE.MeshStandardMaterial, { color: 0x24434b, emissive: 0x000000 }); box(.046, .009, .004, x + .17, y - .25, .225, light);
-    label('0' + (i + 1) + ' / LINK', .16, .024, x - .12, y - .25, .227);
-    slots.push({ x, y, token: null, key: null, state: 'empty', t: 0, light, colour: '#54d6db' });
-  }
+  const assembly = new THREE.Group(); assembly.rotation.y = -.18; v.scene.add(assembly);
+  const cp = connectorPedestal(); assembly.add(cp.group);
+  const panel = cp.panel, hw = cp.hw;
+  const hits = cp.sockets.map(s => s.bed);
+  const slots = cp.sockets.map(s => ({ x: s.x, y: s.y, token: null, key: null, state: 'empty', t: 0, light: s.light, colour: '#54d6db' }));
   // The panel: closed, opening (it comes forward, slides aside and turns), open, closing.
   let panelState = 'closed', panelAt = 0;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const ease = t => t * t * (3 - 2 * t), clamp = t => Math.max(0, Math.min(1, t));
-  const d = drag(canvas, assembly, v.wake, { pitch: [-.4, .4] });
+  const d = drag(canvas, assembly, v.wake, { pitch: [-.5, .5] });
+  // Distance from the cassette: the wheel brings it close enough to read the contacts.
+  let dist = 5.2;
+  const unzoom = zoomer(canvas, () => dist, x => { dist = x; }, [1.6, 9], v.wake);
   const ray = new THREE.Raycaster();
   const click = e => {
     if (d.moved() > 5 || panelState !== 'open') return;
@@ -558,9 +522,10 @@ export function mountBay(canvas, { onSocket = () => {} } = {}) {
       }
       if (s.token && s.token.tick(now)) busy = true;
     }
-    // The camera eases back as the panel slides aside, so all four sockets are in view.
+    // Aim at the cassette; as the panel slides aside the view eases toward the sockets.
     const open = Math.abs(panel.position.x) / 1.85;
-    v.camera.position.set(-.32 * open, .95, 6.8 + 1.6 * open); v.camera.lookAt(-.32 * open, -.18, 0);
+    const tx = -.12 * open, ty = -.62 + .3 * (1 - open);
+    v.camera.position.set(tx, ty + .55 * dist / 5.2, dist); v.camera.lookAt(tx, ty, 0);
     return busy;
   });
   return {
@@ -590,12 +555,10 @@ export function mountBay(canvas, { onSocket = () => {} } = {}) {
       });
       v.wake();
     },
-    front() { assembly.rotation.set(0, 0, 0); v.wake(); },
-    angle() { assembly.rotation.set(-.07, -.32, 0); v.wake(); },
     dispose() {
-      canvas.removeEventListener('pointerup', click); d.off();
+      canvas.removeEventListener('pointerup', click); d.off(); unzoom();
       for (const s of slots) s.token?.dispose();
-      texts.forEach(t => t.dispose()); mats.forEach(m => m.dispose());
+      cp.dispose();
       v.dispose();
     },
   };

@@ -6,7 +6,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -209,9 +209,20 @@ async def run_turn(
             from library_agent.modules.consult import consult as consult_modules
 
             remote_chat = providers.is_remote(model)
+            # Clearance is per operation: on a remote provider only the operations cleared
+            # for any model are offered; a token with none left is held back whole.
             usable, held_back = [], []
             for mod, mcfg in mod_store.seated_modules():
-                (held_back if (mod.local_only and remote_chat) else usable).append((mod, mcfg))
+                ops = mod.cleared(remote_chat)
+                if ops:
+                    usable.append(
+                        (
+                            replace(mod, operations=ops) if len(ops) < len(mod.operations) else mod,
+                            mcfg,
+                        )
+                    )
+                if len(ops) < len(mod.operations):
+                    held_back.append((mod, [o.id for o in mod.operations if o not in ops]))
             if usable:
                 for lr in await consult_modules(client, model, query, usable):
                     live_hits.append(_live_hit(lr))
@@ -222,10 +233,11 @@ async def run_turn(
                         "results": [h.live for h in live_hits],
                         "held_back": [
                             {
-                                "module": m.name,
+                                "module": m.name
+                                + ("" if len(ids) == len(m.operations) else f" ({', '.join(ids)})"),
                                 "reason": "local models only; chat is on a remote provider",
                             }
-                            for m, _ in held_back
+                            for m, ids in held_back
                         ],
                     },
                 }

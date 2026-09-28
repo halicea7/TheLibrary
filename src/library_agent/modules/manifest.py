@@ -15,7 +15,7 @@ secrets are never in a manifest -- they are held beside the provider keys, 0600.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 from urllib.parse import urlparse
 
@@ -81,6 +81,9 @@ class Operation:
     # author must declare it read-only, and a server that marks it otherwise is refused.
     tool: str = ""
     read_only: bool = False
+    # Clearance for this operation alone: "local" (local models only), "any", or "" to
+    # take the token's. Lets one token keep a sensitive lookup local and share a plain one.
+    clearance: str = ""
 
     def path_params(self) -> list[str]:
         return re.findall(r"\{(\w+)\}", self.path)
@@ -147,6 +150,15 @@ class Module:
 
     def op(self, op_id: str) -> Operation | None:
         return next((o for o in self.operations if o.id == op_id), None)
+
+    def op_local_only(self, op: Operation) -> bool:
+        """Whether this operation may only run while chat is on a local model."""
+        return op.clearance == "local" if op.clearance else self.local_only
+
+    def cleared(self, remote_chat: bool) -> tuple[Operation, ...]:
+        """The operations that may run now: all of them on a local model; on a remote
+        provider, only those cleared for any model."""
+        return tuple(o for o in self.operations if not (remote_chat and self.op_local_only(o)))
 
     def token_prefix(self) -> str:
         return {"apitoken": "ApiToken ", "bearer": "Bearer "}.get(self.auth_scheme, "")
@@ -297,8 +309,14 @@ def _operation(o: dict, seen: set[str], *, mcp: bool = False) -> Operation:
     if not _ID.match(oid) or oid in seen:
         raise ManifestError(f"operation id {oid!r} must be unique, lowercase, 2-40 characters")
     seen.add(oid)
-    if mcp:
-        return _mcp_operation(o, oid)
+    clearance = o.get("clearance") or ""
+    if clearance not in ("", "local", "any"):
+        raise ManifestError(f"{oid}: clearance is local, any, or left out to take the token's")
+    op = _mcp_operation(o, oid) if mcp else _http_operation(o, oid)
+    return replace(op, clearance=clearance) if clearance else op
+
+
+def _http_operation(o: dict, oid: str) -> Operation:
     method = _s(o, "method", "GET", 8).upper()
     if method not in ("GET", "POST"):
         raise ManifestError(f"{oid}: only GET, or POST for a read-only search")
@@ -533,6 +551,7 @@ def to_dict(m: Module) -> dict:
                     "ask_when": o.ask_when,
                     "tool": o.tool,
                     "read_only": True,
+                    **({"clearance": o.clearance} if o.clearance else {}),
                     "params": params,
                     "args": dict(o.const_query),
                     "response": {
@@ -561,6 +580,8 @@ def to_dict(m: Module) -> dict:
                 "limit": o.render.limit,
             },
         }
+        if o.clearance:
+            op["clearance"] = o.clearance
         if o.method == "POST":
             op["read_only_post"] = True
             op["body"] = o.body

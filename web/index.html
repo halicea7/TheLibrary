@@ -2240,7 +2240,7 @@ function makeBlank() {
     operations: [makeBlankOp()] };
 }
 function makeBlankOp() {
-  return { id: 'search', summary: '', ask_when: '', method: 'GET', read_only_post: false, path: '/', tool: '', _params: [], _query: '', _body: '',
+  return { id: 'search', summary: '', ask_when: '', method: 'GET', read_only_post: false, path: '/', tool: '', clearance: '', _params: [], _query: '', _body: '',
     pagination: { type: 'none', param: '', size_param: '', size: 0, start: 1, cursor_path: '', max_pages: 3 },
     response: { format: 'json', rows: '', line: '{name}', empty: 'nothing matched', limit: 20 } };
 }
@@ -2292,11 +2292,11 @@ function makeManifest() {
       }
       if (mcp) {
         for (const p of Object.values(params)) { delete p.in; delete p.key; }
-        return { id: o.id, tool: o.tool, read_only: true, summary: o.summary, ask_when: o.ask_when, params,
+        return { id: o.id, tool: o.tool, read_only: true, summary: o.summary, ask_when: o.ask_when, params, ...(o.clearance ? { clearance: o.clearance } : {}),
           args: Object.fromEntries(lines(o._query).map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; }).filter(([k]) => k)),
           response: { ...o.response, format: ['json', 'text'].includes(o.response.format) ? o.response.format : 'text', limit: +o.response.limit } };
       }
-      const op = { id: o.id, summary: o.summary, ask_when: o.ask_when, method: o.method, path: o.path, params,
+      const op = { id: o.id, summary: o.summary, ask_when: o.ask_when, method: o.method, path: o.path, params, ...(o.clearance ? { clearance: o.clearance } : {}),
         query: Object.fromEntries(lines(o._query).map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; }).filter(([k]) => k)),
         response: { ...o.response, limit: +o.response.limit } };
       if (o.method === 'POST') { op.read_only_post = !!o.read_only_post; try { op.body = o._body ? JSON.parse(o._body) : {}; } catch { op.body = o._body; } }
@@ -2423,6 +2423,7 @@ function makeRender() {
       <div class="grid2">
         ${inp(`${P}.id`, 'Id', o.id, { ph: 'search_tickets' })}
         ${isMcp ? inp(`${P}.tool`, 'Tool', o.tool, { ph: 'search_issues' }) : sel(`${P}.method`, 'Method', o.method, [['GET', 'GET'], ['POST', 'POST (read-only search)']]) + inp(`${P}.path`, 'Path', o.path, { ph: '/v1/items/{id}', wide: true })}
+        ${sel(`${P}.clearance`, 'Clearance', o.clearance || '', [['', 'as the token'], ['local', 'local models only'], ['any', 'any model']], false)}
         ${inp(`${P}.summary`, 'Answers', o.summary, { ph: 'Which tickets are open for a customer', wide: true })}
         ${inp(`${P}.ask_when`, 'Ask when', o.ask_when, { ph: 'the question asks about a customer’s open tickets', wide: true })}
       </div>

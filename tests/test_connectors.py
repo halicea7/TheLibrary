@@ -491,3 +491,29 @@ def test_line_filters():
     assert format_row("{n|default:none} {missing}", row) == "none"
     assert format_row("{at|date}", row).startswith("2026-")
     assert format_row("{labels[1].name|upper}", row) == "UI"
+
+
+def test_clearance_is_per_operation():
+    d = manifest(clearance="any")
+    d["operations"].append(
+        {
+            "id": "exposure",
+            "summary": "s",
+            "ask_when": "a",
+            "path": "/x",
+            "clearance": "local",
+            "response": {"rows": "", "line": "{v}"},
+        }
+    )
+    m = from_dict(d)
+    assert not m.local_only
+    assert [o.id for o in m.cleared(remote_chat=False)] == ["items", "exposure"]
+    assert [o.id for o in m.cleared(remote_chat=True)] == ["items"]  # the sensitive one stays local
+    assert (
+        to_dict(m)["operations"][1]["clearance"] == "local"
+        and "clearance" not in to_dict(m)["operations"][0]
+    )
+    local = from_dict(manifest())  # a local-only token: nothing runs on a remote model
+    assert local.cleared(remote_chat=True) == ()
+    with pytest.raises(ManifestError, match="clearance"):
+        from_dict(manifest(op={"clearance": "public"}))

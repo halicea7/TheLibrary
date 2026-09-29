@@ -18,8 +18,10 @@ Four suites, each run once per model:
                 agrees with itself -- plus a question the library cannot answer
     write       one short composition: step timings, citations verified, claims flagged
 
-    uv run python bench/run.py --models qwen3:30b-a3b acme:some-model --runs 2
-    ./library bench --suites ask,write --cases bench/results/our-questions.json
+    ./library bench init                          # write questions from YOUR library, once
+    ./library bench                               # the chat model, every suite
+    ./library bench --models qwen3:30b-a3b acme:some-model --runs 3
+    ./library bench --suites raw,structured --models acme:new-model
 
 Everything a run measures lands in bench/results/<stamp>-<label>/: raw.jsonl (one line per
 measurement), summary.json, report.md. That directory is gitignored: results name your
@@ -31,6 +33,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import re
 import statistics
 import subprocess
@@ -40,6 +43,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import cases as cases_mod  # bench/cases.py
 import httpx
 
 from library_agent.llm import providers
@@ -270,35 +274,7 @@ JUDGE_CASES = [
 ]
 
 
-async def _sections(n: int) -> list[dict]:
-    """Sections with enough text to read, from the Information Retrieval cartridge's
-    papers -- public material, so nothing private is sent to a provider."""
-    from sqlalchemy import text
-
-    from library_agent.db.session import session_scope
-
-    async with session_scope() as db:
-        rows = (
-            await db.execute(
-                text(
-                    "select d.title, coalesce(s.path, s.title, '') as path,"
-                    " string_agg(c.text, E'\\n\\n' order by c.order_index) as body"
-                    " from section s join document d on d.id = s.document_id"
-                    " join chunk c on c.section_id = s.id and c.kind = 'text'"
-                    " where d.id in (select cd.document_id from cartridge_document cd"
-                    "   join cartridge ca on ca.id = cd.cartridge_id"
-                    "   where ca.name = 'Information Retrieval')"
-                    " group by d.title, s.path, s.title, s.id"
-                    " having sum(length(c.text)) between 1500 and 6000"
-                    " order by md5(d.title || s.id::text) limit :n"
-                ),
-                {"n": n},
-            )
-        ).all()
-    return [{"title": t, "path": p, "body": b} for t, p, b in rows]
-
-
-async def suite_structured(rec: Recorder, model: str, runs: int) -> None:
+async def suite_structured(rec: Recorder, model: str, runs: int, cases: dict) -> None:
     from library_agent.chat import compose
     from library_agent.library.contradictions import judge_cluster
     from library_agent.reading import prompts
@@ -311,7 +287,7 @@ async def suite_structured(rec: Recorder, model: str, runs: int) -> None:
             for _ in range(runs):
                 await compose._facets(c, model, b)  # falls back on failure; recorded above
         c.task = "section_reading"
-        for s in await _sections(3):
+        for s in await cases_mod.sections(cases, model):
             for _ in range(runs):
                 try:
                     out = await c.structured(
@@ -369,13 +345,6 @@ async def suite_structured(rec: Recorder, model: str, runs: int) -> None:
 
 
 # ----------------------------------------------------------------------------- ask
-
-
-DEFAULT_CASES = HERE / "cases.json"
-
-
-def load_cases(path: Path) -> dict:
-    return json.loads(path.read_text())
 
 
 async def _ask(client: httpx.AsyncClient, model: str, q: str, effort: str) -> dict:
@@ -444,11 +413,15 @@ DECLINES = (
 
 
 async def suite_ask(rec: Recorder, model: str, runs: int, cases: dict, effort: str) -> None:
+    # A hand-written set lists what a right answer must say (all of it); a generated set
+    # lists exact terms from the passage, which a right answer may phrase otherwise.
+    share = float(cases.get("terms_required", 1.0))
     async with httpx.AsyncClient(base_url=API, timeout=900) as client:
         for case in cases["questions"]:
             for i in range(runs):
                 d = await _ask(client, model, case["question"], effort)
                 low = (d.get("answer") or "").lower()
+                flat = " ".join(low.split())
                 titles = [s["title"] for s in d["sources"] if s["n"] in d.get("cited", [])]
                 rec.add(
                     suite="ask",
@@ -461,7 +434,9 @@ async def suite_ask(rec: Recorder, model: str, runs: int, cases: dict, effort: s
                     thinking_at=d["thinking_at"],
                     total=d["total"],
                     words=len(low.split()),
-                    terms_ok=all(any(t in low for t in g) for g in case["terms"]),
+                    terms_found=(found := sum(any(t in flat for t in g) for g in case["terms"])),
+                    terms_total=len(case["terms"]),
+                    terms_ok=found >= math.ceil(share * len(case["terms"])),
                     volume_ok=any(case["volume"].lower() in t.lower() for t in titles),
                     emitted=d.get("emitted", 0),
                     resolved=d.get("resolved", 0),
@@ -749,8 +724,18 @@ def report(rec: Recorder, models: list[str], meta: dict) -> str:
             [
                 ("completed", per(lambda m: rate(sum(r["ok"] for r in a(m)), len(a(m))))),
                 (
-                    "holds the terms a right answer must",
+                    "holds the key terms (all, or the set's share)",
                     per(lambda m: rate(sum(r["terms_ok"] for r in a(m)), len(a(m)))),
+                ),
+                (
+                    "key terms present, mean share",
+                    per(
+                        lambda m: (
+                            f"{100 * sum(r['terms_found'] for r in a(m)) / max(1, sum(r['terms_total'] for r in a(m))):.0f}%"
+                            if a(m)
+                            else None
+                        )
+                    ),
                 ),
                 (
                     "cites the volume it should",
@@ -836,7 +821,37 @@ async def _busy() -> str | None:
     return None
 
 
+async def _missing(cases: dict) -> list[str]:
+    from sqlalchemy import text
+
+    from library_agent.db.session import session_scope
+
+    async with session_scope() as db:
+        titles = set((await db.execute(text("select title from document"))).scalars())
+    return cases_mod.missing_volumes(cases, titles)
+
+
+async def init_main(argv: list[str]) -> None:
+    ap = argparse.ArgumentParser(
+        prog="./library bench init",
+        description="Write the benchmark's questions from this library (bench/results/cases.json).",
+    )
+    ap.add_argument("--n", type=int, default=10, help="questions to write (default 10)")
+    ap.add_argument("--cartridge", help="only from this cartridge's volumes")
+    ap.add_argument("--shelf", help="only from this shelf (and its sub-shelves)")
+    a = ap.parse_args(argv)
+    say(f"writing {a.n} questions from this library with its reader model...")
+    cases = await cases_mod.build(n=a.n, cartridge=a.cartridge, shelf=a.shelf)
+    say(
+        f"\n{len(cases['questions'])} questions -> {cases_mod.GENERATED}\n"
+        "Read them over and edit freely, then: ./library bench"
+    )
+
+
 async def main() -> None:
+    if sys.argv[1:2] == ["init"]:
+        await init_main(sys.argv[2:])
+        return
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument(
         "--models",
@@ -846,13 +861,31 @@ async def main() -> None:
     ap.add_argument("--suites", default="raw,structured,ask,write")
     ap.add_argument("--runs", type=int, default=2, help="runs per case (default 2)")
     ap.add_argument("--effort", default="normal", help="Ask's effort: quick, normal or deep")
-    ap.add_argument("--cases", type=Path, default=DEFAULT_CASES, help="questions for the ask suite")
+    ap.add_argument(
+        "--cases",
+        type=Path,
+        default=None,
+        help="question set (default: bench/results/cases.json from `bench init`)",
+    )
     ap.add_argument("--label", default="", help="a name for this run's directory")
     ap.add_argument("--force", action="store_true", help="run even if the GPU looks busy")
     a = ap.parse_args()
     suites = [s.strip() for s in a.suites.split(",") if s.strip()]
     models = a.models or [providers.model_for("chat_general")]
-    cases = load_cases(a.cases)
+    cases_path = cases_mod.resolve(a.cases)
+    cases = cases_mod.load(cases_path)
+    if "ask" in suites or "write" in suites:
+        missing = await _missing(cases)
+        if missing and len(missing) == len({q["volume"] for q in cases["questions"]}):
+            sys.exit(
+                f"{cases_path.name} asks about volumes this library doesn't hold "
+                f"({', '.join(missing[:3])}...). Write a set from yours first:\n"
+                "    ./library bench init            # or: --cartridge NAME / --shelf NAME"
+            )
+        if missing:
+            say(
+                f"note: {len(missing)} expected volume(s) not on this shelf: {', '.join(missing[:3])}"
+            )
 
     why = await _busy()
     if (
@@ -896,7 +929,7 @@ async def main() -> None:
         "effort": a.effort,
         "models": models,
         "suites": suites,
-        "cases": str(a.cases),
+        "cases": str(cases_path),
     }
     say(f"benchmark → {out}")
     started = time.time()
@@ -907,7 +940,7 @@ async def main() -> None:
                 if s == "raw":
                     await suite_raw(rec, m, a.runs)
                 elif s == "structured":
-                    await suite_structured(rec, m, a.runs)
+                    await suite_structured(rec, m, a.runs, cases)
                 elif s == "ask":
                     await suite_ask(rec, m, a.runs, cases, a.effort)
                 elif s == "write":

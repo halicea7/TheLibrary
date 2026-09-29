@@ -133,9 +133,25 @@ class Settings(BaseSettings):
     bind: str = "127.0.0.1"
     port: int = 8077
 
+    # Addresses trusted like loopback, as CIDRs, comma-separated. For a container: the host's
+    # browser arrives from the container network's gateway, not from loopback, so the compose
+    # file pins that network and trusts only its gateway (with the port published on the
+    # host's loopback alone, only this machine can come that way). Empty everywhere else.
+    trusted_networks: str = ""
+
     @property
     def tokens(self) -> set[str]:
         return {t.strip() for t in self.api_tokens.split(",") if t.strip()}
+
+    @property
+    def trusted(self) -> list:
+        import ipaddress
+
+        return [
+            ipaddress.ip_network(n.strip(), strict=False)
+            for n in self.trusted_networks.split(",")
+            if n.strip()
+        ]
 
     # --- running it for others ---
     # A one-token probe every so often: reachability is not liveness (a wedged Ollama still

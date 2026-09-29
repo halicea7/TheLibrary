@@ -18,6 +18,8 @@ dependencies = [
     "alembic>=1.14",
     "psycopg[binary,pool]>=3.2",
     "pgvector>=0.3.6",
+    "numpy>=2.0",  # cartridge vectors, claim anchors; not only the reranker's
+    "scikit-learn>=1.6",  # threads: HDBSCAN over the claims
     # jobs
     "arq>=0.26",
     "redis>=5.2",
@@ -35,10 +37,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The reranker: a cross-encoder in-process. Without it Find and Ask go unreranked.
 ml = [
     "torch>=2.5",
     "sentence-transformers>=3.3",
-    "scikit-learn>=1.6",
 ]
 
 [dependency-groups]
@@ -47,6 +49,16 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
 ]
+
+# On Linux (the container, CI), torch comes as the CPU build: the reranker is a small
+# cross-encoder, and the CUDA build would add several GB for nothing. macOS is unchanged.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["uv_build>=0.11.14,<0.12.0"]

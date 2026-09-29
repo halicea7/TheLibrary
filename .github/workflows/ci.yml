@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --group dev
+      - name: ruff
+        run: uv run ruff check src tests bench
+      - name: The UI's scripts parse
+        run: |
+          node -e '
+            const fs = require("fs");
+            const html = fs.readFileSync("web/index.html", "utf8");
+            let n = 0;
+            for (const m of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) { new Function(m[1]); n++; }
+            for (const f of fs.readdirSync("web").filter(f => f.endsWith(".js"))) {
+              require("child_process").execFileSync("node", ["--check", "web/" + f]);
+            }
+            console.log(`${n} inline scripts parse`);'
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: library
+          POSTGRES_PASSWORD: library
+          POSTGRES_DB: library_agent
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U library -d library_agent"
+          --health-interval 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-retries 20
+    env:
+      LIBRARY_DATABASE_URL: postgresql+psycopg://library:library@localhost:5432/library_agent
+      LIBRARY_REDIS_URL: redis://localhost:6379/0
+      # No model server in CI: tests that need one fake it or skip.
+      LIBRARY_OLLAMA_URL: http://127.0.0.1:9
+      LIBRARY_STORAGE_DIR: ${{ runner.temp }}/library/documents
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --group dev
+      - name: Extensions and migrations
+        env:
+          PGPASSWORD: library
+        run: |
+          psql -h localhost -U library -d library_agent -f docker/initdb.sql
+          uv run alembic upgrade head
+      - name: pytest
+        run: uv run pytest -q
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: the-library:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: The stack comes up and answers
+        run: |
+          docker compose up -d postgres redis
+          docker compose run -d --name api-ci --service-ports api serve
+          for i in $(seq 1 90); do
+            curl -sf http://127.0.0.1:8077/api/health >/dev/null && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8077/api/health | python3 -m json.tool | head -20
+          curl -sf -o /dev/null http://127.0.0.1:8077/ && echo "UI served"
+      - name: Logs on failure
+        if: failure()
+        run: docker logs api-ci 2>&1 | tail -80 || true
+      - name: Down
+        if: always()
+        run: docker compose down -v

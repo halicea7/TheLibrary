@@ -40,6 +40,17 @@ class TestDoor:
         assert c.get("/ping", headers={"Authorization": "Bearer nope"}).status_code == 401
         assert c.get("/ping", headers={"Authorization": "Bearer beta-token"}).status_code == 200
 
+    def test_a_trusted_network_is_treated_as_this_machine(self, monkeypatch):
+        # In a container the host's browser arrives from the network's gateway.
+        monkeypatch.setattr(settings(), "api_tokens", "")
+        monkeypatch.setattr(settings(), "trusted_networks", "172.31.77.1/32, 192.168.65.1/32")
+        assert TestClient(_app(), client=("172.31.77.1", 1)).get("/ping").status_code == 200
+        assert TestClient(_app(), client=("192.168.65.1", 1)).get("/ping").status_code == 200
+        # Another container on the same network is not the gateway.
+        assert TestClient(_app(), client=("172.31.77.5", 1)).get("/ping").status_code == 403
+        monkeypatch.setattr(settings(), "trusted_networks", "")
+        assert TestClient(_app(), client=("172.31.77.1", 1)).get("/ping").status_code == 403
+
     def test_token_check(self, monkeypatch):
         monkeypatch.setattr(settings(), "api_tokens", "s3cret")
         assert token_ok("Bearer s3cret") and token_ok("bearer s3cret")

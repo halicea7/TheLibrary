@@ -1,0 +1,112 @@
+# The Library, containerised.
+#
+#   docker compose up -d                      # then open http://localhost:8077
+#   docker compose logs -f api worker
+#   docker compose run --rm api ./library import /import --read     # files in ./import
+#   docker compose down                       # data stays in the volumes
+#
+# Ollama is expected on the host (the default below) or wherever LIBRARY_OLLAMA_URL points.
+# For one fully in compose instead:  docker compose --profile ollama up -d
+# with LIBRARY_OLLAMA_URL=http://ollama:11434 in .env (and a GPU block, see below).
+
+x-library: &library
+  build:
+    context: .
+    args:
+      WITH_RERANKER: ${WITH_RERANKER:-1}
+  image: the-library:latest
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    LIBRARY_DATABASE_URL: postgresql+psycopg://library:library@postgres:5432/library_agent
+    LIBRARY_REDIS_URL: redis://redis:6379/0
+    LIBRARY_OLLAMA_URL: ${LIBRARY_OLLAMA_URL:-http://host.docker.internal:11434}
+    # The browser on this machine reaches the API through the published port, and so
+    # arrives from the network's gateway rather than loopback. Trust exactly that
+    # address (and Docker Desktop's host address); the port is published on this
+    # machine's loopback only, so nothing else can come that way.
+    LIBRARY_TRUSTED_NETWORKS: ${LIBRARY_TRUSTED_NETWORKS:-172.31.77.1/32,192.168.65.1/32}
+  volumes:
+    - library-data:/data
+    - ./import:/import:ro
+  extra_hosts:
+    - host.docker.internal:host-gateway
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks: [library]
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *library
+    command: serve
+    ports:
+      # Loopback only. To serve other machines, set LIBRARY_API_TOKENS and change this
+      # to "8077:8077" -- two deliberate steps, as outside a container.
+      - "127.0.0.1:${LIBRARY_PORT:-8077}:8077"
+
+  worker:
+    <<: *library
+    command: worker
+    healthcheck:
+      disable: true
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: library
+      POSTGRES_PASSWORD: library
+      POSTGRES_DB: library_agent
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/initdb.sql:/docker-entrypoint-initdb.d/10-extensions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U library -d library_agent"]
+      interval: 5s
+      retries: 20
+    networks: [library]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+    networks: [library]
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: [ollama]
+    volumes:
+      - ollama-models:/root/.ollama
+    networks: [library]
+    restart: unless-stopped
+    # With an NVIDIA GPU and the container toolkit installed:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+networks:
+  library:
+    ipam:
+      config:
+        - subnet: 172.31.77.0/24
+          gateway: 172.31.77.1
+
+volumes:
+  library-data:
+  postgres-data:
+  redis-data:
+  ollama-models:

@@ -84,6 +84,20 @@ It opens at `http://localhost:8077`. `./library stop`, `restart` and `status` do
 
 **4. Use it.** Drop a PDF (or Markdown, HTML, text) onto the shelf. It's **searchable within seconds**; click *have it read* for summaries and subjects, then *annotate it* for marginalia. Ask a question in the **Ask** tab — every claim from the shelf carries a citation you can check. The first visit is walked by a short tour of the room.
 
+**Or run it in Docker.** Postgres (with pgvector), Redis, the API and the worker come up together; Ollama stays wherever your GPU is.
+
+```sh
+docker compose up -d                  # then open http://localhost:8077
+docker compose logs -f api worker
+docker compose run --rm api ./library import /import --read     # files placed in ./import
+```
+
+- **Models** are reached at `LIBRARY_OLLAMA_URL`, by default Ollama on the host (`host.docker.internal:11434`). For Ollama inside compose too: `docker compose --profile ollama up -d` with `LIBRARY_OLLAMA_URL=http://ollama:11434` in `.env` (uncomment the GPU block for an NVIDIA card).
+- **Everything the library keeps** — the database, and `~/.library-agent` (originals, figures, cartridges, providers, modules, classification) — lives in named volumes, so `docker compose down` and a rebuild keep it. `down -v` deletes it.
+- **The port is published on this machine's loopback only**, and the API trusts exactly the compose network's gateway as "this machine" (`LIBRARY_TRUSTED_NETWORKS`), so the door is as closed as outside a container. To open it to other machines, set `LIBRARY_API_TOKENS` and publish the port more widely — two deliberate steps, as always.
+- **The reranker** (CPU torch) is in the image; `WITH_RERANKER=0 docker compose build` leaves it out and saves about a gigabyte, at the cost of unreranked Find and Ask.
+- Any `./library` command runs in the container: `docker compose run --rm api ./library bench init`.
+
 To check everything works end to end: `uv run python scripts/verify.py` exercises every surface against the running instance and reports pass/fail per check.
 
 Nothing leaves your machine: no cloud, no API keys, no telemetry. Other models are opt-in under **Settings** ([Models](#models)); live connectors in the **bay** under the rack ([Modules](#modules)).

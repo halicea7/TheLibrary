@@ -19,12 +19,15 @@ from library_agent.config import settings
 
 
 def _is_loopback(host: str | None) -> bool:
+    """This machine: loopback, or an address LIBRARY_TRUSTED_NETWORKS vouches for (the
+    container network's gateway, when the library runs in Docker)."""
     if not host:
         return False
     try:
-        return ipaddress.ip_address(host.split("%")[0]).is_loopback
+        ip = ipaddress.ip_address(host.split("%")[0])
     except ValueError:
         return host == "localhost"
+    return ip.is_loopback or any(ip in n for n in settings().trusted)
 
 
 def token_ok(header: str | None) -> bool:

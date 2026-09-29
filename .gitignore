@@ -24,3 +24,6 @@ dump/
 
 # benchmark results name providers and quote the library
 bench/results/
+
+# files placed for the container to import
+import/

@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.env
+ops/logs
+dump
+Specs.md
+TODO.md
+bench/results
+import
+tests
+docs/*.jpg

@@ -61,7 +61,7 @@ jobs:
       LIBRARY_REDIS_URL: redis://localhost:6379/0
       # No model server in CI: tests that need one fake it or skip.
       LIBRARY_OLLAMA_URL: http://127.0.0.1:9
-      LIBRARY_STORAGE_DIR: ${{ runner.temp }}/library/documents
+      LIBRARY_STORAGE_DIR: /tmp/library/documents
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

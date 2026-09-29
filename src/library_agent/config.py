@@ -162,7 +162,8 @@ class Settings(BaseSettings):
             "categories": "v1",
             "reflection": "v1",
             "cluster_summary": "v1",
-            "contradiction": "v1",
+            # v2: a verdict that contradicts its own explanation is overruled.
+            "contradiction": "v2",
             "query_rewrite": "v1",
             "eval_question": "v1",
         }

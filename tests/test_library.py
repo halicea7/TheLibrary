@@ -116,3 +116,53 @@ class TestInstructionShapedExplanation:
             "Claim 5 says the BERT-style objective beats prefix LM; claim 6 says they perform "
             "similarly on the same benchmark, so both cannot hold."
         )
+
+
+def test_an_explanation_that_asserts_a_conflict_overrules_a_false_verdict():
+    from library_agent.library.contradictions import _explanation_affirms
+
+    assert _explanation_affirms(
+        "The claims conflict because A requires a majority and B a single acknowledgement."
+        " A single acknowledgement could lose data if the leader fails."
+    )
+    assert _explanation_affirms("The sources are mutually exclusive on static RSA in TLS 1.3.")
+    for hedged in (
+        "These claims seem to conflict, but they describe different clusters.",
+        "They might contradict if both were about the same host.",
+        "The claims do not conflict: they describe two different clusters.",
+        "Each claim describes a different property of BM25; they are complementary.",
+    ):
+        assert not _explanation_affirms(hedged), hedged
+
+
+async def test_judge_overrules_a_verdict_its_explanation_contradicts():
+    # qwen3's shape, measured: "The claims conflict because ..." with disagreement=false.
+    from library_agent.library.contradictions import judge_cluster
+
+    claims = [
+        "In Raft, a leader commits a log entry once a majority of the cluster has stored it.",
+        "In Raft, an entry is committed as soon as any single follower acknowledges it.",
+    ]
+
+    class Fake:
+        def __init__(self, subject):
+            self.subject = subject
+
+        async def structured(self, *a, **kw):
+            return {
+                "analysis": "Both are about Raft's commit rule.",
+                "explanation": "The claims conflict because one requires a majority and the other a single follower.",
+                "sources": ["A", "B"],
+                "claim_a": claims[0],
+                "claim_b": claims[1],
+                "subject": self.subject,
+                "disagreement": False,
+            }
+
+    v = await judge_cluster(
+        Fake("Raft commit rule"), "m", "Raft", claims, ["A", "B"], claim_sources=["A", "B"]
+    )
+    assert v["disagreement"] is True and v["votes"] in ("2/2", "3/3")
+    # No shared subject named: two things, not a conflict -- the verdict stands.
+    v = await judge_cluster(Fake(""), "m", "Raft", claims, ["A", "B"], claim_sources=["A", "B"])
+    assert v["disagreement"] is False

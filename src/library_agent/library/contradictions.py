@@ -57,7 +57,7 @@ document is about -- the claim's scope.
 Decide whether these sources genuinely conflict.
 {genre_rule}
 A claim is about the thing its document is about. "The head node is login01" in a guide to
-one cluster and "the head node is cerberus" in a guide to another are two facts about two
+one cluster and "the head node is node-b" in a guide to another are two facts about two
 systems, not a disagreement. The same goes for different hosts, accounts, tenants, sites,
 versions, environments, datasets, hardware, or dates: a claim scoped to one is not
 contradicted by a claim scoped to another.
@@ -107,6 +107,39 @@ _DENIAL = re.compile(
 def _explanation_denies(text: str | None) -> bool:
     """Does the explanation say the sources do *not* conflict?"""
     return bool(text) and bool(_DENIAL.search(text[:400]))
+
+
+# The other way round: qwen3 writes "The claims conflict because A requires a majority and
+# B a single acknowledgement", names the shared subject -- and sets the verdict false.
+# Measured on known cases (bench/): 0 of 4 real disagreements kept on its verdict alone.
+# An explanation that plainly asserts the conflict, without hedging, outweighs the flag.
+_AFFIRM = re.compile(
+    r"\b(claims|sources|statements|they|these|both)\s+(directly\s+|clearly\s+)?"
+    r"(conflict|contradict|disagree)|"
+    r"\b(conflict|contradict)s?\s+because\b|"
+    r"\b(are|is)\s+(mutually\s+|directly\s+)?(incompatible|contradictory|mutually exclusive)\b|"
+    r"\b(are|is)\s+in\s+(direct\s+)?(conflict|contradiction)\b",
+    re.IGNORECASE,
+)
+_HEDGE = re.compile(
+    r"\b(seem|seems|appear|appears|superficial(ly)?|at first|might|may|could|if)\b", re.IGNORECASE
+)
+
+
+def _explanation_affirms(text: str | None) -> bool:
+    """Does the explanation assert, without hedging, that the sources conflict? A hedge
+    counts only in the sentence that makes the assertion, before it: "they seem to
+    conflict" is not an assertion; "they conflict because ... it could fail if ..." is."""
+    if not text:
+        return False
+    head = text[:400]
+    if _DENIAL.search(head):
+        return False
+    for m in _AFFIRM.finditer(head):
+        start = max(head.rfind(".", 0, m.start()), head.rfind("\n", 0, m.start())) + 1
+        if not _HEDGE.search(head[start : m.end()]):
+            return True
+    return False
 
 
 # "Explain why they conflict or why they don't." -- a paraphrase of the instruction rather
@@ -175,6 +208,16 @@ async def judge_cluster(
         except Exception:
             log.warning("contradiction check failed for cluster %r", label, exc_info=True)
             continue
+        if (
+            not out.get("disagreement")
+            and _explanation_affirms(out.get("explanation"))
+            and len(str(out.get("subject") or "").strip()) >= 3
+            and not _explanation_is_junk(out.get("explanation"))
+        ):
+            # The verdict says no while the model's own explanation says yes, and names
+            # what both claims are about. The quotes are still checked below.
+            out["disagreement"] = True
+            out["overruled"] = True
         if out.get("disagreement") and _explanation_is_junk(out.get("explanation")):
             # No usable explanation means no usable verdict.
             out["disagreement"] = False

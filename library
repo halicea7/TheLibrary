@@ -43,6 +43,7 @@ case "${1:-start}" in
     if [ "${1:-}" = "export" ]; then exec uv run python -c "import asyncio, json, sys; from library_agent.eval.judged import export_bundle; json.dump(asyncio.run(export_bundle()), sys.stdout, indent=1, ensure_ascii=False)"; fi
     exec uv run python -m library_agent.eval.judged "$@" ;;
   anchors) shift; exec uv run python -m library_agent.library.anchors "$@" ;;
+  bench) shift; exec uv run python bench/run.py "$@" ;;
   spans) shift; exec uv run python -m library_agent.ingest.spans "$@" ;;
   *) echo "usage: ./library [start|stop|restart|status|import <paths>... [--read]|export …|insert <zip>]"; exit 2 ;;
 esac

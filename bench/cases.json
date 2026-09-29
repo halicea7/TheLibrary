@@ -1,0 +1,19 @@
+{
+  "_about": "Questions with known answers for the ask suite. Each: the question, groups of terms a right answer must contain (any one of each group), and a substring of the volume it should cite. These are on public papers; for your own material, copy this file into bench/results/ (gitignored) and pass --cases.",
+  "questions": [
+    {"question": "What does RAPTOR build from the chunks of a document, and how?",
+     "terms": [["tree"], ["cluster"], ["summar"]], "volume": "RECURSIVE ABSTRACTIVE"},
+    {"question": "In Dense Passage Retrieval, what are the two encoders and what does each encode?",
+     "terms": [["question", "query"], ["passage"], ["bert", "encoder"]], "volume": "Dense Passage Retrieval"},
+    {"question": "Which two pre-training tasks does BERT use?",
+     "terms": [["masked"], ["next sentence"]], "volume": "BERT"},
+    {"question": "What is HNSW and what does it trade off?",
+     "terms": [["graph", "navigable"], ["neighbor", "neighbour"]], "volume": "navigable small world"},
+    {"question": "How does ColBERT's late interaction score a passage against a query?",
+     "terms": [["maxsim", "maximum similarity", "max"], ["token", "embedding"]], "volume": "ColBERT"}
+  ],
+  "unanswerable": [
+    "What did the library's owner have for breakfast on the day the collection was started?"
+  ],
+  "write_brief": "Compare how BERT-style cross-encoders and ColBERT's late interaction trade accuracy for speed in passage retrieval."
+}

@@ -21,3 +21,6 @@ TODO.md
 
 # local material, never committed
 dump/
+
+# benchmark results name providers and quote the library
+bench/results/

@@ -389,6 +389,8 @@ Providers and assignments live in `~/.library-agent/providers.json`, readable by
 
 **The model can judge too, on probation.** *Suggest* has the local model rule on each gathered passage (supports, looks relevant but doesn't, unrelated), with a reason you can read, and you confirm or correct its marks. *Let the model judge 10* judges asked questions unattended. Those cases are tagged model-judged, listed for you to check, and scored in their own tables, never mixed with yours. Every question you save after a suggestion is also a measurement: the page shows how often the model agrees with you per question type, with Cohen's kappa so chance agreement doesn't count. Where agreement is high, model-judged cases of that type are worth using; where it's low, judge them yourself. A model grading retrieval shares retrieval's blind spots (a neighbouring mechanism, a control working as intended read as a failure), and this is how you find out where.
 
+**Which model to run on.** `./library bench` measures the model's side of the work — speed (first token, first word, tokens per second, four streams at once), reliability of the library's structured calls (valid on the first try, and why not), and correctness (known-answer questions, citations verified, runs agreeing, the unanswerable declined, the conflict judge on known cases) — for any mix of local and provider models, with a Markdown report per run. See [`bench/`](bench/README.md).
+
 Retrieval is evaluated on a generated question set (a question per gold passage, the answer known) with a ladder of configurations, so every stage earns its place. Re-run on the current corpus — 1,219 volumes, 57 questions, most of them from the security material:
 
 | config | recall@1 | recall@5 | recall@10 | MRR | s/query |
@@ -435,6 +437,7 @@ src/library_agent/
   mcp_server.py         the library as MCP tools
   chat/                 citations, query rewriting, stances, streaming, composing (threads, argument memory, chapters, the seal)
   eval/                 question generation, recall@k harness, the hand-judged set
+bench/                  model benchmarks: speed, reliability, correctness (results stay local)
   api/  worker/  db/
 web/index.html          the UI, one file, no build step
 web/cartridge3d.js      the cartridge as an object, and the pedestal (three.js)

@@ -4,7 +4,7 @@
   "name": "SentinelOne",
   "kind": "endpoint security",
   "colour": "#e0564b",
-  "description": "The SentinelOne fleet, read-only: exposure to a CVE, whether an indicator has been seen, which endpoints run an application, and the state of the agents.",
+  "description": "The SentinelOne fleet, read-only: the latest threats and console activity, exposure to a CVE, whether an indicator has been seen, which endpoints run an application, and the state of the agents.",
   "base_url": "",
   "clearance": "local",
   "auth": {
@@ -22,6 +22,46 @@
   "allowed_hosts": [],
   "operations": [
     {
+      "id": "recent_threats",
+      "summary": "The most recent threats detected in the fleet, newest first: what, on which host, and whether it was mitigated.",
+      "ask_when": "the question asks about the latest or recent threats, detections, alerts, incidents or events in SentinelOne, or what happened most recently.",
+      "method": "GET",
+      "path": "/web/api/v2.1/threats",
+      "params": {},
+      "query": {
+        "sortBy": "createdAt",
+        "sortOrder": "desc",
+        "limit": "10"
+      },
+      "response": {
+        "format": "json",
+        "rows": "data",
+        "line": "{threatInfo.createdAt|date} — {threatInfo.threatName} on {agentRealtimeInfo.agentComputerName} ({threatInfo.classification}, {threatInfo.confidenceLevel}; mitigation {threatInfo.mitigationStatus}; incident {threatInfo.incidentStatus}; verdict {threatInfo.analystVerdict})",
+        "empty": "No threats are recorded.",
+        "limit": 10
+      }
+    },
+    {
+      "id": "recent_activity",
+      "summary": "The most recent entries in the SentinelOne activity log, newest first: agent, policy, user and threat events.",
+      "ask_when": "the question asks about the latest or recent activity, the activity log, or what changed or happened in the SentinelOne console lately.",
+      "method": "GET",
+      "path": "/web/api/v2.1/activities",
+      "params": {},
+      "query": {
+        "sortBy": "createdAt",
+        "sortOrder": "desc",
+        "limit": "15"
+      },
+      "response": {
+        "format": "json",
+        "rows": "data",
+        "line": "{createdAt|date} — {primaryDescription}",
+        "empty": "The activity log is empty.",
+        "limit": 15
+      }
+    },
+    {
       "id": "cve_exposure",
       "summary": "Which endpoints in the fleet are exposed to a given CVE.",
       "ask_when": "the question names a CVE id and asks who or what is exposed, affected, vulnerable or at risk in the fleet.",
@@ -33,7 +73,8 @@
           "description": "a CVE id, e.g. CVE-2024-3094",
           "in": "query",
           "key": "cveId__contains",
-          "required": true
+          "required": true,
+          "pattern": "CVE-\\d{4}-\\d{4,7}"
         }
       },
       "query": {

@@ -73,7 +73,9 @@ async def test_the_built_in_can_be_copied_not_changed(home):
         await api.save(api.SaveIn(manifest=manifest(mid="sentinelone")))
     assert e.value.status_code == 409
     dup = await api.duplicate("sentinelone")
-    assert dup["id"] == "sentinelone-copy" and len(dup["summary"]["operations"]) == 5
+    assert dup["id"] == "sentinelone-copy" and len(dup["summary"]["operations"]) == len(
+        registry.get("sentinelone").operations
+    )
 
 
 async def test_an_import_is_described_before_it_is_approved(home):

@@ -127,7 +127,11 @@ class Picker:
 
     async def structured(self, model, prompt, schema, **kw):
         assert "sentinelone.cve_exposure" in schema["properties"]["operation"]["enum"]
-        return {"need": "a live look", "operation": self.operation, "parameters": self.parameters}
+        return {
+            "closest": self.operation,
+            "operation": self.operation,
+            "parameters": self.parameters,
+        }
 
 
 async def test_consult_picks_runs_and_renders(served):
@@ -205,3 +209,23 @@ async def test_a_down_source_surfaces_as_an_error_not_silence(served, monkeypatc
         [(SENTINELONE, _cfg())],
     )
     assert len(out) == 1 and out[0].error and out[0].text == ""
+
+
+async def test_an_invented_value_that_breaks_the_inputs_pattern_is_not_used(served):
+    # Measured: asked "What is Kerberoasting?", the model filled cve="Kerberoasting".
+    c = Picker("sentinelone.cve_exposure", {"cve": "Kerberoasting"})
+    out = await consult(c, "m", "What is Kerberoasting?", [(SENTINELONE, _cfg())])
+    assert out == [] and not served.state.calls
+    c = Picker("sentinelone.cve_exposure", {"cve": "cve-2024-3094"})  # any case
+    out = await consult(c, "m", "who is exposed to cve-2024-3094?", [(SENTINELONE, _cfg())])
+    assert len(out) == 1
+
+
+def test_a_question_that_names_a_module_is_recognised():
+    from library_agent.chat.session import _cannot_hit, _names
+
+    assert _names("Check Sentinel One and tell me the latest event", "SentinelOne")
+    assert _names("anything on sentinelone?", "SentinelOne")
+    assert not _names("what is a sentinel value?", "SentinelOne")
+    hit = _cannot_hit(SENTINELONE)
+    assert hit.kind == "live" and "not queried" in hit.text and "recent" in hit.text.lower()

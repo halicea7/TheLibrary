@@ -7,9 +7,16 @@
   "description": "The U.S. National Vulnerability Database: what a CVE is and how severe, and which vulnerabilities CISA lists as known to be exploited. Works without a key at a low rate; an NVD API key (free) raises the limit -- set the auth to a header named apiKey.",
   "base_url": "https://services.nvd.nist.gov",
   "clearance": "any",
-  "auth": {"type": "none"},
+  "auth": {
+    "type": "none"
+  },
   "headers": {},
-  "limits": {"timeout": 30, "max_bytes": 3000000, "rate_per_minute": 8, "cache_seconds": 3600},
+  "limits": {
+    "timeout": 30,
+    "max_bytes": 3000000,
+    "rate_per_minute": 8,
+    "cache_seconds": 3600
+  },
   "allowed_hosts": [],
   "operations": [
     {
@@ -19,7 +26,14 @@
       "method": "GET",
       "path": "/rest/json/cves/2.0",
       "params": {
-        "cve": {"type": "string", "description": "a CVE id, e.g. CVE-2024-3094", "in": "query", "key": "cveId", "required": true}
+        "cve": {
+          "type": "string",
+          "description": "a CVE id, e.g. CVE-2024-3094",
+          "in": "query",
+          "key": "cveId",
+          "required": true,
+          "pattern": "CVE-\\d{4}-\\d{4,7}"
+        }
       },
       "response": {
         "format": "json",
@@ -36,9 +50,18 @@
       "method": "GET",
       "path": "/rest/json/cves/2.0",
       "params": {
-        "product": {"type": "string", "description": "a product or vendor name, e.g. Fortinet", "in": "query", "key": "keywordSearch", "required": true}
+        "product": {
+          "type": "string",
+          "description": "a product or vendor name, e.g. Fortinet",
+          "in": "query",
+          "key": "keywordSearch",
+          "required": true
+        }
       },
-      "query": {"hasKev": "", "resultsPerPage": "20"},
+      "query": {
+        "hasKev": "",
+        "resultsPerPage": "20"
+      },
       "response": {
         "format": "json",
         "rows": "vulnerabilities[*].cve",

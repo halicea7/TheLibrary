@@ -9,6 +9,7 @@ from — cited like any other, but marked as live."""
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -21,29 +22,34 @@ from library_agent.modules.store import ModuleConfig
 
 log = logging.getLogger(__name__)
 
-# Measured on ten questions (six about the fleet, four about documents): telling the model
-# "none is the normal case" and asking for the operation straight away got 6/10 -- it
-# answered none to "How many endpoints have Zoom installed?" and "How many agents do we
-# have?". Letting it say what the question needs first, and saying when a live look *is*
-# wanted, got 10/10 with no false positives on the document questions.
+# Routing, measured on 17 questions with SentinelOne and NVD seated (9 about the fleet, 3
+# about CVEs, 5 about documents). Asking for the operation outright, with "none is the
+# normal case", got 6/10 on the first ten; saying what the question needs first, 10/10 --
+# until two more operations were added, when it fell to 9/14: the model echoed the
+# question as its "need" and chose none. Naming the closest operation first, then the one
+# to run, got 17/17. A value the model invents for an input ("BERT" as a CVE id) is caught
+# by the input's pattern, not by the prompt.
 CONSULT_SYSTEM = (
-    "You decide whether a reader's question needs a live look at a connected system, and if "
-    "so, which one operation. Most questions are about the library's documents and need none. "
-    "But when the question asks about the reader's own systems -- what is installed, where, "
-    "how many, which hosts, whether something was seen -- and an operation below answers "
-    "exactly that, choose it. Fill parameters only from the question; never guess an "
-    "identifier that is not in it."
+    "You route a reader's question. Some questions are about the library's documents -- what "
+    "something is, how it works, what a paper or runbook says. Others ask about the reader's "
+    "own live systems -- what is installed, what happened recently, what was detected, how "
+    "many hosts or agents, whether something was seen. For those, a connected system's "
+    "operation answers it. Fill parameters only from the question; never guess an identifier "
+    "that is not in it."
 )
 
-CONSULT_PROMPT = """A reader asked the library:
+CONSULT_PROMPT = """A reader asked:
 {question}
 
-You may consult one live operation, or none. The operations available:
+Connected systems and what each operation answers:
 {operations}
 
-First say in `need` what the question asks for. Then choose exactly one `operation` id from
-the list, or "none". If you choose one, put its parameters in `parameters`, taking the values
-from the question only."""
+Decide in order:
+1. `closest`: the operation that fits the question best (always name one).
+2. `operation`: the operation to run -- normally `closest` when the question is about the
+   reader's own systems; "none" when it is about the library's documents or no operation
+   truly answers it.
+Put any parameters in `parameters`, from the question only."""
 
 
 @dataclass
@@ -67,14 +73,20 @@ def _schema(op_ids: list[str]) -> dict:
     return {
         "type": "object",
         "properties": {
-            # First and required, so the model says what the question needs before it
-            # commits. Optional, it is skipped -- and the choice fell to 4/10 (all none).
-            "need": {"type": "string", "maxLength": 200},
+            # First and required: naming the nearest operation before deciding is what
+            # stopped the model defaulting to none (see CONSULT_SYSTEM).
+            "closest": {"type": "string", "enum": op_ids},
             "operation": {"type": "string", "enum": [*op_ids, "none"]},
             "parameters": {"type": "object"},
         },
-        "required": ["need", "operation"],
+        "required": ["closest", "operation"],
     }
+
+
+def _looks_right(value: Any, pattern: str | None) -> bool:
+    if not pattern:
+        return True
+    return bool(re.fullmatch(pattern, str(value).strip(), flags=re.IGNORECASE))
 
 
 def _required(op: Operation) -> list[str]:
@@ -135,8 +147,14 @@ async def consult(
     module, cfg, op = match
     given = out.get("parameters") if isinstance(out.get("parameters"), dict) else {}
     given = {k: v for k, v in given.items() if v not in (None, "")}
-    # An exact-match input is never taken from the question (see manifest._param).
-    given = {k: v for k, v in given.items() if not (op.param_specs.get(k) or {}).get("exact")}
+    # An exact-match input is never taken from the question, and a value that doesn't look
+    # like what the input takes (a CVE id that isn't one) is dropped (see manifest._param).
+    given = {
+        k: v
+        for k, v in given.items()
+        if not (op.param_specs.get(k) or {}).get("exact")
+        and _looks_right(v, (op.param_specs.get(k) or {}).get("pattern"))
+    }
     op = _fillable(op, given, [o for (m, _c, o) in ops if m is module])
     if op is None:
         return []  # nothing the question gives can fill any fitting operation

@@ -233,6 +233,15 @@ def _param(name: str, spec: dict, path_names: set[str]) -> tuple[dict, dict]:
         schema.update(type="string", description=(schema["description"] + " (YYYY-MM-DD)").strip())
     else:
         schema.update(type="string", maxLength=_int(spec, "max_length", 200, 1, 2000))
+        pattern = spec.get("pattern")
+        if pattern is not None:
+            if not isinstance(pattern, str) or len(pattern) > 200:
+                raise ManifestError(f"parameter {name}: a pattern is a regular expression")
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ManifestError(f"parameter {name}: pattern does not compile ({exc})") from exc
+            schema["pattern"] = pattern
     for bound in ("min", "max"):
         if bound in spec and t in ("int", "number"):
             schema["minimum" if bound == "min" else "maximum"] = spec[bound]
@@ -250,6 +259,9 @@ def _param(name: str, spec: dict, path_names: set[str]) -> tuple[dict, dict]:
         # it): never filled from a reader's question, where "Google" for "Google LLC"
         # would find nothing and read as "not installed".
         "exact": bool(spec.get("exact")),
+        # What a value must look like (a CVE id: CVE-\d{4}-\d+). A value from the question
+        # that doesn't match is dropped -- "BERT" is not a CVE, and a guess is not a lookup.
+        "pattern": schema.get("pattern"),
     }
     return schema, placement
 
@@ -545,6 +557,8 @@ def to_dict(m: Module) -> dict:
                     spec[k] = pl[k]
             if pl.get("exact"):
                 spec["exact"] = True
+            if pl.get("pattern"):
+                spec["pattern"] = pl["pattern"]
             params[name] = spec
         if o.method == "MCP":
             for spec in params.values():

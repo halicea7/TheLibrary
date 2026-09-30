@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
@@ -41,6 +42,45 @@ from library_agent.retrieval.readings import named_documents, retrieve_readings
 log = logging.getLogger(__name__)
 
 _MODULE_NS = uuid.uuid5(uuid.NAMESPACE_URL, "library-agent:module")
+
+
+def _names(question: str, name: str) -> bool:
+    """Does the question name this module? "Sentinel One" and "sentinelone" both count."""
+    squash = lambda s: re.sub(r"[^a-z0-9]", "", s.lower())
+    return len(squash(name)) >= 3 and squash(name) in squash(question)
+
+
+def _cannot_hit(mod) -> SearchHit:
+    """A note in the pool: the module is connected, and what it can look up -- so the answer
+    says that instead of "the library has nothing on it"."""
+    can = "; ".join(o.summary.rstrip(".") for o in mod.operations)
+    return SearchHit(
+        chunk_id=uuid.uuid4(),
+        document_id=uuid.uuid5(_MODULE_NS, mod.id),
+        document_title=mod.name,
+        section_path="(no operation fits)",
+        page=None,
+        text=(
+            f"{mod.name} is connected and was considered for this question, but none of its "
+            f"operations answers it, so it was not queried. What it can look up: {can}. Say "
+            f"this plainly; do not say the library or {mod.name} has no information."
+        ),
+        score=1.0,
+        dense_rank=None,
+        lexical_rank=None,
+        kind="live",
+        live={
+            "module": mod.name,
+            "module_id": mod.id,
+            "colour": mod.colour,
+            "op": "no operation fits",
+            "when": 0,
+            "when_label": "",
+            "arg": "",
+            "error": "",
+            "count": 0,
+        },
+    )
 
 
 def _live_hit(lr) -> SearchHit:
@@ -258,6 +298,19 @@ async def run_turn(
             if usable:
                 for lr in await consult_modules(client, model, query, usable):
                     live_hits.append(_live_hit(lr))
+                # The question names a seated module, but nothing it has answers it: say so,
+                # rather than let the answer read as if the module were not there at all.
+                if not live_hits:
+                    for mod, _c in usable:
+                        if _names(query, mod.name):
+                            live_hits.append(_cannot_hit(mod))
+                            held_back.append(
+                                (
+                                    mod,
+                                    [o.id for o in mod.operations],
+                                    "connected, but none of its operations answers this",
+                                )
+                            )
             if usable or held_back:
                 yield {
                     "event": "consulted",

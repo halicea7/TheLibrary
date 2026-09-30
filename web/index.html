@@ -590,7 +590,22 @@ select, .toggle {
 .drawer.bay.making .bay-side { border-left:0; }
 .mk { max-width:980px; }
 .mk h4 { margin:14px 0 6px; font:600 12px/1.3 var(--sans); color:var(--fg); letter-spacing:.02em; }
-.mk .starts { display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 10px; }
+/* Where to start: catalogue cards. A title over a ruled line, what you need beneath,
+   a punched hole at the foot; lifts on hover, gilt-edged when chosen. */
+.mk .starts { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px; margin:8px 0 14px; }
+.mk .start { position:relative; display:flex; flex-direction:column; justify-content:flex-start; text-align:left; cursor:pointer; color:var(--fg);
+  background:var(--panel); border:1px solid var(--rule); border-radius:3px; padding:10px 12px 18px;
+  box-shadow:0 1px 0 var(--rule-soft), 0 2px 6px rgba(0,0,0,.12); transition:transform .12s, border-color .12s, box-shadow .12s;
+  font:inherit; margin:0; }
+.mk .start b { display:block; font:600 12.5px/1.3 var(--serif); letter-spacing:.01em; padding-bottom:6px; margin-bottom:6px; border-bottom:1px solid var(--rule); }
+.mk .start .d { display:block; font:11px/1.45 var(--sans); color:var(--dim); }
+.mk .start b, .mk .start .d { text-align:left; width:100%; }
+.mk .start::after { content:""; position:absolute; left:50%; bottom:6px; width:6px; height:6px; margin-left:-3px; border-radius:50%; background:var(--bg); box-shadow:inset 0 1px 1px rgba(0,0,0,.35); }
+.mk .start:hover, .mk .start:focus-visible { transform:translateY(-2px); border-color:var(--dim); box-shadow:0 1px 0 var(--rule-soft), 0 6px 14px rgba(0,0,0,.18); outline:none; }
+.mk .start[aria-pressed="true"] { border-color:var(--gilt); box-shadow:0 0 0 1px var(--gilt-lo), 0 2px 6px rgba(0,0,0,.12); }
+.mk .start.file input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+.mk .start.file { border-style:dashed; }
+.mk .start.file.over { border-color:var(--gilt); background:var(--sunk); }
 .mk .grid2 { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:4px 18px; }
 .mk label { display:grid; grid-template-columns:120px 1fr; gap:8px; align-items:center; margin:5px 0; font:11.5px/1.3 var(--sans); }
 .mk label.wide { grid-template-columns:120px 1fr; grid-column:1 / -1; }
@@ -2385,14 +2400,19 @@ function makeRender() {
   const txt = (mp, label, v, ph = '') => `<label class="wide">${label}<textarea data-mp="${mp}" placeholder="${esc2(ph)}">${esc2(v)}</textarea></label>`;
   if (!maker.m) {
     pane.innerHTML = `<div class="mk">
-      <h4>Make a module</h4><p class="nt">A module is a read-only line to an API that the librarian can consult during a question. Start from whichever you have.</p>
-      <div class="starts"><button class="linkish" onclick="makeExamples()">from an example</button>
-        <button class="linkish" onclick="maker.m = makeBlank(); makeRender()">from scratch</button>
-        <button class="linkish" onclick="maker.oa = maker.oa || { text: '' }; makeRender()">from an OpenAPI / Swagger document</button>
-        <button class="linkish" onclick="maker.curl = maker.curl || ' '; makeRender()">from a curl command</button>
-        <button class="linkish" onclick="maker.pm = maker.pm || { text: '' }; makeRender()">from a Postman collection</button>
-        <button class="linkish" onclick="maker.mcp = maker.mcp || { type: 'mcp_stdio', command: '', args: '', env: '', secret_env: '', secret: '', url: '', name: '' }; makeRender()">from an MCP server</button>
-        <label style="display:inline-flex;gap:6px;align-items:center;margin:0">import a module file <input type="file" accept=".json,application/json" onchange="makeImportFile(this)"></label></div>
+      <h4>Make a module</h4><p class="nt">A module is a read-only line to an API that the librarian can consult during a question. Pick where to start.</p>
+      <div class="starts" role="group" aria-label="Start from">
+        ${makeCard('ex', 'From an example', 'A working module to open, try and change. The quickest way to learn how one is built.', 'makeExamples()')}
+        ${makeCard('blank', 'From scratch', 'An empty module: fill in the address, sign-in and operations yourself.', 'maker.m = makeBlank(); makeRender()')}
+        ${makeCard('oa', 'From an OpenAPI spec', 'Paste or upload the API’s Swagger / OpenAPI document, then pick the operations.', "maker.oa = maker.oa || { text: '' }; makeRender()")}
+        ${makeCard('curl', 'From a curl command', 'Paste a command that already works; its sign-in goes to the connection, not the file.', "maker.curl = maker.curl || ' '; makeRender()")}
+        ${makeCard('pm', 'From a Postman collection', 'Paste an exported collection (v2.x) and pick the requests that only read.', "maker.pm = maker.pm || { text: '' }; makeRender()")}
+        ${makeCard('mcp', 'From an MCP server', 'A program this machine runs, or a server at a URL. Pick its read-only tools.', "maker.mcp = maker.mcp || { type: 'mcp_stdio', command: '', args: '', env: '', secret_env: '', secret: '', url: '', name: '' }; makeRender()")}
+        <label class="start file" ondragover="event.preventDefault(); this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="makeCardDrop(event, this)">
+          <input type="file" accept=".json,application/json" onchange="makeImportFile(this)">
+          <b>Import a module file</b><span class="d">A .json someone shared. Choose it, or drop it on this card. You’ll see what it can do before anything is added.</span>
+        </label>
+      </div>
       ${maker.ex ? `<h4>Examples</h4><p class="nt">Working modules against public services. Pick one to open it as a draft: <i>try it</i> on each operation, change what you like, then make it — or keep it as a guide to how a module is put together.</p>
         <div class="exs">${maker.ex.map(x => `<div class="ex" style="--c:${esc2(x.colour)}"><div class="ex-h"><b>${esc2(x.name)}</b><span class="m">${esc2(x.kind)} · ${x.operations.length} operation${x.operations.length === 1 ? '' : 's'}${x.transport !== 'http' ? ' · MCP' : ''}</span>
           <button class="go" onclick="makeExample('${esc2(x.slug)}')">${x.taken ? 'open a copy' : 'use this'}</button></div>
@@ -2634,6 +2654,18 @@ async function makeImportObject(file) {
   const j = await r.json();
   if (!r.ok) { maker.msg = j.detail; return makeRender(); }
   maker.imp = { file, summary: j.summary }; maker.msg = ''; makeRender();
+}
+// A start option as a catalogue card: a title, a ruled line, and what you need to begin.
+function makeCard(key, title, desc, action) {
+  const on = { ex: !!maker.ex, oa: !!maker.oa, curl: !!maker.curl, pm: !!maker.pm, mcp: !!maker.mcp }[key] || false;
+  return `<button type="button" class="start" aria-pressed="${on}" onclick="${action.replace(/"/g, '&quot;')}"><b>${title}</b><span class="d">${desc}</span></button>`;
+}
+async function makeCardDrop(e, card) {
+  e.preventDefault(); card.classList.remove('over');
+  const f = [...(e.dataTransfer.files || [])][0]; if (!f) return;
+  let o; try { o = JSON.parse(await f.text()); } catch { maker.msg = 'That file is not JSON.'; return makeRender(); }
+  if (!isModuleFile(o)) { maker.msg = 'That JSON is not a module file (library-connector/1).'; return makeRender(); }
+  await makeImportObject(o);
 }
 async function makeExamples() {
   try { maker.ex = (await (await fetch('/api/connectors/examples')).json()).examples; }

@@ -120,17 +120,24 @@ async def test_off_host_redirect_is_refused(served):
 
 
 class Picker:
-    """A model that picks one operation and fills it from the question."""
+    """A model that makes one round of calls, then is done. `rounds` gives several rounds;
+    each is a list of (operation, parameters)."""
 
-    def __init__(self, operation, parameters):
-        self.operation, self.parameters = operation, parameters
+    def __init__(self, operation=None, parameters=None, rounds=None):
+        if rounds is None:
+            rounds = [] if operation in (None, "none") else [[(operation, parameters or {})]]
+        self.rounds, self.prompts = list(rounds), []
 
     async def structured(self, model, prompt, schema, **kw):
-        assert "sentinelone.cve_exposure" in schema["properties"]["operation"]["enum"]
+        enum = schema["properties"]["calls"]["items"]["properties"]["operation"]["enum"]
+        assert "sentinelone.cve_exposure" in enum and kw.get("think") is True
+        self.prompts.append(prompt)
+        if not self.rounds:
+            return {"calls": [], "done": True}
+        calls = self.rounds.pop(0)
         return {
-            "closest": self.operation,
-            "operation": self.operation,
-            "parameters": self.parameters,
+            "calls": [{"operation": o, "parameters": p} for o, p in calls],
+            "done": not self.rounds,
         }
 
 
@@ -222,10 +229,80 @@ async def test_an_invented_value_that_breaks_the_inputs_pattern_is_not_used(serv
 
 
 def test_a_question_that_names_a_module_is_recognised():
-    from library_agent.chat.session import _cannot_hit, _names
+    from library_agent.chat.session import _cannot_note, _names
 
     assert _names("Check Sentinel One and tell me the latest event", "SentinelOne")
     assert _names("anything on sentinelone?", "SentinelOne")
     assert not _names("what is a sentinel value?", "SentinelOne")
-    hit = _cannot_hit(SENTINELONE)
-    assert hit.kind == "live" and "not queried" in hit.text and "recent" in hit.text.lower()
+    note = _cannot_note(SENTINELONE)
+    assert "not queried" in note and "recent" in note.lower()
+
+
+async def test_several_calls_in_one_turn(served, monkeypatch):
+    from library_agent.modules import consult as cm
+
+    ran = []
+
+    async def fake_call(module, cfg, op, args):
+        ran.append((op.id, args))
+        return {"rows": [], "count": 0, "when": 0.0}
+
+    monkeypatch.setattr(cm, "call", fake_call)
+    c = Picker(
+        rounds=[
+            [("sentinelone.agents", {}), ("sentinelone.app_inventory", {"application": "Zoom"})]
+        ]
+    )
+    out = await consult(c, "m", "how many agents, and is Zoom installed?", [(SENTINELONE, _cfg())])
+    assert sorted(r[0] for r in ran) == ["agents", "app_inventory"] and len(out) == 2
+
+
+async def test_a_later_round_may_use_what_an_earlier_one_returned(served, monkeypatch):
+    # The first call returns a CVE id; the second looks it up. The id was never in the
+    # question -- it is grounded by the result.
+    from library_agent.modules import consult as cm
+
+    ran = []
+
+    async def fake_call(module, cfg, op, args):
+        ran.append((op.id, args))
+        rows = [{"id": "CVE-2024-3094"}] if op.id == "recent_threats" else []
+        return {"rows": rows, "count": len(rows), "when": 0.0}
+
+    monkeypatch.setattr(cm, "call", fake_call)
+    monkeypatch.setattr(cm, "render_rows", lambda op, rows: "\n".join(r["id"] for r in rows))
+    c = Picker(
+        rounds=[
+            [("sentinelone.recent_threats", {})],
+            [("sentinelone.cve_exposure", {"cve": "CVE-2024-3094"})],
+        ]
+    )
+    await consult(c, "m", "what's the latest threat and who is exposed?", [(SENTINELONE, _cfg())])
+    assert ran == [("recent_threats", {}), ("cve_exposure", {"cve": "CVE-2024-3094"})]
+    assert "CVE-2024-3094" in c.prompts[1]  # the second round saw the first round's result
+
+
+async def test_an_identifier_not_in_the_conversation_is_refused(served):
+    # Measured: "look up those CVEs you just gave me" became CVE-2023-1234, which the
+    # previous answer never mentioned.
+    history = [
+        ("user", "any recent Django CVEs?"),
+        ("assistant", "CVE-2025-48432 and CVE-2025-57833."),
+    ]
+    c = Picker("sentinelone.cve_exposure", {"cve": "CVE-2023-1234"})
+    out = await consult(c, "m", "look those up", [(SENTINELONE, _cfg())], history)
+    assert out == [] and not served.state.calls
+    c = Picker("sentinelone.cve_exposure", {"cve": "CVE-2025-48432"})
+    out = await consult(c, "m", "look those up", [(SENTINELONE, _cfg())], history)
+    assert len(out) == 1  # in the last answer: allowed
+
+
+def test_a_rewrite_that_invents_an_identifier_is_not_used():
+    from library_agent.chat.grounding import ungrounded
+
+    known = "any recent Django CVEs? CVE-2025-48432 and CVE-2025-57833."
+    assert ungrounded("look up CVE-2023-1234 and CVE-2023-5678 with NVD", known) == {
+        "cve-2023-1234",
+        "cve-2023-5678",
+    }
+    assert not ungrounded("look up CVE-2025-48432 with NVD", known)

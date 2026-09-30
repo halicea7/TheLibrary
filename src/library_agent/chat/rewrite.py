@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import re
 
+from library_agent.chat.grounding import ungrounded
 from library_agent.llm.ollama import Ollama
 
 log = logging.getLogger(__name__)
@@ -67,7 +68,14 @@ async def rewrite_query(
     """Returns (query_to_embed, needs_retrieval). Falls back to the raw message."""
     if not history or looks_self_contained(message):
         return message, True
-    transcript = "\n".join(f"{role}: {text[:400]}" for role, text in history[-6:])
+    # The last answer whole (up to a point): a follow-up like "look up those CVEs" refers
+    # to a list that sits past the first few hundred characters -- cut there, the model
+    # invented the ids it couldn't see.
+    turns = history[-6:]
+    transcript = "\n".join(
+        f"{role}: {text[:3000] if i == len(turns) - 1 else text[:400]}"
+        for i, (role, text) in enumerate(turns)
+    )
     try:
         out = await client.structured(
             model,
@@ -79,4 +87,11 @@ async def rewrite_query(
         log.warning("query rewrite failed; using raw message", exc_info=True)
         return message, True
     query = (out.get("standalone_query") or "").strip()
+    known = message + "\n" + "\n".join(text for _, text in history)
+    if bad := ungrounded(query, known):
+        log.warning(
+            "rewrite introduced identifiers not in the conversation %s; using the message",
+            sorted(bad),
+        )
+        query = message
     return (query or message), bool(out.get("needs_retrieval", True))

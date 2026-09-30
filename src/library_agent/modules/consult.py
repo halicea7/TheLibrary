@@ -8,13 +8,17 @@ from — cited like any other, but marked as live."""
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from library_agent.chat.grounding import ungrounded
 from library_agent.modules.execute import ModuleError, call
 from library_agent.modules.manifest import Module, Operation
 from library_agent.modules.render import render_rows
@@ -22,34 +26,41 @@ from library_agent.modules.store import ModuleConfig
 
 log = logging.getLogger(__name__)
 
-# Routing, measured on 17 questions with SentinelOne and NVD seated (9 about the fleet, 3
-# about CVEs, 5 about documents). Asking for the operation outright, with "none is the
-# normal case", got 6/10 on the first ten; saying what the question needs first, 10/10 --
-# until two more operations were added, when it fell to 9/14: the model echoed the
-# question as its "need" and chose none. Naming the closest operation first, then the one
-# to run, got 17/17. A value the model invents for an input ("BERT" as a CVE id) is caught
-# by the input's pattern, not by the prompt.
+# How the librarian uses modules. It used to make one snap choice -- one operation, no
+# thinking, the bare question -- which was measured and tuned (6/10 -> 17/17 on routing)
+# but couldn't follow a conversation ("look up those CVEs you just gave me") or combine
+# sources ("how severe is it, and are we exposed?"). Now it thinks, may call several
+# operations across modules, sees what came back, and may call again: at most
+# MAX_ROUNDS rounds and MAX_CALLS calls a question. Whatever it proposes still passes the
+# same checks in code: exact inputs are never taken from it, a value must fit its
+# input's pattern, and an identifier (CVE, hash, IP) must already be in the question,
+# the conversation or an earlier result -- a model that can't see the ids invents them.
+MAX_ROUNDS = 3
+MAX_CALLS = 4
+PER_ROUND = 3
+
 CONSULT_SYSTEM = (
-    "You route a reader's question. Some questions are about the library's documents -- what "
-    "something is, how it works, what a paper or runbook says. Others ask about the reader's "
-    "own live systems -- what is installed, what happened recently, what was detected, how "
-    "many hosts or agents, whether something was seen. For those, a connected system's "
-    "operation answers it. Fill parameters only from the question; never guess an identifier "
-    "that is not in it."
+    "You decide which of the reader's connected systems to query, if any, to answer their "
+    "question. Some questions are about the library's documents -- what something is, how it "
+    "works, what a paper or runbook says: those need no call. Others ask about the reader's own "
+    "live systems or about current data a connected service holds: what is installed, what "
+    "happened recently, what was detected, how many hosts, whether something was seen, how "
+    "severe a CVE is. Think it through, then call what answers it -- several operations if the "
+    "question has several parts. Take every identifier (CVE ids, hashes, addresses, names) from "
+    "the question, the conversation or earlier results; never make one up. If an operation "
+    "can't be filled from what you have, don't call it."
 )
 
-CONSULT_PROMPT = """A reader asked:
+CONSULT_PROMPT = """Today is {today}.
+{conversation}The reader now asks:
 {question}
 
-Connected systems and what each operation answers:
+Connected systems and their operations:
 {operations}
-
-Decide in order:
-1. `closest`: the operation that fits the question best (always name one).
-2. `operation`: the operation to run -- normally `closest` when the question is about the
-   reader's own systems; "none" when it is about the library's documents or no operation
-   truly answers it.
-Put any parameters in `parameters`, from the question only."""
+{results}
+Decide what to call next. List the calls in `calls` (at most {room}), each an operation and
+its parameters. When nothing more is needed -- or nothing was needed at all -- return no
+calls and set `done` to true."""
 
 
 @dataclass
@@ -73,14 +84,111 @@ def _schema(op_ids: list[str]) -> dict:
     return {
         "type": "object",
         "properties": {
-            # First and required: naming the nearest operation before deciding is what
-            # stopped the model defaulting to none (see CONSULT_SYSTEM).
-            "closest": {"type": "string", "enum": op_ids},
-            "operation": {"type": "string", "enum": [*op_ids, "none"]},
-            "parameters": {"type": "object"},
+            "calls": {
+                "type": "array",
+                "maxItems": PER_ROUND,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "operation": {"type": "string", "enum": op_ids},
+                        "parameters": {"type": "object"},
+                    },
+                    "required": ["operation"],
+                },
+            },
+            "done": {"type": "boolean"},
         },
-        "required": ["closest", "operation"],
+        "required": ["calls", "done"],
     }
+
+
+def _catalogue(ops) -> str:
+    out = []
+    for m, _c, op in ops:
+        params = []
+        for name, schema in (op.params.get("properties") or {}).items():
+            spec = op.param_specs.get(name) or {}
+            bits = [name]
+            if name in (op.params.get("required") or []):
+                bits.append("required")
+            if spec.get("pattern"):
+                bits.append(f"like {spec['pattern']}")
+            if spec.get("exact"):
+                bits.append("exact value from the service's own listing; leave out")
+            desc = schema.get("description")
+            params.append(
+                f"{' '.join(bits[:1])} ({', '.join(bits[1:]) or 'optional'}){': ' + desc if desc else ''}"
+            )
+        out.append(
+            f"- {m.id}.{op.id} [{m.name}]: {op.summary} Use when {op.ask_when}"
+            f"\n    parameters: {'; '.join(params) or 'none'}"
+        )
+    return "\n".join(out)
+
+
+def _conversation(history: list[tuple[str, str]] | None) -> str:
+    """The recent turns, the last answer at length: a follow-up points into it."""
+    turns = (history or [])[-4:]
+    if not turns:
+        return ""
+    lines = [
+        f"{role}: {text[:3000] if i == len(turns) - 1 else text[:600]}"
+        for i, (role, text) in enumerate(turns)
+    ]
+    return "The conversation so far:\n" + "\n".join(lines) + "\n\n"
+
+
+def _results_block(results: list[LiveResult]) -> str:
+    if not results:
+        return ""
+    parts = ["\nWhat the calls so far returned:"]
+    for r in results:
+        body = (
+            f"error: {r.error}" if r.error else "\n".join(r.text.splitlines()[:12]) or "(no rows)"
+        )
+        parts.append(f"- {r.module.id}.{r.op.id}({json.dumps(r.args)}):\n{body}")
+    return "\n".join(parts) + "\n"
+
+
+def _prepare(call_spec: dict, ops, known: str):
+    """A proposed call, checked: (module, cfg, op, args), or None if it can't be made
+    honestly from what the reader and the results have given."""
+    choice = str(call_spec.get("operation") or "")
+    match = next(((m, c, op) for (m, c, op) in ops if f"{m.id}.{op.id}" == choice), None)
+    if not match:
+        return None
+    module, cfg, op = match
+    given = call_spec.get("parameters") if isinstance(call_spec.get("parameters"), dict) else {}
+    given = {k: v for k, v in given.items() if v not in (None, "")}
+    # An exact-match input is never taken from the model; a value must fit its input's
+    # pattern; an identifier must already be in the known text (see grounding).
+    given = {
+        k: v
+        for k, v in given.items()
+        if not (op.param_specs.get(k) or {}).get("exact")
+        and _looks_right(v, (op.param_specs.get(k) or {}).get("pattern"))
+        and not ungrounded(str(v), known)
+    }
+    op = _fillable(op, given, [o for (m, _c, o) in ops if m is module])
+    if op is None:
+        return None
+    args = {k: given[k] for k in (op.params.get("properties") or {}) if k in given}
+    return module, cfg, op, args
+
+
+async def _run(module, cfg, op, args) -> LiveResult:
+    try:
+        res = await call(module, cfg, op, args)
+    except ModuleError as exc:
+        return LiveResult(module=module, op=op, args=args, when=time.time(), error=str(exc))
+    return LiveResult(
+        module=module,
+        op=op,
+        args=args,
+        when=res["when"],
+        count=res["count"],
+        text=render_rows(op, res["rows"]),
+    )
 
 
 def _looks_right(value: Any, pattern: str | None) -> bool:
@@ -112,66 +220,67 @@ async def consult(
     model: str,
     question: str,
     seated: list[tuple[Module, ModuleConfig]],
+    history: list[tuple[str, str]] | None = None,
+    *,
+    on_call=None,
 ) -> list[LiveResult]:
-    """Consult the seated modules for this question. Returns at most one live result
-    (including a result that is an error, so the answer can say the source was down rather
-    than thinning silently)."""
+    """Query the seated modules for this question: think, call what answers it (several
+    operations if it has several parts), look at what came back, call again if needed.
+    Returns every result, errors included, so the answer can say a source was down rather
+    than thinning silently. `on_call(module, op, args)` is told as each call starts."""
     ops = [(m, c, op) for (m, c) in seated for op in m.operations]
     if not ops:
         return []
     op_ids = [f"{m.id}.{op.id}" for (m, _c, op) in ops]
-    lines = "\n".join(
-        f"- {m.id}.{op.id}: {op.summary} Use when {op.ask_when} "
-        f"Parameters: {', '.join((op.params.get('properties') or {}).keys()) or 'none'}"
-        for (m, _c, op) in ops
-    )
-    try:
-        out = await client.structured(
-            model,
-            CONSULT_PROMPT.format(question=question, operations=lines),
-            _schema(op_ids),
-            system=CONSULT_SYSTEM,
-            think=False,
-            temperature=0.0,
-            num_predict=300,
-        )
-    except Exception:
-        log.warning("module consult failed", exc_info=True)
-        return []
-    choice = str(out.get("operation") or "none")
-    if choice == "none":
-        return []
-    match = next(((m, c, op) for (m, c, op) in ops if f"{m.id}.{op.id}" == choice), None)
-    if not match:
-        return []
-    module, cfg, op = match
-    given = out.get("parameters") if isinstance(out.get("parameters"), dict) else {}
-    given = {k: v for k, v in given.items() if v not in (None, "")}
-    # An exact-match input is never taken from the question, and a value that doesn't look
-    # like what the input takes (a CVE id that isn't one) is dropped (see manifest._param).
-    given = {
-        k: v
-        for k, v in given.items()
-        if not (op.param_specs.get(k) or {}).get("exact")
-        and _looks_right(v, (op.param_specs.get(k) or {}).get("pattern"))
-    }
-    op = _fillable(op, given, [o for (m, _c, o) in ops if m is module])
-    if op is None:
-        return []  # nothing the question gives can fill any fitting operation
-    args = {k: given[k] for k in (op.params.get("properties") or {}) if k in given}
-    import time
-
-    try:
-        res = await call(module, cfg, op, args)
-    except ModuleError as exc:
-        return [LiveResult(module=module, op=op, args=args, when=time.time(), error=str(exc))]
-    return [
-        LiveResult(
-            module=module,
-            op=op,
-            args=args,
-            when=res["when"],
-            count=res["count"],
-            text=render_rows(op, res["rows"]),
-        )
-    ]
+    catalogue = _catalogue(ops)
+    conversation = _conversation(history)
+    known = question + "\n" + "\n".join(text for _, text in (history or []))
+    results: list[LiveResult] = []
+    made: set[str] = set()
+    for _round in range(MAX_ROUNDS):
+        room = min(PER_ROUND, MAX_CALLS - len(results))
+        if room <= 0:
+            break
+        try:
+            out = await client.structured(
+                model,
+                CONSULT_PROMPT.format(
+                    today=datetime.now(UTC).date().isoformat(),
+                    conversation=conversation,
+                    question=question,
+                    operations=catalogue,
+                    results=_results_block(results),
+                    room=room,
+                ),
+                _schema(op_ids),
+                system=CONSULT_SYSTEM,
+                think=True,
+                temperature=0.0,
+                num_predict=900,
+            )
+        except Exception:
+            log.warning("module consult failed", exc_info=True)
+            break
+        batch = []
+        for spec in (out.get("calls") or [])[:room]:
+            prepared = _prepare(spec if isinstance(spec, dict) else {}, ops, known)
+            if not prepared:
+                continue
+            module, _cfg, op, args = prepared
+            key = f"{module.id}.{op.id}:{json.dumps(args, sort_keys=True)}"
+            if key in made:
+                continue
+            made.add(key)
+            batch.append(prepared)
+        if not batch:
+            break
+        for module, _cfg, op, args in batch:
+            if on_call:
+                await on_call(module, op, args)
+        got = await asyncio.gather(*(_run(*b) for b in batch))
+        results.extend(got)
+        # What came back may name what to look up next (a product, a CVE, a host).
+        known += "\n" + "\n".join(r.text for r in got)
+        if out.get("done"):
+            break
+    return results

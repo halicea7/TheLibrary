@@ -50,36 +50,14 @@ def _names(question: str, name: str) -> bool:
     return len(squash(name)) >= 3 and squash(name) in squash(question)
 
 
-def _cannot_hit(mod) -> SearchHit:
-    """A note in the pool: the module is connected, and what it can look up -- so the answer
-    says that instead of "the library has nothing on it"."""
+def _cannot_note(mod) -> str:
+    """For the answer's instructions, not its sources: the module is connected, and what it
+    can look up -- so the answer says that instead of "the library has nothing on it"."""
     can = "; ".join(o.summary.rstrip(".") for o in mod.operations)
-    return SearchHit(
-        chunk_id=uuid.uuid4(),
-        document_id=uuid.uuid5(_MODULE_NS, mod.id),
-        document_title=mod.name,
-        section_path="(no operation fits)",
-        page=None,
-        text=(
-            f"{mod.name} is connected and was considered for this question, but none of its "
-            f"operations answers it, so it was not queried. What it can look up: {can}. Say "
-            f"this plainly; do not say the library or {mod.name} has no information."
-        ),
-        score=1.0,
-        dense_rank=None,
-        lexical_rank=None,
-        kind="live",
-        live={
-            "module": mod.name,
-            "module_id": mod.id,
-            "colour": mod.colour,
-            "op": "no operation fits",
-            "when": 0,
-            "when_label": "",
-            "arg": "",
-            "error": "",
-            "count": 0,
-        },
+    return (
+        f"The reader named {mod.name}, which is connected, but none of its operations answers "
+        f"this question, so it was not queried. Say so plainly, and what it can look up: {can}. "
+        f"Do not say {mod.name} or the library has no information about it."
     )
 
 
@@ -258,6 +236,7 @@ async def run_turn(
         # result joining the passage pool to be cited and verified like any other. Refused
         # when chat is on a remote provider and the module is local-only; the desk says so.
         live_hits: list[SearchHit] = []
+        notes: list[str] = []  # for the model, not citable: e.g. a module that can't help
         if needs_retrieval:
             from library_agent.modules import store as mod_store
             from library_agent.modules.consult import consult as consult_modules
@@ -296,14 +275,16 @@ async def run_turn(
                         (mod, [o.id for o in mod.operations if o not in ops], local_only)
                     )
             if usable:
-                for lr in await consult_modules(client, model, query, usable):
+                # The reader's own words and the conversation: a follow-up ("look those
+                # up") points into the last answer, which the loop can see.
+                for lr in await consult_modules(client, model, question, usable, history):
                     live_hits.append(_live_hit(lr))
                 # The question names a seated module, but nothing it has answers it: say so,
                 # rather than let the answer read as if the module were not there at all.
                 if not live_hits:
                     for mod, _c in usable:
-                        if _names(query, mod.name):
-                            live_hits.append(_cannot_hit(mod))
+                        if _names(question, mod.name):
+                            notes.append(_cannot_note(mod))
                             held_back.append(
                                 (
                                     mod,
@@ -478,6 +459,7 @@ async def run_turn(
             history,
             stance=stance,
             foreign=any(s.cartridge for s in state.sources),
+            notes=notes,
             max_passage_chars=effort_mod.passage_chars(lvl),
         )
         # A stance is an invitation to interpret; give the sampler room to take it.

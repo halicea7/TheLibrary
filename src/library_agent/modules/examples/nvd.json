@@ -69,6 +69,34 @@
         "empty": "No known-exploited vulnerability matches that product.",
         "limit": 20
       }
+    },
+    {
+      "id": "recent_cves",
+      "summary": "CVEs published in the last three days, optionally only those mentioning a product or keyword.",
+      "ask_when": "the question asks for recent, new or latest CVEs or vulnerabilities, optionally in a named product.",
+      "method": "GET",
+      "path": "/rest/json/cves/2.0",
+      "params": {
+        "keyword": {
+          "type": "string",
+          "description": "optional: a product, vendor or word to narrow to, e.g. Chrome",
+          "in": "query",
+          "key": "keywordSearch"
+        }
+      },
+      "query": {
+        "pubStartDate": "{now-3d:%Y-%m-%dT00:00:00.000}",
+        "pubEndDate": "{now:%Y-%m-%dT23:59:59.999}",
+        "resultsPerPage": "20",
+        "noRejected": ""
+      },
+      "response": {
+        "format": "json",
+        "rows": "vulnerabilities[*].cve",
+        "line": "{id} (published {published|date}): {descriptions[0].value|trunc:220} — CVSS {metrics.cvssMetricV31[0].cvssData.baseScore|default:not yet scored}",
+        "empty": "No CVE was published in the last three days that matches.",
+        "limit": 20
+      }
     }
   ]
 }

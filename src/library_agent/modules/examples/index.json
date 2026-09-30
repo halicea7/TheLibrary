@@ -1,10 +1,48 @@
 {
-  "_about": "The examples offered in the bay's Make tab under 'start from an example'. Each is a working module against a public service; `shows` is what it teaches.",
-  "examples": [
-    {"file": "openalex.json", "shows": ["no sign-in", "a JSON response: rows by path (results)", "nested fields and an array index in a line: {last_known_institutions[0].display_name}", "filters: {doi|default:no DOI}"]},
-    {"file": "nvd.json", "shows": ["deep paths into a response: vulnerabilities[*].cve", "a fixed query value alongside the question's (hasKev)", "a strict rate limit and a long cache for a service that asks for them", "how to add an API key later: a header named apiKey"]},
-    {"file": "arxiv.json", "shows": ["an XML (Atom) response: rows by element name (.//entry)", "each child element becomes a field: {title}, {published}"]},
-    {"file": "github.json", "shows": ["path parameters: /repos/{owner}/{repo}/releases", "fixed headers the service expects", "Link-header pagination", "switching to a bearer token for private repositories"]},
-    {"file": "mcp-time.json", "shows": ["an MCP server this machine runs: a program and its arguments, never a shell line", "an operation per read-only tool", "the server's own read-only / destructive marks are checked before each call"]}
-  ]
+ "_about": "The examples offered in the bay's Make tab under 'start from an example'. Each is a working module against a public service; `shows` is what it teaches.",
+ "examples": [
+  {
+   "file": "openalex.json",
+   "shows": [
+    "no sign-in",
+    "a JSON response: rows by path (results)",
+    "nested fields and an array index in a line: {last_known_institutions[0].display_name}",
+    "filters: {doi|default:no DOI}"
+   ]
+  },
+  {
+   "file": "nvd.json",
+   "shows": [
+    "deep paths into a response: vulnerabilities[*].cve",
+    "a fixed query value alongside the question's (hasKev)",
+    "a strict rate limit and a long cache for a service that asks for them",
+    "how to add an API key later: a header named apiKey",
+    "relative dates in a fixed query: {now-3d:%Y-%m-%dT00:00:00.000}, so 'recent' needs no input"
+   ]
+  },
+  {
+   "file": "arxiv.json",
+   "shows": [
+    "an XML (Atom) response: rows by element name (.//entry)",
+    "each child element becomes a field: {title}, {published}"
+   ]
+  },
+  {
+   "file": "github.json",
+   "shows": [
+    "path parameters: /repos/{owner}/{repo}/releases",
+    "fixed headers the service expects",
+    "Link-header pagination",
+    "switching to a bearer token for private repositories"
+   ]
+  },
+  {
+   "file": "mcp-time.json",
+   "shows": [
+    "an MCP server this machine runs: a program and its arguments, never a shell line",
+    "an operation per read-only tool",
+    "the server's own read-only / destructive marks are checked before each call"
+   ]
+  }
+ ]
 }

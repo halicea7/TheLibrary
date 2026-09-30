@@ -123,6 +123,7 @@ def build_messages(
     stance: str | None = None,
     foreign: bool = False,
     reflections: dict[str, str] | None = None,
+    notes: list[str] | None = None,
 ) -> list[dict[str, str]]:
     system = SYSTEM
     # Documents come from other people now -- cartridges, shared folders. Their text is
@@ -141,6 +142,9 @@ def build_messages(
         )
     if stance and stance in STANCES:
         system += f"\n\nFor this answer, take a stance — {STANCES[stance]['label']}:\n{STANCES[stance]['prompt']}"
+    # About this turn's connected systems -- guidance, never a source to cite.
+    for note in notes or []:
+        system += f"\n\n{note}"
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
     for role, text in history[-8:]:
         messages.append({"role": role, "content": text})

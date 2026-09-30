@@ -116,7 +116,7 @@ def build(op: Operation, args: dict[str, Any]) -> tuple[str, dict[str, str], Any
     path = op.path
     for name in op.path_params():
         path = path.replace("{" + name + "}", quote(_render_value(args[name]), safe=""))
-    query: dict[str, str] = dict(op.const_query)
+    query: dict[str, str] = {k: relative_dates(v) for k, v in op.const_query.items()}
     body_args: dict[str, Any] = {}
     for name, v in args.items():
         spec = op.param_specs.get(name) or {}
@@ -227,6 +227,26 @@ async def _fetch(
 # ------------------------------------------------------------------- responses
 
 _SEG = re.compile(r"([^.\[\]]+)|\[(\*|\d+)\]")
+
+
+_RELDATE = re.compile(r"\{now(?:([+-])(\d{1,4})([dh]))?(?::([^{}]{1,40}))?\}")
+
+
+def relative_dates(value: str) -> str:
+    """A fixed query value may name a moment relative to now, formatted as the service
+    wants it: "{now-7d:%Y-%m-%dT00:00:00.000}" is the start of the day a week ago (UTC),
+    "{now:%Y-%m-%d}" today. So "recent" needs no input a model would have to compute."""
+    from datetime import UTC, datetime, timedelta
+
+    def one(m: re.Match) -> str:
+        sign, n, unit, fmt = m.groups()
+        t = datetime.now(UTC)
+        if n:
+            delta = timedelta(days=int(n)) if unit == "d" else timedelta(hours=int(n))
+            t = t - delta if sign == "-" else t + delta
+        return t.strftime(fmt or "%Y-%m-%dT%H:%M:%SZ")
+
+    return _RELDATE.sub(one, str(value))
 
 
 def dig(obj: Any, path: str) -> Any:

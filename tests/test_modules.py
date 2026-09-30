@@ -127,7 +127,7 @@ class Picker:
 
     async def structured(self, model, prompt, schema, **kw):
         assert "sentinelone.cve_exposure" in schema["properties"]["operation"]["enum"]
-        return {"operation": self.operation, "parameters": self.parameters}
+        return {"need": "a live look", "operation": self.operation, "parameters": self.parameters}
 
 
 async def test_consult_picks_runs_and_renders(served):
@@ -152,6 +152,45 @@ async def test_consult_skips_when_a_required_param_is_missing(served):
         Picker("sentinelone.cve_exposure", {}), "m", "any exposure?", [(SENTINELONE, _cfg())]
     )
     assert out == [] and not served.state.calls
+
+
+def test_an_unfillable_choice_falls_back_to_a_sibling_the_question_fills():
+    # "Which hosts have Chrome?": the per-host lookup also needs the vendor, which the
+    # question doesn't give; the inventory lookup takes just the name and still answers.
+    from library_agent.modules.consult import _fillable
+
+    ep, inv = SENTINELONE.op("app_endpoints"), SENTINELONE.op("app_inventory")
+    assert _fillable(ep, {"application": "Chrome"}, SENTINELONE.operations) is inv
+    assert (
+        _fillable(ep, {"application": "Chrome", "vendor": "Google LLC"}, SENTINELONE.operations)
+        is ep
+    )
+    assert _fillable(SENTINELONE.op("cve_exposure"), {}, SENTINELONE.operations) is None
+
+
+def test_an_exact_input_is_never_taken_from_the_question():
+    # "Google" in the question is not "Google LLC" in the inventory: an exact match would
+    # find nothing and read as "not installed".
+    assert SENTINELONE.op("app_endpoints").param_specs["vendor"]["exact"] is True
+    from library_agent.modules.manifest import from_dict, to_dict
+
+    back = from_dict(to_dict(SENTINELONE))
+    assert back.op("app_endpoints").param_specs["vendor"]["exact"] is True
+
+
+async def test_consult_drops_a_guessed_exact_input_and_falls_back(served, monkeypatch):
+    from library_agent.modules import consult as cm
+
+    ran = []
+
+    async def fake_call(module, cfg, op, args):
+        ran.append((op.id, args))
+        return {"rows": [], "count": 0, "when": 0.0}
+
+    monkeypatch.setattr(cm, "call", fake_call)
+    c = Picker("sentinelone.app_endpoints", {"application": "Google Chrome", "vendor": "Google"})
+    await consult(c, "m", "which hosts is Google Chrome installed on?", [(SENTINELONE, _cfg())])
+    assert ran == [("app_inventory", {"application": "Google Chrome"})]
 
 
 async def test_a_down_source_surfaces_as_an_error_not_silence(served, monkeypatch):

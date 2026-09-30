@@ -246,6 +246,10 @@ def _param(name: str, spec: dict, path_names: set[str]) -> tuple[dict, dict]:
         "max": spec.get("max"),
         "values": schema.get("enum"),
         "max_length": schema.get("maxLength"),
+        # Must match the source's own listing exactly (a vendor as the inventory spells
+        # it): never filled from a reader's question, where "Google" for "Google LLC"
+        # would find nothing and read as "not installed".
+        "exact": bool(spec.get("exact")),
     }
     return schema, placement
 
@@ -539,6 +543,8 @@ def to_dict(m: Module) -> dict:
             for k in ("default", "min", "max"):
                 if pl.get(k) is not None:
                     spec[k] = pl[k]
+            if pl.get("exact"):
+                spec["exact"] = True
             params[name] = spec
         if o.method == "MCP":
             for spec in params.values():

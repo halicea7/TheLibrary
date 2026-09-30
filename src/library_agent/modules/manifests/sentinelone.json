@@ -42,7 +42,7 @@
       "response": {
         "format": "json",
         "rows": "data",
-        "line": "{cveId}: {applicationName} on {endpointName} \u2014 severity {severity}",
+        "line": "{cveId}: {applicationName} on {endpointName} — severity {severity}",
         "empty": "No fleet endpoint is recorded as exposed to this CVE.",
         "limit": 30
       }
@@ -50,7 +50,7 @@
     {
       "id": "ioc_seen",
       "summary": "Whether an indicator of compromise has been seen in the tenant.",
-      "ask_when": "the question gives an indicator \u2014 a file hash, IP address, domain or URL \u2014 and asks whether it has been seen, is known, or is malicious.",
+      "ask_when": "the question gives an indicator — a file hash, IP address, domain or URL — and asks whether it has been seen, is known, or is malicious.",
       "method": "GET",
       "path": "/web/api/v2.1/threat-intelligence/iocs",
       "params": {
@@ -68,14 +68,14 @@
       "response": {
         "format": "json",
         "rows": "data",
-        "line": "{value} \u2014 {name} ({type}), source {source}",
+        "line": "{value} — {name} ({type}), source {source}",
         "empty": "This indicator is not in the tenant's threat-intelligence records.",
         "limit": 20
       }
     },
     {
       "id": "app_inventory",
-      "summary": "Whether an application is present in the fleet, and its vendor.",
+      "summary": "Which applications in the fleet match a name, and on how many endpoints each is installed.",
       "ask_when": "the question asks whether a named application or piece of software is installed, present or in use anywhere in the fleet.",
       "method": "GET",
       "path": "/web/api/v2.1/application-management/inventory",
@@ -84,7 +84,7 @@
           "type": "string",
           "description": "an application name, e.g. OpenSSL",
           "in": "query",
-          "key": "applicationName__contains",
+          "key": "name__contains",
           "required": true
         }
       },
@@ -94,7 +94,7 @@
       "response": {
         "format": "json",
         "rows": "data",
-        "line": "{applicationName} by {applicationVendor}",
+        "line": "{applicationName} by {applicationVendor}: installed on {endpointsCount} endpoints ({applicationVersionsCount} versions)",
         "empty": "No such application is in the fleet inventory.",
         "limit": 30
       }
@@ -112,6 +112,14 @@
           "in": "query",
           "key": "applicationName",
           "required": true
+        },
+        "vendor": {
+          "type": "string",
+          "description": "the application's vendor exactly as the inventory lists it, e.g. Zoom Communications, Inc.",
+          "in": "query",
+          "key": "applicationVendor",
+          "required": true,
+          "exact": true
         }
       },
       "query": {
@@ -120,7 +128,7 @@
       "response": {
         "format": "json",
         "rows": "data",
-        "line": "{endpointName}: {applicationName} {applicationVersion} ({osType})",
+        "line": "{endpointName}: {applicationName} {version} ({osName}, {siteName})",
         "empty": "No endpoint is recorded as running that application.",
         "limit": 40
       }
@@ -145,7 +153,7 @@
       "response": {
         "format": "json",
         "rows": "data",
-        "line": "{computerName} \u2014 agent {id}",
+        "line": "{computerName} — {osName}, agent {agentVersion}, last active {lastActiveDate|date}",
         "empty": "No agent matched.",
         "limit": 40
       }

@@ -558,6 +558,11 @@ select, .toggle {
 .bay-tabs button[aria-selected="true"] { color:var(--fg); border-bottom-color:var(--gilt); }
 .bay-pane { overflow-y:auto; padding:12px 16px 18px; font:12.5px/1.55 var(--sans); color:var(--dim); scrollbar-width:thin; }
 .tok-card { display:grid; grid-template-columns:34px 1fr auto; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid var(--rule-soft); }
+.exs { display:grid; gap:10px; margin:6px 0 12px; }
+.ex { border:1px solid var(--rule); border-left:3px solid var(--c); border-radius:4px; padding:8px 10px; }
+.ex-h { display:flex; align-items:center; gap:10px; } .ex-h .m { font:10.5px var(--mono); color:var(--faint); } .ex-h .go { margin-left:auto; }
+.ex .shows { margin:4px 0 0; padding-left:18px; font:11px/1.5 var(--sans); color:var(--dim); }
+.drawer.bay.over { outline:2px dashed var(--verdigris); outline-offset:-6px; }
 .tok-card .tok-row.face { margin:0; cursor:default; }
 .tok-card[data-armed="true"] { box-shadow:inset 3px 0 0 var(--gilt); padding-left:8px; }
 .tok-card b { color:var(--fg); font:600 13px/1.3 var(--serif); }
@@ -2050,6 +2055,17 @@ function bayOpen() {
       <div class="bay-pane" id="bay-pane"></div></div></div>`;
   document.body.append(lock, box);
   tokens.els = { lock, box };
+  // A module file dropped on the bay: reviewed in Make before it is added.
+  box.addEventListener('dragover', e => { e.preventDefault(); box.classList.add('over'); });
+  box.addEventListener('dragleave', () => box.classList.remove('over'));
+  box.addEventListener('drop', async e => {
+    e.preventDefault(); box.classList.remove('over');
+    const f = [...(e.dataTransfer.files || [])].find(f => /\.json$/i.test(f.name));
+    if (!f) { say('The bay takes a module file (.json).', true); return; }
+    let o; try { o = JSON.parse(await f.text()); } catch { say('That file is not JSON.', true); return; }
+    if (!isModuleFile(o)) { say('That JSON is not a module file (library-connector/1).', true); return; }
+    await moduleDropped(o);
+  });
   tokens.onKey = e => { if (e.key === 'Escape') bayClose(); };
   addEventListener('keydown', tokens.onKey);
   if (window.Token3D) {
@@ -2177,6 +2193,10 @@ function custRender() {
     <details><summary>Planets</summary>
       ${chk('planets', 'Metal planet inlays')}
       <label>Highlighted<select data-k="planet"><option value="-1">None</option>${(T.PLANETS || []).map((p, i) => `<option value="${i}" ${i === +d.planet ? 'selected' : ''}>${p}</option>`).join('')}</select></label></details>
+    <details><summary>Classification</summary>
+      <p style="margin:4px 0">What this module's live results count as. A question whose ceiling is below it — and a remote model held to the remote ceiling — does not consult it at all, and an answer that cites it is marked at this level.</p>
+      ${scale ? `<label>Level<select id="cust-level" onchange="custLevelSave(this)">${scale.levels.map(l => `<option value="${esc(l.id)}" ${l.id === (m.classification || scale.default) ? 'selected' : ''}>${esc(l.label)}${l.id === scale.default ? ' (default)' : ''}</option>`).join('')}</select></label>` : '<p>The classification scale is unavailable.</p>'}
+    </details>
     <details ${m.configured ? '' : 'open'}><summary>Connection</summary>
       <p style="margin:4px 0">${esc(m.description)}</p>
       <label>Base URL<input type="text" id="cust-url" value="${esc(m.base_url || '')}" placeholder="https://your-tenant.example.net"></label>
@@ -2227,10 +2247,16 @@ async function custConnSave() {
   try { await tokenPut(tokens.edit, body); if ($('#cust-tok')) $('#cust-tok').value = ''; $('#cust-msg').textContent = 'Connection saved.'; await loadTokens(); tokens.draft && tokens.view?.state((tokens.list.find(m => m.id === tokens.edit) || {}).configured ? 'ready' : 'error'); }
   catch (e) { $('#cust-msg').textContent = 'Not saved: ' + e.message; }
 }
+async function custLevelSave(sel) {
+  try {
+    await tokenPut(tokens.edit, { classification: sel.value === scale.default ? '' : sel.value });
+    $('#cust-msg').textContent = `Classified ${lvOf(sel.value).label}.`; await loadTokens();
+  } catch (e) { $('#cust-msg').textContent = 'Not saved: ' + e.message; }
+}
 async function custConnTest(btn) {
   btn.disabled = true; $('#cust-msg').textContent = 'reaching…'; tokens.view?.state('connecting');
   try { const r = await (await fetch('/api/settings/modules/' + tokens.edit + '/test', { method: 'POST' })).json();
-    $('#cust-msg').textContent = r.ok ? `Reached (${r.count} rows from the probe).` : `✗ ${r.error}`; setTimeout(() => tokens.view?.state(r.ok ? 'ready' : 'error'), 2200); }
+    $('#cust-msg').textContent = r.ok ? `Reached (${r.count} rows${r.operation ? ' from ' + r.operation : ''}).` : `✗ ${r.error}`; setTimeout(() => tokens.view?.state(r.ok ? 'ready' : 'error'), 2200); }
   catch (e) { $('#cust-msg').textContent = String(e); tokens.view?.state('error'); }
   btn.disabled = false;
 }
@@ -2312,7 +2338,7 @@ function makeManifest() {
     }),
   };
 }
-function makeStart() { maker.m = null; maker.editing = null; maker.oa = null; maker.imp = null; maker.tries = {}; maker.msg = ''; maker.conn = { base_url: '', token: '', username: '' }; if (!tokens.els) bayOpen(); bayTab('make'); }
+function makeStart() { maker.m = null; maker.editing = null; maker.oa = null; maker.imp = null; maker.ex = null; maker.tries = {}; maker.msg = ''; maker.conn = { base_url: '', token: '', username: '' }; if (!tokens.els) bayOpen(); bayTab('make'); }
 async function makeEdit(id) {
   const d = await (await fetch('/api/connectors/' + id)).json();
   maker.m = makeFromManifest(d); maker.editing = id; maker.tries = {}; maker.msg = '';
@@ -2360,12 +2386,17 @@ function makeRender() {
   if (!maker.m) {
     pane.innerHTML = `<div class="mk">
       <h4>Make a module</h4><p class="nt">A module is a read-only line to an API that the librarian can consult during a question. Start from whichever you have.</p>
-      <div class="starts"><button class="linkish" onclick="maker.m = makeBlank(); makeRender()">from scratch</button>
+      <div class="starts"><button class="linkish" onclick="makeExamples()">from an example</button>
+        <button class="linkish" onclick="maker.m = makeBlank(); makeRender()">from scratch</button>
         <button class="linkish" onclick="maker.oa = maker.oa || { text: '' }; makeRender()">from an OpenAPI / Swagger document</button>
         <button class="linkish" onclick="maker.curl = maker.curl || ' '; makeRender()">from a curl command</button>
         <button class="linkish" onclick="maker.pm = maker.pm || { text: '' }; makeRender()">from a Postman collection</button>
         <button class="linkish" onclick="maker.mcp = maker.mcp || { type: 'mcp_stdio', command: '', args: '', env: '', secret_env: '', secret: '', url: '', name: '' }; makeRender()">from an MCP server</button>
         <label style="display:inline-flex;gap:6px;align-items:center;margin:0">import a module file <input type="file" accept=".json,application/json" onchange="makeImportFile(this)"></label></div>
+      ${maker.ex ? `<h4>Examples</h4><p class="nt">Working modules against public services. Pick one to open it as a draft: <i>try it</i> on each operation, change what you like, then make it — or keep it as a guide to how a module is put together.</p>
+        <div class="exs">${maker.ex.map(x => `<div class="ex" style="--c:${esc2(x.colour)}"><div class="ex-h"><b>${esc2(x.name)}</b><span class="m">${esc2(x.kind)} · ${x.operations.length} operation${x.operations.length === 1 ? '' : 's'}${x.transport !== 'http' ? ' · MCP' : ''}</span>
+          <button class="go" onclick="makeExample('${esc2(x.slug)}')">${x.taken ? 'open a copy' : 'use this'}</button></div>
+          <p class="nt">${esc2(x.description)}</p><ul class="shows">${x.shows.map(s => `<li>${esc2(s)}</li>`).join('')}</ul></div>`).join('')}</div>` : ''}
       ${maker.oa ? `<h4>OpenAPI / Swagger</h4><label class="wide">Document<textarea id="mk-oa" placeholder="Paste the JSON or YAML here">${esc2(maker.oa.text)}</textarea></label>
         <label>or a file<input type="file" accept=".json,.yaml,.yml" onchange="makeOaFile(this)"></label>
         <div class="acts"><button onclick="makeOaList()">list its operations</button></div>
@@ -2587,10 +2618,37 @@ async function makeCurl() {
 async function makeImportFile(input) {
   const f = input.files[0]; if (!f) return;
   let file; try { file = JSON.parse(await f.text()); } catch { maker.msg = 'That file is not JSON.'; return makeRender(); }
+  return makeImportObject(file);
+}
+// A module file: a manifest, or the export wrapper ({manifest, design, requires}).
+const isModuleFile = o => !!o && typeof o === 'object'
+  && (o.format === 'library-connector/1' || (o.manifest && o.manifest.format === 'library-connector/1'));
+// Dropped on the accession box or the bay: the same review a shared file gets -- where it
+// reaches, how it signs in, every operation -- before anything is added.
+async function moduleDropped(file) {
+  makeStart();
+  await makeImportObject(file);
+}
+async function makeImportObject(file) {
   const r = await fetch('/api/connectors/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file }) });
   const j = await r.json();
   if (!r.ok) { maker.msg = j.detail; return makeRender(); }
   maker.imp = { file, summary: j.summary }; maker.msg = ''; makeRender();
+}
+async function makeExamples() {
+  try { maker.ex = (await (await fetch('/api/connectors/examples')).json()).examples; }
+  catch { maker.msg = 'Could not load the examples.'; }
+  makeRender();
+}
+async function makeExample(slug) {
+  const j = await (await fetch('/api/connectors/examples/' + encodeURIComponent(slug))).json();
+  const m = j.manifest;
+  // One you already have keeps its id; the copy gets its own so it can be made alongside.
+  if ((maker.ex || []).find(x => x.slug === slug)?.taken) { m.id = m.id + '-copy'; m.name = m.name + ' (copy)'; }
+  maker.m = makeFromManifest(m); maker.ex = null; maker.editing = null; maker.tries = {};
+  maker.conn = { base_url: m.base_url || '', token: '', username: '' };
+  maker.msg = `The ${m.name} example, as a draft. Try each operation, change anything, then make it.`;
+  makeRender();
 }
 async function makeImportApprove() {
   const r = await fetch('/api/connectors/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: maker.imp.file, approve: true }) });
@@ -2708,7 +2766,18 @@ async function collect(items) {
 }
 
 async function accession(files) {
-  const all = [...files].filter(f => !f.name.startsWith('.'));
+  let all = [...files].filter(f => !f.name.startsWith('.'));
+  // A module file (.json) goes to the bay for review, not to the shelf.
+  const modules = [];
+  for (const f of all.filter(f => /\.json$/i.test(f.name))) {
+    try { const o = JSON.parse(await f.text()); if (isModuleFile(o)) modules.push(o); } catch {}
+  }
+  if (modules.length) {
+    all = all.filter(f => !/\.json$/i.test(f.name));
+    await moduleDropped(modules[0]);
+    if (modules.length > 1) say(`${modules.length} module files dropped; reviewing the first — drop the others one at a time.`);
+    if (!all.length) return;
+  }
   const skipped = all.filter(f => !SUPPORTED.test(f.name));
   files = all.filter(f => SUPPORTED.test(f.name));
   const skipMsg = skipped.length

@@ -104,3 +104,28 @@ def test_a_composition_carries_its_banner_and_marks():
     plain = Composition(title="T")
     plain.sections = comp.sections
     assert "**" not in plain.markdown().split("\n")[0]
+
+
+def _live(module_id):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(kind="live", chunk_id="x", live={"module_id": module_id})
+
+
+async def test_a_modules_live_results_carry_its_level(tmp_path, monkeypatch):
+    from library_agent.modules import store
+
+    monkeypatch.setenv("LIBRARY_MODULES_FILE", str(tmp_path / "modules.json"))
+    store._cache = None
+    s = cls.preset("us")
+    store.save({"s1": store.ModuleConfig(id="s1", classification="C")})
+    assert store.config_for("s1").classification == "C"
+    assert cls.module_level("s1", s) == "C"
+    assert cls.module_level("other", s) == "U"  # unset: the default
+    store.save({"s1": store.ModuleConfig(id="s1", classification="gone")})
+    assert cls.module_level("s1", s) == "U"  # a level no longer on the scale
+    store.save({"s1": store.ModuleConfig(id="s1", classification="S")})
+    # Only live results: no passages to look up, and they still get the module's level.
+    assert await cls.hit_levels(None, [_live("s1"), _live("other")], s) == ["S", "U"]
+    # A question held to Confidential may not consult a Secret module.
+    assert cls.module_level("s1", s) not in cls.allowed_levels("C", s=s)

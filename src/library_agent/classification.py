@@ -368,7 +368,7 @@ def default_level() -> str:
 async def hit_levels(db, hits, s: Scale | None = None) -> list[str]:
     """Each hit's level, in order: a passage its portion mark, else its volume's level,
     else the default; a reading the highest of its volume and the passages it spans; a
-    live module result the default (it is not the library's material)."""
+    live module result the level set for its module in Customize (see module_level)."""
     from sqlalchemy import text
 
     s = s or load()
@@ -380,23 +380,26 @@ async def hit_levels(db, hits, s: Scale | None = None) -> list[str]:
         for c in (getattr(h, "span_chunk_ids", None) or [h.chunk_id])
         if c
     }
-    if not chunk_ids:
-        return [s.default for _ in hits]
     rows = (
-        await db.execute(
-            text(
-                "select c.id, c.portion, d.classification from chunk c"
-                " join document d on d.id = c.document_id where c.id = any(cast(:ids as uuid[]))"
-            ),
-            {"ids": list(chunk_ids)},
-        )
-    ).all()
+        (
+            await db.execute(
+                text(
+                    "select c.id, c.portion, d.classification from chunk c"
+                    " join document d on d.id = c.document_id where c.id = any(cast(:ids as uuid[]))"
+                ),
+                {"ids": list(chunk_ids)},
+            )
+        ).all()
+        if chunk_ids
+        else []
+    )
     doc_level = {str(i): (dl if dl in ids else None) for i, _, dl in rows}
     portion = {str(i): (p if p in ids else None) for i, p, _ in rows}
     out = []
     for h in hits:
         if getattr(h, "kind", "passage") == "live":
-            out.append(s.default)
+            # A module's results count as the level set for it in Customize.
+            out.append(module_level((getattr(h, "live", None) or {}).get("module_id"), s))
             continue
         span = [str(c) for c in (getattr(h, "span_chunk_ids", None) or [h.chunk_id])]
         if getattr(h, "kind", "passage") == "reading":
@@ -440,3 +443,13 @@ async def within(db, document_ids: list, ceiling: str, s: Scale | None = None) -
     top = s.rank(ceiling)
     kept = [d for d in document_ids if s.rank(level.get(d, s.default)) <= top]
     return kept, [d for d in document_ids if s.rank(level.get(d, s.default)) > top]
+
+
+def module_level(module_id: str | None, s: Scale | None = None) -> str:
+    """The level a module's live results count as: set per module in Customize, else the
+    scale's default. A level no longer on the scale falls back to the default too."""
+    from library_agent.modules import store
+
+    s = s or load()
+    lv = store.config_for(module_id).classification if module_id else ""
+    return lv if lv in {x.id for x in s.levels} else s.default

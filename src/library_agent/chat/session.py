@@ -70,6 +70,7 @@ def _live_hit(lr) -> SearchHit:
         kind="live",
         live={
             "module": lr.module.name,
+            "module_id": lr.module.id,
             "colour": lr.module.colour,
             "op": lr.op.id,
             "when": lr.when,
@@ -225,7 +226,23 @@ async def run_turn(
             # Clearance is per operation: on a remote provider only the operations cleared
             # for any model are offered; a token with none left is held back whole.
             usable, held_back = [], []
+            local_only = "local models only; chat is on a remote provider"
             for mod, mcfg in mod_store.seated_modules():
+                # Classified above what this question may draw on: not consulted at all,
+                # so nothing it would return reaches the model.
+                mlevel = classification.module_level(mod.id, scale)
+                if levels is not None and mlevel not in levels:
+                    held_back.append(
+                        (
+                            mod,
+                            [o.id for o in mod.operations],
+                            (
+                                f"classified {scale.level(mlevel).label}, above this "
+                                f"question's ceiling ({scale.level(top).label})"
+                            ),
+                        )
+                    )
+                    continue
                 ops = mod.cleared(remote_chat)
                 if ops:
                     usable.append(
@@ -235,7 +252,9 @@ async def run_turn(
                         )
                     )
                 if len(ops) < len(mod.operations):
-                    held_back.append((mod, [o.id for o in mod.operations if o not in ops]))
+                    held_back.append(
+                        (mod, [o.id for o in mod.operations if o not in ops], local_only)
+                    )
             if usable:
                 for lr in await consult_modules(client, model, query, usable):
                     live_hits.append(_live_hit(lr))
@@ -248,9 +267,9 @@ async def run_turn(
                             {
                                 "module": m.name
                                 + ("" if len(ids) == len(m.operations) else f" ({', '.join(ids)})"),
-                                "reason": "local models only; chat is on a remote provider",
+                                "reason": why,
                             }
-                            for m, ids in held_back
+                            for m, ids, why in held_back
                         ],
                     },
                 }

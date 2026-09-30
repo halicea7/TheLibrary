@@ -1,0 +1,24 @@
+{
+  "format": "library-connector/1",
+  "id": "time",
+  "name": "Time",
+  "kind": "MCP server",
+  "colour": "#2a9d8f",
+  "description": "An MCP server run on this machine: the reference time server, started with uvx. The shape to copy for any MCP server -- the program and its arguments (never a shell line), and one operation per read-only tool.",
+  "clearance": "any",
+  "transport": {"type": "mcp_stdio", "command": "uvx", "args": ["mcp-server-time"]},
+  "limits": {"timeout": 30, "max_bytes": 200000, "rate_per_minute": 30, "cache_seconds": 30},
+  "operations": [
+    {
+      "id": "current_time",
+      "summary": "The current date and time in a time zone.",
+      "ask_when": "the question asks what time or date it is now somewhere.",
+      "tool": "get_current_time",
+      "read_only": true,
+      "params": {
+        "timezone": {"type": "string", "description": "an IANA time zone, e.g. America/New_York", "required": true}
+      },
+      "response": {"format": "json", "rows": "", "line": "{timezone}: {datetime}", "empty": "no answer", "limit": 1}
+    }
+  ]
+}

@@ -27,6 +27,9 @@ class ModuleConfig:
     # in a socket), and how the token looks. Neither is secret.
     socket: int | None = None
     design: dict = field(default_factory=dict)
+    # What this module's live results count as on the classification scale (a level id),
+    # set here, per installation, not in the shared module file. Empty: the default.
+    classification: str = ""
 
     def public(self) -> dict:
         return {
@@ -38,6 +41,7 @@ class ModuleConfig:
             "token_tail": self.token[-4:] if len(self.token) >= 8 else "",
             "socket": self.socket,
             "design": self.design,
+            "classification": self.classification,
         }
 
 
@@ -76,6 +80,7 @@ def load() -> dict[str, ModuleConfig]:
                 extra_headers={str(k): str(x) for k, x in (v.get("extra_headers") or {}).items()},
                 socket=v.get("socket") if isinstance(v.get("socket"), int) else None,
                 design=v.get("design") if isinstance(v.get("design"), dict) else {},
+                classification=str(v.get("classification") or ""),
             )
             # Seated and socketed are one fact; a file from before sockets gets the first
             # free socket for a seated module.
@@ -100,6 +105,7 @@ def save(configs: dict[str, ModuleConfig]) -> None:
                 "extra_headers": c.extra_headers,
                 "socket": c.socket,
                 "design": c.design,
+                "classification": c.classification,
             }
             for c in configs.values()
         }

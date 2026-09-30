@@ -340,6 +340,8 @@ class ModulePut(BaseModel):
     # The bay: 0-3 puts the token in that socket (seating it), -1 takes it out.
     socket: int | None = None
     design: dict | None = None
+    # A level id on the classification scale; "" returns it to the default.
+    classification: str | None = None
 
 
 def _module_public(mod, cfg) -> dict:
@@ -436,6 +438,12 @@ async def put_module(mid: str, body: ModulePut) -> dict:
             cfg.design = clean(body.design)
         except DesignError as exc:
             raise HTTPException(422, str(exc)) from exc
+    if body.classification is not None:
+        from library_agent import classification as cls
+
+        if body.classification and body.classification not in {lv.id for lv in cls.load().levels}:
+            raise HTTPException(422, "not a level on the classification scale")
+        cfg.classification = body.classification
     cfgs[mid] = cfg
     mod_store.save(cfgs)
     return _module_public(BUILTIN[mid], cfg)

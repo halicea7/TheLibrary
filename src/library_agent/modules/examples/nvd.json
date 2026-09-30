@@ -1,0 +1,51 @@
+{
+  "format": "library-connector/1",
+  "id": "nvd",
+  "name": "NVD",
+  "kind": "vulnerability database",
+  "colour": "#c0392b",
+  "description": "The U.S. National Vulnerability Database: what a CVE is and how severe, and which vulnerabilities CISA lists as known to be exploited. Works without a key at a low rate; an NVD API key (free) raises the limit -- set the auth to a header named apiKey.",
+  "base_url": "https://services.nvd.nist.gov",
+  "clearance": "any",
+  "auth": {"type": "none"},
+  "headers": {},
+  "limits": {"timeout": 30, "max_bytes": 3000000, "rate_per_minute": 8, "cache_seconds": 3600},
+  "allowed_hosts": [],
+  "operations": [
+    {
+      "id": "cve_details",
+      "summary": "One CVE: its description, severity score, and whether CISA lists it as exploited.",
+      "ask_when": "the question names a CVE id and asks what it is, how severe it is, or whether it is being exploited.",
+      "method": "GET",
+      "path": "/rest/json/cves/2.0",
+      "params": {
+        "cve": {"type": "string", "description": "a CVE id, e.g. CVE-2024-3094", "in": "query", "key": "cveId", "required": true}
+      },
+      "response": {
+        "format": "json",
+        "rows": "vulnerabilities[*].cve",
+        "line": "{id} ({vulnStatus}, published {published|date}): {descriptions[0].value|trunc:400} — CVSS {metrics.cvssMetricV31[0].cvssData.baseScore|default:n/a} {metrics.cvssMetricV31[0].cvssData.baseSeverity|default:} — CISA known exploited since {cisaExploitAdd|default:never}",
+        "empty": "NVD has no record of that CVE.",
+        "limit": 1
+      }
+    },
+    {
+      "id": "known_exploited",
+      "summary": "Vulnerabilities in CISA's Known Exploited catalogue matching a product or vendor.",
+      "ask_when": "the question asks which vulnerabilities in a named product or vendor are known to be exploited, or on CISA's KEV list.",
+      "method": "GET",
+      "path": "/rest/json/cves/2.0",
+      "params": {
+        "product": {"type": "string", "description": "a product or vendor name, e.g. Fortinet", "in": "query", "key": "keywordSearch", "required": true}
+      },
+      "query": {"hasKev": "", "resultsPerPage": "20"},
+      "response": {
+        "format": "json",
+        "rows": "vulnerabilities[*].cve",
+        "line": "{id}: {cisaVulnerabilityName|default:(unnamed)} — exploited since {cisaExploitAdd}, CISA action due {cisaActionDue}",
+        "empty": "No known-exploited vulnerability matches that product.",
+        "limit": 20
+      }
+    }
+  ]
+}

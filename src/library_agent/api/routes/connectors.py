@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -100,6 +101,48 @@ async def list_connectors() -> dict:
         "errors": registry.errors(),
         "folder": str(registry.folder()),
     }
+
+
+EXAMPLES = Path(__file__).resolve().parents[2] / "modules" / "examples"
+
+
+def _examples() -> list[dict]:
+    index = json.loads((EXAMPLES / "index.json").read_text())
+    out = []
+    for e in index["examples"]:
+        m = json.loads((EXAMPLES / e["file"]).read_text())
+        out.append({"slug": e["file"].removesuffix(".json"), "shows": e["shows"], "manifest": m})
+    return out
+
+
+@router.get("/examples")
+async def examples() -> dict:
+    """Working modules against public services, to start a new one from: each is loaded
+    into the builder as a draft to try, change and make -- the guide is the example."""
+    return {
+        "examples": [
+            {
+                "slug": e["slug"],
+                "name": e["manifest"]["name"],
+                "kind": e["manifest"].get("kind", ""),
+                "colour": e["manifest"].get("colour", ""),
+                "description": e["manifest"].get("description", ""),
+                "shows": e["shows"],
+                "transport": (e["manifest"].get("transport") or {}).get("type", "http"),
+                "operations": [o["id"] for o in e["manifest"]["operations"]],
+                "taken": registry.get(e["manifest"]["id"]) is not None,
+            }
+            for e in _examples()
+        ]
+    }
+
+
+@router.get("/examples/{slug}")
+async def example(slug: str) -> dict:
+    for e in _examples():
+        if e["slug"] == slug:
+            return {"manifest": e["manifest"], "shows": e["shows"]}
+    raise HTTPException(404, "no such example")
 
 
 @router.get("/{mid}")

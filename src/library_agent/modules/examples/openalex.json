@@ -1,0 +1,75 @@
+{
+  "format": "library-connector/1",
+  "id": "openalex",
+  "name": "OpenAlex",
+  "kind": "scholarly works",
+  "colour": "#3b7dd8",
+  "description": "OpenAlex, the open catalogue of scholarly works: find papers by topic, and see how often each is cited. No account or key needed.",
+  "base_url": "https://api.openalex.org",
+  "clearance": "any",
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "limits": {
+    "timeout": 20,
+    "max_bytes": 2000000,
+    "rate_per_minute": 30,
+    "cache_seconds": 600
+  },
+  "allowed_hosts": [],
+  "operations": [
+    {
+      "id": "works_search",
+      "summary": "Papers on a topic, most relevant first, with year and citation count.",
+      "ask_when": "the question asks for papers, research or literature on a topic beyond what the library holds, or which work on a topic is most cited.",
+      "method": "GET",
+      "path": "/works",
+      "params": {
+        "topic": {
+          "type": "string",
+          "description": "the subject to search for, e.g. dense passage retrieval",
+          "in": "query",
+          "key": "search",
+          "required": true
+        }
+      },
+      "query": {
+        "per_page": "10"
+      },
+      "response": {
+        "format": "json",
+        "rows": "results",
+        "line": "{display_name} ({publication_year}) — cited {cited_by_count} times — {doi|default:no DOI}",
+        "empty": "OpenAlex has no work on that topic.",
+        "limit": 10
+      }
+    },
+    {
+      "id": "author_lookup",
+      "summary": "A researcher: how much they have published, how often they are cited, and where they work.",
+      "ask_when": "the question names a researcher and asks who they are, how prolific or cited they are, or where they work.",
+      "method": "GET",
+      "path": "/authors",
+      "params": {
+        "author": {
+          "type": "string",
+          "description": "the researcher's name, e.g. Omar Khattab",
+          "in": "query",
+          "key": "search",
+          "required": true
+        }
+      },
+      "query": {
+        "per_page": "5"
+      },
+      "response": {
+        "format": "json",
+        "rows": "results",
+        "line": "{display_name} — {works_count} works, cited {cited_by_count} times — {last_known_institutions[0].display_name|default:institution unknown}",
+        "empty": "OpenAlex knows no researcher by that name.",
+        "limit": 5
+      }
+    }
+  ]
+}

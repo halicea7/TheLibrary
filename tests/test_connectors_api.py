@@ -242,3 +242,21 @@ async def test_drafts_from_openapi_and_curl():
     with pytest.raises(HTTPException) as e:
         await api.draft_curl(api.CurlIn(command="curl -X DELETE https://x.test/a"))
     assert "changes data" in e.value.detail
+
+
+async def test_the_examples_are_valid_modules_and_each_teaches_something():
+    from library_agent.api.routes import connectors
+    from library_agent.modules.manifest import from_dict
+
+    listed = (await connectors.examples())["examples"]
+    assert {x["slug"] for x in listed} >= {"openalex", "nvd", "arxiv", "github", "mcp-time"}
+    for x in listed:
+        assert x["shows"] and x["operations"] and x["description"]
+        m = from_dict((await connectors.example(x["slug"]))["manifest"])
+        assert m.operations and not m.local_only  # public data: any model may read it
+    # An example ships no credentials: it signs in with nothing, or an MCP server's
+    # secret variable is left for the person to fill.
+    for x in listed:
+        man = (await connectors.example(x["slug"]))["manifest"]
+        assert (man.get("auth") or {"type": "none"}) == {"type": "none"}
+        assert not (man.get("transport") or {}).get("env")

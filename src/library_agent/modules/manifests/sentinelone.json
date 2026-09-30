@@ -14,7 +14,7 @@
   },
   "headers": {},
   "limits": {
-    "timeout": 30.0,
+    "timeout": 60.0,
     "max_bytes": 2000000,
     "rate_per_minute": 30,
     "cache_seconds": 90.0

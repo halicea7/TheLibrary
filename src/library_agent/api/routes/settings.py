@@ -443,8 +443,11 @@ async def put_module(mid: str, body: ModulePut) -> dict:
 
 @router.post("/modules/{mid}/test")
 async def test_module(mid: str) -> dict:
-    """Reach the module with its configured base URL and token, running its first
-    operation with an obviously-harmless value, so a wrong URL or token shows at once."""
+    """Reach the module with its configured base URL and token, so a wrong URL or token
+    shows at once. It runs the lightest operation it has -- one that needs no input, if
+    there is one (listing agents, say) -- rather than the first: on a large SentinelOne
+    tenant the first, a CVE search over millions of risk rows, takes 20-50 seconds, and
+    a test that sits on "reaching" for a minute looks broken when it isn't."""
     from library_agent.modules import store as mod_store
     from library_agent.modules.execute import ModuleError, call
     from library_agent.modules.registry import all_modules
@@ -456,13 +459,16 @@ async def test_module(mid: str) -> dict:
     cfg = mod_store.config_for(mid)
     if not (cfg.base_url and cfg.token):
         return {"ok": False, "error": "set a base URL and a token first"}
-    op = mod.operations[0]
+    op = next(
+        (o for o in mod.operations if not (o.params.get("required") or [])),
+        mod.operations[0],
+    )
     probe = {
         k: "CVE-0000-0000" if "cve" in k else "___probe___"
-        for k in (op.params.get("properties") or {})
+        for k in (op.params.get("required") or [])
     }
     try:
         res = await call(mod, cfg, op, probe)
-        return {"ok": True, "reached": True, "count": res["count"]}
+        return {"ok": True, "reached": True, "count": res["count"], "operation": op.id}
     except ModuleError as exc:
         return {"ok": False, "error": str(exc)}

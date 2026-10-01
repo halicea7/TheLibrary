@@ -46,6 +46,10 @@ class RetrievalConfig:
     router_global_reserve: float | None = None
     candidate_pool: int | None = None
     final_top_k: int | None = None
+    # Words of the question that only a few passages hold (names, projects, hosts) and the
+    # search above missed are looked up exactly (see literal.rare_terms). Opt-in: on for
+    # what people use (Find, Ask, Write), off for the ladder's baselines.
+    rare_terms: bool = False
 
 
 async def retrieve(
@@ -110,6 +114,29 @@ async def retrieve(
         candidates = await hybrid_search(
             db, query, limit=pool, pool=pool, document_ids=document_ids, **common
         )
+
+    if rc.rare_terms:
+        from library_agent.retrieval.literal import rare_hits, rare_terms
+
+        words = await rare_terms(db, query)
+        # Only what the search missed: a word its top results already hold ("ColBERT" in
+        # a question about ColBERT) needs no help -- measured: adding those anyway took
+        # plain hybrid from MRR 0.69 to 0.57 on Astra's set.
+        head_text = " ".join(h.text.lower() for h in candidates[:10])
+        words = [w for w in words if not re.search(rf"\b{re.escape(w)}", head_text)]
+        if words:
+            extra = await rare_hits(
+                db,
+                words,
+                category_ids=category_ids,
+                cartridge_ids=cartridge_ids,
+                levels=levels,
+                document_ids=document_ids,
+            )
+            have = {h.chunk_id for h in extra}
+            rest = [h for h in candidates if h.chunk_id not in have]
+            # After the strongest few, not over them; the reranker reorders all of it.
+            candidates = rest[:3] + extra + rest[3:]
 
     # An index entry or a bibliography line matches by shared words and is never the
     # evidence -- unless the question is about the references themselves.
@@ -182,7 +209,7 @@ LADDER = [
 ]
 
 # What chat should use: reranking wins on conversational phrasing.
-CHAT_RETRIEVAL = RetrievalConfig(name="chat", use_reranker=True, rerank_depth=20)
+CHAT_RETRIEVAL = RetrievalConfig(name="chat", use_reranker=True, rerank_depth=20, rare_terms=True)
 # What the raw search box should use: keyword queries are hurt by the cross-encoder.
 KEYWORD_RETRIEVAL = RetrievalConfig(name="keyword", use_reranker=False)
 # What Find uses. Measured on 38 questions from real use, model-judged (2026-09-28):
@@ -190,7 +217,9 @@ KEYWORD_RETRIEVAL = RetrievalConfig(name="keyword", use_reranker=False)
 # of the time (MRR .83, 95% in the top 5) against 58% (.72) unreranked; reranking 40 was
 # slower and no better. The earlier "the cross-encoder hurts keyword queries" came from
 # generated questions, and exact names are now looked up literally first anyway.
-FIND_RETRIEVAL = RetrievalConfig(name="find", use_reranker=True, rerank_depth=20, per_document=3)
+FIND_RETRIEVAL = RetrievalConfig(
+    name="find", use_reranker=True, rerank_depth=20, per_document=3, rare_terms=True
+)
 
 
 async def hits_for_chunks(db, chunk_ids: list) -> list:

@@ -53,7 +53,7 @@ EFFORTS: dict[str, Effort] = {
     "quick": Effort(
         "quick",
         passages=3,
-        config=RetrievalConfig(name="quick", use_reranker=False),
+        config=RetrievalConfig(name="quick", use_reranker=False, rare_terms=True),
         rewrite=False,
         multi_query=False,
         num_ctx=8192,
@@ -62,7 +62,9 @@ EFFORTS: dict[str, Effort] = {
     "normal": Effort(
         "normal",
         passages=5,
-        config=RetrievalConfig(name="chat", use_reranker=True, rerank_depth=20, per_document=2),
+        config=RetrievalConfig(
+            name="chat", use_reranker=True, rerank_depth=20, per_document=2, rare_terms=True
+        ),
         rewrite=True,
         multi_query=False,
         num_ctx=16384,
@@ -73,7 +75,9 @@ EFFORTS: dict[str, Effort] = {
         "deep",
         # The tunnelled machine prefills fast enough that sixteen costs seconds, not tens.
         passages=16,
-        config=RetrievalConfig(name="deep", use_reranker=True, rerank_depth=40, per_document=3),
+        config=RetrievalConfig(
+            name="deep", use_reranker=True, rerank_depth=40, per_document=3, rare_terms=True
+        ),
         rewrite=True,
         multi_query=True,
         num_ctx=32768,

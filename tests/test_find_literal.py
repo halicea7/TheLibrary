@@ -81,3 +81,20 @@ def test_an_exact_hit_lights_the_sentence_holding_the_name_wherever_it_is():
     text += " Opening with O_DIRECT bypasses the page cache."
     assert holding_sentence(text, ["O_DIRECT"]) == "Opening with O_DIRECT bypasses the page cache."
     assert holding_sentence("nothing here at all.", ["O_DIRECT"]) is None
+
+
+async def test_a_rare_name_is_looked_up_but_a_rare_ordinary_word_is_not(db):
+    from conftest import make_document
+
+    from library_agent.retrieval.literal import rare_hits, rare_terms
+
+    await make_document(
+        db,
+        title="Team notes",
+        body="Zorbleck reviewed the storage plan. Zorbleck approved it. " * 6
+        + "We will recalibrate the quernish gauges next week. " * 6,
+    )
+    words = await rare_terms(db, "what did zorbleck say about the quernish gauges?")
+    assert "zorbleck" in words and "quernish" not in words  # a name, not a lowercase word
+    hits = await rare_hits(db, ["zorbleck"])
+    assert hits and all("Zorbleck" in h.text for h in hits)

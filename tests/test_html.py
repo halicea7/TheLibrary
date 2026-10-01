@@ -61,3 +61,15 @@ def test_plain_page_without_landmarks():
     )
     assert title == "Runbook"
     assert "Restart the node." in md
+
+
+def test_a_wiki_pages_creator_and_editors_are_kept():
+    from library_agent.ingest.html import page_people
+
+    new = """<div id="main-content"><p>body</p></div><div class="page-metadata">
+      Created by <span class='author'> Ann Lee</span> on Jun 01, 2022, last updated by
+      <span class='editor'>Bo Ng</span> on Jul 02, 2023</div>"""
+    assert page_people(new) == ["Ann Lee", "Bo Ng"]
+    old = '<div class="page-metadata">Created by Ann Lee, last modified by Bo Ng on Jan 3</div>'
+    assert page_people(old) == ["Ann Lee", "Bo Ng"]
+    assert page_people("<p>no byline</p>") == []

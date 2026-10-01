@@ -60,6 +60,8 @@ class Extracted:
     page_count: int = 0
     needs_ocr: bool = False
     two_column_pages: int = 0
+    # Who made it, when the source says (a wiki page's creator and editors).
+    authors: list[str] = field(default_factory=list)
 
     def page_for_offset(self, offset: int) -> int | None:
         """Page containing a character offset. Used for citation attribution."""
@@ -380,11 +382,13 @@ def extract_text_file(path: Path) -> Extracted:
     is_md = path.suffix.lower() in MARKDOWN_LIKE
     if path.suffix.lower() in HTML:
         # A web page is read as the Markdown it converts to; see ingest/html.py.
-        from library_agent.ingest.html import extract_html
+        from library_agent.ingest.html import extract_html, page_people_of
 
         raw = extract_html(path)
+        people = page_people_of(path)
     else:
         raw = path.read_text(encoding="utf-8", errors="replace")
+        people = []
     # Strip fenced code blocks from heading detection but keep them in the body.
     text = raw if is_md else normalize(raw)
 
@@ -413,7 +417,9 @@ def extract_text_file(path: Path) -> Extracted:
                 )
 
     title = toc[0].title if toc and toc[0].level == 1 else path.stem
-    return Extracted(text=text, page_offsets=[(0, 1)], toc=toc, title=title, page_count=1)
+    return Extracted(
+        text=text, page_offsets=[(0, 1)], toc=toc, title=title, page_count=1, authors=people
+    )
 
 
 HTML = {".html", ".htm"}

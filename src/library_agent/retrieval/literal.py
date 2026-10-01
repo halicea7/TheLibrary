@@ -164,3 +164,167 @@ def exact_first(
     ids = {h.chunk_id for h in exact}
     rest = [h for h in ranked if h.chunk_id not in ids]
     return (exact + rest)[:limit], ids
+
+
+# --------------------------------------------------------------------------- rare words
+
+# A word the question uses that only a handful of passages contain is almost always the
+# thing being asked about: a person ("what has Hector said"), a project ("RaaSP"), a host.
+# Meaning-based search can't place a rare name, and the lexical half drowns it in common
+# words -- measured on Astra's judgements: six questions about people whose names appear in
+# 9-14 passages each, and search surfaced none of those passages. So such a word is looked
+# up exactly, the way an identifier is, and what holds it joins the candidates.
+# Rare: held by at most 0.2% of passages (and never fewer than 20), so the bar grows with
+# the library -- a project named in 33 of 23,673 passages is still the thing asked about.
+RARE_SHARE = 0.002
+RARE_FLOOR = 20
+_WORD = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{3,}")
+_COMMON = {
+    "what",
+    "which",
+    "where",
+    "when",
+    "with",
+    "would",
+    "could",
+    "should",
+    "about",
+    "there",
+    "their",
+    "these",
+    "those",
+    "this",
+    "that",
+    "have",
+    "does",
+    "your",
+    "from",
+    "into",
+    "they",
+    "them",
+    "been",
+    "were",
+    "will",
+    "just",
+    "like",
+    "some",
+    "tell",
+    "give",
+    "show",
+    "list",
+    "please",
+    "library",
+    "know",
+    "anything",
+    "information",
+    "said",
+    "written",
+    "wrote",
+}
+
+
+async def rare_terms(db: AsyncSession, query: str, *, max_df: int | None = None) -> list[str]:
+    """Words of the query found in few passages (see RARE_SHARE), or among the authors."""
+    if max_df is None:
+        total = (await db.execute(text("select count(*) from chunk"))).scalar_one()
+        max_df = max(RARE_FLOOR, int(total * RARE_SHARE))
+    words = []
+    for w in _WORD.findall(query or ""):
+        w = w.strip(".-_").lower()
+        if len(w) >= 4 and w not in _COMMON and w not in words:
+            words.append(w)
+    out = []
+    for w in words[:8]:
+        n = (
+            await db.execute(
+                text("select count(*) from chunk where fts @@ plainto_tsquery('english', :w)"),
+                {"w": w},
+            )
+        ).scalar_one()
+        authored = (
+            await db.execute(
+                text(
+                    "select count(*) from document d, jsonb_array_elements_text("
+                    "coalesce(d.authors, '[]'::jsonb)) a where a ilike :p"
+                ),
+                {"p": f"%{w}%"},
+            )
+        ).scalar_one()
+        if authored or (1 <= n <= max_df and await _written_as_a_name(db, w)):
+            out.append(w)
+    return out
+
+
+async def _written_as_a_name(db: AsyncSession, w: str) -> bool:
+    """Does the library write this word as a name -- capitalised (Rubeel, RaaSP, RCEs) in
+    most places it appears? A rare *ordinary* word ("summarise", "calibration") is
+    lowercase in running text, and looking it up exactly only crowds out better results:
+    measured, it cost one of Astra's questions its first place."""
+    rows = (
+        await db.execute(
+            text(
+                "select text from chunk where fts @@ plainto_tsquery('english', :w) limit 30"
+            ),
+            {"w": w},
+        )
+    ).scalars().all()
+    rx = re.compile(rf"\b({re.escape(w)})", re.IGNORECASE)
+    seen = [m.group(1) for body in rows for m in rx.finditer(body)]
+    if not seen:
+        return False
+    named = sum(1 for s in seen if s[0].isupper())
+    return named / len(seen) >= 0.6
+
+
+async def rare_hits(
+    db: AsyncSession,
+    terms: list[str],
+    *,
+    per_term: int = 4,
+    category_ids: list[uuid.UUID] | None = None,
+    cartridge_ids: list[uuid.UUID] | None = None,
+    levels: list[str] | None = None,
+    document_ids: list[uuid.UUID] | None = None,
+) -> list[SearchHit]:
+    """For each rare word: the passages that hold it (by the full-text index, so "hector"
+    is not found inside "vector"), and the opening passages of volumes it authored."""
+    base: dict = {
+        "docs": [str(x) for x in document_ids] if document_ids else None,
+        "cats": [str(x) for x in category_ids] if category_ids else None,
+        "carts": [str(x) for x in cartridge_ids] if cartridge_ids else None,
+        "levels": levels,
+        "deflt": _default_level() if levels else None,
+        "lim": per_term,
+    }
+    seen: set = set()
+    out: list[SearchHit] = []
+    for w in terms[:4]:
+        for conds in (
+            "c.fts @@ plainto_tsquery('english', :t0)",
+            (
+                "c.kind = 'text' and c.order_index < 2 and exists (select 1 from "
+                "jsonb_array_elements_text(coalesce(d.authors, '[]'::jsonb)) a where a ilike :a0)"
+            ),
+        ):
+            rows = (
+                await db.execute(text(_SQL.format(conds=conds)), {**base, "t0": w, "a0": f"%{w}%"})
+            ).all()
+            for r in rows:
+                if r.id in seen:
+                    continue
+                seen.add(r.id)
+                out.append(
+                    SearchHit(
+                        chunk_id=r.id,
+                        document_id=r.document_id,
+                        document_title=r.title,
+                        section_path=r.path,
+                        page=r.page_start,
+                        text=r.text,
+                        score=1.0,
+                        dense_rank=None,
+                        lexical_rank=None,
+                        context_prefix=r.prefix,
+                    )
+                )
+    return out

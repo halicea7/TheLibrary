@@ -407,6 +407,7 @@ async def run_turn(
                 if d:
                     s.document_title = d.title
                     s.readings_only = d.readings_only
+                    s.authors = d.authors if isinstance(d.authors, list) else None
                     s.cartridge = provenance.get(d.id)
 
         if withheld:

@@ -111,3 +111,72 @@ def to_markdown(html: str) -> tuple[str, str | None]:
 
 def extract_html(path: Path) -> str:
     return to_markdown(path.read_text(encoding="utf-8", errors="replace"))[0]
+
+
+def page_people(html: str) -> list[str]:
+    """Who made a wiki page: Confluence's "Created by <author> on …, last updated by
+    <editor> on …", the creator first. The block is stripped from the body (it isn't the
+    document) but kept here, so "what has Hector written?" can be answered."""
+    soup = BeautifulSoup(html, "html.parser")
+    block = soup.select_one(".page-metadata")
+    if block is None:
+        return []
+    names = [
+        " ".join(el.get_text().split())
+        for el in block.select(".author, .editor, [class*=author], [class*=editor]")
+    ]
+    if not names:  # an older export: "Created by Ann Lee, last modified by Bo Ng on …"
+        names = re.findall(
+            r"(?:created|modified|updated) by\s+([^,<]+?)(?:\s+on\b|,|$)",
+            block.get_text(),
+            re.IGNORECASE,
+        )
+    return list(dict.fromkeys(n.strip() for n in names if n and n.strip()))[:8]
+
+
+def page_people_of(path: Path) -> list[str]:
+    try:
+        return page_people(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return []
+
+
+async def backfill_authors(session_scope) -> dict:
+    """Read who made each wiki page already on the shelf from its stored original, for
+    volumes ingested before authors were kept. Volumes that already have authors, or
+    whose original isn't an HTML page on this machine, are left alone."""
+    from sqlalchemy import select
+
+    from library_agent.db.models import Document
+
+    found = missing = 0
+    async with session_scope() as db:
+        docs = list(
+            (
+                await db.execute(
+                    select(Document).where(
+                        Document.authors.is_(None), Document.source_path.ilike("%.htm%")
+                    )
+                )
+            ).scalars()
+        )
+        for d in docs:
+            people = page_people_of(Path(d.source_path))
+            if people:
+                d.authors = people
+                found += 1
+            else:
+                missing += 1
+    return {"volumes_given_authors": found, "html_without_a_byline": missing}
+
+
+def main() -> None:
+    import asyncio
+
+    from library_agent.db.session import session_scope
+
+    print(asyncio.run(backfill_authors(session_scope)))
+
+
+if __name__ == "__main__":
+    main()

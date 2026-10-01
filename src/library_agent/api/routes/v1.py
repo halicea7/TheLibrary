@@ -242,7 +242,7 @@ async def search(
         limit=n + 10 if terms else n,
         category_ids=sids or None,
         cartridge_ids=[rid] if rid else None,
-        config=RetrievalConfig(name="v1", use_reranker=True, use_router=False),
+        config=RetrievalConfig(name="v1", use_reranker=True, use_router=False, rare_terms=True),
     )
     exact: set = set()
     if terms:  # a query that names something exactly: passages holding it first

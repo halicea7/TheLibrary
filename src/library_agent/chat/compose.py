@@ -83,10 +83,14 @@ COMPOSE_PASSAGES = 16
 COMPOSE_READINGS = 8
 COMPOSE_PER_DOCUMENT = 4
 COMPOSE_PASSAGE_CHARS = 1400  # as a deep Ask gives each passage
-COMPOSE_CONFIG = RetrievalConfig(name="compose", use_reranker=True, rerank_depth=40, per_document=3)
+COMPOSE_CONFIG = RetrievalConfig(
+    name="compose", use_reranker=True, rerank_depth=40, per_document=3, rare_terms=True
+)
 # The coverage probe wants a relevance sample, not a ranked answer, so it skips the
 # reranker -- cheaper, and one fewer heavy call before the document even begins.
-COVERAGE_PROBE = RetrievalConfig(name="coverage", use_reranker=False, per_document=2)
+COVERAGE_PROBE = RetrievalConfig(
+    name="coverage", use_reranker=False, per_document=2, rare_terms=True
+)
 # The thread block plus a section's passages and readings are a large prompt; the compose
 # model is chosen to have the room. A section still writes into a modest reply.
 COMPOSE_NUM_CTX = 65536
@@ -626,6 +630,7 @@ def _numbered(h: SearchHit, by_key: dict, comp: Composition, docs: dict, provena
         page=h.page,
         cartridge=provenance.get(h.document_id),
         readings_only=bool(d and d.readings_only),
+        authors=d.authors if d and isinstance(d.authors, list) else None,
         kind=getattr(h, "kind", "passage"),
         **reading_identity(h),
     )

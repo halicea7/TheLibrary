@@ -12,6 +12,7 @@
 #   ./library eval [tune|test|all|export|review-packet]   score the hand-judged set (judge it at /eval); export > file.json; review-packet: the model's cases, blind, for a reviewer
 #   ./library anchors [--report]            tie every Tier 1 claim to the passage that says it
 #   ./library spans [--repair]                check each passage opens on its own text; fix the ones that don't
+#   ./library authors                       read who made each wiki page already shelved (Confluence bylines)
 #
 # Ctrl-C in the foreground stops everything.
 set -euo pipefail
@@ -46,6 +47,7 @@ case "${1:-start}" in
   anchors) shift; exec uv run python -m library_agent.library.anchors "$@" ;;
   bench) shift; exec uv run python bench/run.py "$@" ;;
   spans) shift; exec uv run python -m library_agent.ingest.spans "$@" ;;
+  authors) exec uv run python -m library_agent.ingest.html ;;
   *) echo "usage: ./library [start|stop|restart|status|import <paths>... [--read]|export …|insert <zip>]"; exit 2 ;;
 esac
 

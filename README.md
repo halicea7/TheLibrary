@@ -120,7 +120,7 @@ And when you ask it something, the answer is a reading column with an apparatus:
 
 Drop PDFs, Markdown, HTML, or text onto the shelf — folders are walked. A document is **searchable within seconds**.
 
-- **Wikis drop straight in.** An HTML page is read as the Markdown it converts to: the page body found (Confluence's `#main-content`, MediaWiki's, `<article>`, `<main>`), breadcrumbs, metadata and footers dropped, headings, lists, code and tables kept, the page title as its H1. A **Confluence space export** becomes one volume per page.
+- **Wikis drop straight in.** An HTML page is read as the Markdown it converts to: the page body found (Confluence's `#main-content`, MediaWiki's, `<article>`, `<main>`), breadcrumbs, metadata and footers dropped, headings, lists, code and tables kept, the page title as its H1. A **Confluence space export** becomes one volume per page, and each page keeps who created and last updated it, so *what has Hector written?* can be answered (`./library authors` adds this to pages shelved before it existed).
 - **Reading is a click.** *have it read* writes section summaries and subjects (a couple of minutes); *annotate it* writes marginalia. Under the shelf header, *read the N unread* and *annotate the N read* queue everything in view — the whole shelf, a subject, or a seated cartridge — skip what's already queued, and say how long it will take first.
 - **Re-shelving.** *re-shelve these N* appears when one shelf is chosen, and places its volumes again from what they say rather than where they sit.
 
@@ -151,6 +151,7 @@ An answer draws on two kinds of source. **Passages** are the exact words of a pa
 
 **Find** — passages, reranked by the cross-encoder (the top 20, at most three per volume), each with its dense and lexical rank. On 38 questions from real use it puts the right passage first 74% of the time, against 58% unreranked.
 
+- **Rare names found.** A word your question uses that the library writes as a name and holds in only a few passages — a person, a project, a host — is looked up exactly when search alone misses it, and so is a volume's author. Ask and Write do the same. (Measured: six questions about people whose names sat in 9–14 passages each had found none of them; now 3–4 of the top ten mention the person.)
 - **Exact names first.** A query that names something exactly — `O_DIRECT`, `--no-verify`, `RFC 7231`, `SSTable`, a `"quoted phrase"`, or a single word — is also looked up literally, and passages holding every such term come first, marked *exact*.
 - **Why it came up.** Your words are lit in each passage, marker-pen style, and the **sentence nearest your question** is lifted — the passages that matter most are often found by meaning, with none of your words in them. When that sentence shares none of your words it's labelled *related excerpt*: a lead, not proof.
 - **Hold.** **hold** on a hit keeps that passage in hand: the next answer starts from what you hold and retrieval fills the rest of its budget around it, and those margin notes say *held*, so an answer shows which evidence was yours and which the library found. Whole volumes can be held too — **hold** on a shelf row — and then the answer reads only the volumes in hand. The tray under the composer lists what's held; follow-ups keep it until you let go.

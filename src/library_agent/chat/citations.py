@@ -59,6 +59,8 @@ class Source:
     artifact_id: str | None = None
     page_end: int | None = None
     span_chunk_ids: list[str] | None = None
+    # Who made the volume, when its source says (a wiki page's creator and editors).
+    authors: list[str] | None = None
     # Its classification level (an id on the scale); see classification.hit_levels.
     level: str | None = None
 
@@ -143,8 +145,9 @@ def render_context(
         note = (reflections or {}).get(str(hit.chunk_id))
         what = "the library's reading of " if src.kind == "reading" else ""
         sec = plain_label(src.section_path)
+        by = f" (by {', '.join(src.authors[:3])})" if src.authors else ""
         blocks.append(
-            f"[{src.n}] {what}{plain_label(src.document_title)}{loc}"
+            f"[{src.n}] {what}{plain_label(src.document_title)}{by}{loc}"
             f"{f' — {sec}' if sec else ''}\n{body}"
             + (f"\n(the library's note on this passage: {note.strip()[:500]})" if note else "")
         )

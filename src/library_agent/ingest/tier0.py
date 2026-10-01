@@ -138,6 +138,7 @@ async def ingest(
         tier=0,
         status=DocumentStatus.READY,
         near_dup_of=near[0] if near else None,
+        authors=ex.authors or None,
     )
     db.add(doc)
     await db.flush()

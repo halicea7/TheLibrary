@@ -133,8 +133,8 @@
     },
     {
       "id": "cve_exposure",
-      "summary": "Which endpoints in the fleet are exposed to a given CVE.",
-      "ask_when": "the question names a CVE id and asks who or what is exposed, affected, vulnerable or at risk in the fleet.",
+      "summary": "Which endpoints in the fleet are exposed to a given CVE. Slow on a large fleet: it can take minutes and time out.",
+      "ask_when": "the question names a CVE id and asks who or what is exposed, affected, vulnerable or at risk in the fleet. It is slow and may time out: when NVD is also connected, look the CVE up there too, and check the inventory (app_inventory) for the affected product it names.",
       "method": "GET",
       "path": "/web/api/v2.1/application-management/risks",
       "params": {
@@ -187,7 +187,7 @@
     {
       "id": "app_inventory",
       "summary": "Which applications in the fleet match a name, and on how many endpoints each is installed.",
-      "ask_when": "the question asks whether a named application or piece of software is installed, present or in use anywhere in the fleet.",
+      "ask_when": "the question asks whether a named application is installed, present or in use in the fleet, on how many endpoints, or which hosts have it -- this needs only the application's name, and it is the lookup to use when the vendor isn't given.",
       "method": "GET",
       "path": "/web/api/v2.1/application-management/inventory",
       "params": {
@@ -207,7 +207,8 @@
         "rows": "data",
         "line": "{applicationName} by {applicationVendor}: installed on {endpointsCount} endpoints ({applicationVersionsCount} versions)",
         "empty": "No such application is in the fleet inventory.",
-        "limit": 30
+        "limit": 30,
+        "summary": "{count} applications match. The most widely installed of them is on {max:endpointsCount} endpoints, so at least that many endpoints have one. Installs across all of them add up to {sum:endpointsCount}, but helpers, updaters and variants sit on the same machines, so that is not a count of endpoints."
       }
     },
     {
@@ -267,6 +268,47 @@
         "line": "{computerName} — {osName}, agent {agentVersion}, last active {lastActiveDate|date}",
         "empty": "No agent matched.",
         "limit": 40
+      }
+    },
+    {
+      "id": "agents_by_os",
+      "summary": "How many agents report an OS version containing the given text (e.g. 15.8.1, 26.7.1), counted by SentinelOne.",
+      "ask_when": "the question asks how many endpoints, devices or agents run a given OS version or release (macOS Sequoia 15.8.1, Windows 11 23H2, Ubuntu 22.04).",
+      "method": "GET",
+      "path": "/web/api/v2.1/agents",
+      "params": {
+        "version": {
+          "type": "string",
+          "description": "the version number or text the OS version contains, e.g. 15.8.1 -- one version per call",
+          "in": "query",
+          "key": "osVersion__contains",
+          "required": true
+        }
+      },
+      "query": {
+        "countOnly": "true"
+      },
+      "response": {
+        "format": "json",
+        "rows": "pagination",
+        "line": "{totalItems} agents report an OS version containing that.",
+        "empty": "No agent reports that OS version.",
+        "limit": 1
+      }
+    },
+    {
+      "id": "inventory_scan_schedule",
+      "summary": "When the application inventory and vulnerability scan runs: how often, on which days, at what time, and whether extensive and vulnerability scanning are on.",
+      "ask_when": "the question asks when the application inventory or vulnerability scan runs, ran last, or runs next, or how it is scheduled.",
+      "method": "GET",
+      "path": "/web/api/v2.1/application-management/settings",
+      "params": {},
+      "response": {
+        "format": "json",
+        "rows": "data",
+        "line": "Inventory scan: every {scanSchedule.scanEvery|default:?} on {scanSchedule.repeatOn|join|default:(no days set)} at {scanSchedule.time|default:?} ({scanSchedule.timezone|default:timezone not set}); extensive scan {extensiveScanEnabled}; vulnerability scanning {vulnerabilitiesScanEnabled}. SentinelOne reports the schedule, not a timestamp of the last run: the last and next runs follow from it.",
+        "empty": "SentinelOne returned no scan settings.",
+        "limit": 1
       }
     }
   ]

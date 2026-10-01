@@ -210,10 +210,18 @@ async def run_turn(
                     names = sorted({h.live["module"] for h in live_hits})
                     notes.append(
                         f"Some sources are live results just fetched from {', '.join(names)} "
-                        "(marked live), not from the library. Answer from them as that system's "
-                        "data. If they don't answer the question, say what was looked up and what "
-                        f"came back; never say {' or '.join(names)} has no information when it "
-                        "was queried, and don't describe live results as library passages."
+                        "(marked live). They are that system's data, not the library's: write "
+                        f"\"{names[0]} shows …\", \"{names[0]} returned …\". If they don't answer "
+                        f"the question, say which {names[0]} lookup was made and what it returned, "
+                        "and what it can't show. Never say the library or "
+                        f"{' or '.join(names)} has no information when {' or '.join(names)} was "
+                        "queried, and never call a live result a library passage. A summary line "
+                        "at the top of a live result is counted by the system -- quote its numbers "
+                        "rather than adding rows up yourself. Live data shows the systems as they "
+                        "are now: where it contradicts what you know (a version or product you "
+                        "don't recognise), trust it -- your own knowledge may be out of date. Don't "
+                        "question whether a version or product name the reader uses is real when "
+                        "the live data reports it."
                     )
                 # The question names a seated module, but nothing it has answers it: say so,
                 # rather than let the answer read as if the module were not there at all.

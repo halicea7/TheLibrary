@@ -341,3 +341,22 @@ def test_threats_can_be_found_by_host():
     op = SENTINELONE.op("threats_on_host")
     assert op.params["required"] == ["host"] and op.query["host"] == "computerName__contains"
     assert "{count}" in op.render.summary
+
+
+def test_summaries_can_sum_a_field():
+    from library_agent.modules.render import summarise
+
+    rows = [{"n": 3}, {"n": "4"}, {"n": None}, {}]
+    assert summarise("{count} apps, {sum:n} installs", rows) == "4 apps, 7 installs"
+
+
+def test_sentinelone_counts_agents_by_os_and_reads_the_scan_schedule():
+    by_os = SENTINELONE.op("agents_by_os")
+    assert (
+        by_os.const_query["countOnly"] == "true" and by_os.query["version"] == "osVersion__contains"
+    )
+    sched = SENTINELONE.op("inventory_scan_schedule")
+    assert (
+        sched.path.endswith("/application-management/settings") and "schedule" in sched.render.line
+    )
+    assert "{sum:endpointsCount}" in SENTINELONE.op("app_inventory").render.summary

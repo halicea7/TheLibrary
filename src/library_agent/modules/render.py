@@ -116,18 +116,28 @@ def render_rows(op: Operation, data: Any) -> str:
     return text or r.empty
 
 
-_SUMMARY = re.compile(r"\{(count|distinct:[A-Za-z0-9_.\[\]*]+)\}")
+_SUMMARY = re.compile(r"\{(count|(?:distinct|sum|max):[A-Za-z0-9_.\[\]*]+)\}")
 
 
 def summarise(template: str, rows: list) -> str:
     """{count}: the rows fetched; {distinct:path}: how many different values that field
-    takes across them (empty values not counted)."""
+    takes across them (empty values not counted); {sum:path} / {max:path}: that field
+    added up, or its largest value."""
 
     def one(m: re.Match) -> str:
         key = m.group(1)
         if key == "count":
             return str(len(rows))
-        path = key.split(":", 1)[1]
+        kind, path = key.split(":", 1)
+        if kind in ("sum", "max"):
+            nums = []
+            for row in rows:
+                try:
+                    nums.append(float(dig(row, path) or 0))
+                except (TypeError, ValueError):
+                    pass
+            total = (sum(nums) if kind == "sum" else max(nums, default=0.0))
+            return f"{total:,.0f}" if total == int(total) else f"{total:,.2f}"
         vals = {
             json.dumps(v, sort_keys=True)
             for row in rows

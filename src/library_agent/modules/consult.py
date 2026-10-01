@@ -48,7 +48,9 @@ CONSULT_SYSTEM = (
     "severe a CVE is. Think it through, then call what answers it -- several operations if the "
     "question has several parts. Take every identifier (CVE ids, hashes, addresses, names) from "
     "the question, the conversation or earlier results; never make one up. If an operation "
-    "can't be filled from what you have, don't call it."
+    "can't be filled from what you have, don't call it. If a call failed or came back empty, "
+    "try another angle before giving up -- e.g. when a CVE exposure lookup fails, check the "
+    "inventory for the product the CVE affects."
 )
 
 CONSULT_PROMPT = """Today is {today}.
@@ -256,6 +258,9 @@ async def consult(
                 system=CONSULT_SYSTEM,
                 think=True,
                 temperature=0.0,
+                # Same question, same decision: at temperature 0 the thinking still varied
+                # run to run ("which hosts have Chrome?" -> none, then app_inventory).
+                seed=7,
                 num_predict=900,
             )
         except Exception:

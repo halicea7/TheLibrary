@@ -1616,7 +1616,8 @@ async function holdings() {
       `${h.documents} volumes<span class="sep">/</span>${h.chunks.toLocaleString()} passages` +
       `<span class="sep">/</span>${h.embeddings.toLocaleString()} vectors` +
       (orphans ? `<span class="sep">/</span><span style="color:var(--amber)">${orphans} orphaned</span>` : '') +
-      (h.model_answering === false ? `<span class="sep">/</span><span style="color:var(--amber)" title="${esc(h.model_liveness?.detail || '')}">the model is not answering</span>` : '');
+      (h.model_answering === false ? `<span class="sep">/</span><span style="color:var(--amber)" title="${esc(h.model_liveness?.detail || '')}">the model is not answering</span>`
+        : h.model_liveness?.strained ? `<span class="sep">/</span><span style="color:var(--amber)" title="${esc(h.model_liveness?.detail || '')} — answers still go through, slower">the model is slow right now</span>` : '');
   } catch { $('#holdings').textContent = 'the library is not answering'; }
 }
 

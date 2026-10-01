@@ -98,3 +98,19 @@ async def test_a_rare_name_is_looked_up_but_a_rare_ordinary_word_is_not(db):
     assert "zorbleck" in words and "quernish" not in words  # a name, not a lowercase word
     hits = await rare_hits(db, ["zorbleck"])
     assert hits and all("Zorbleck" in h.text for h in hits)
+
+
+async def test_a_volume_whose_authors_is_json_null_does_not_break_the_lookup(db):
+    # An explicit None in a JSONB column is stored as JSON null, not SQL NULL; reading it
+    # as a list failed every rare-word lookup in the library.
+    from conftest import make_document
+    from sqlalchemy import text
+
+    from library_agent.retrieval.literal import rare_hits, rare_terms
+
+    doc = await make_document(db, title="No byline", body="Quillfeather wrote this. " * 10)
+    await db.execute(
+        text("update document set authors = 'null'::jsonb where id = :d"), {"d": doc.id}
+    )
+    assert "quillfeather" in await rare_terms(db, "what did quillfeather write?")
+    assert await rare_hits(db, ["quillfeather"])

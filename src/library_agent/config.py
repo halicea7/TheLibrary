@@ -158,6 +158,10 @@ class Settings(BaseSettings):
     # answers /api/tags). When the probe fails, generations are refused with a 503 at once.
     liveness_interval_seconds: int = 120
     liveness_timeout_seconds: float = 25.0
+    # On a shared GPU a busy model answers slowly, not never: a slow or broken probe marks
+    # it strained, and only this many in a row mark it down. Nothing listening (connection
+    # refused -- the tunnel is down) marks it down at once.
+    liveness_failures_to_down: int = 3
     # The gate: how many generations may be in flight at once across everyone, how many
     # per client, and how long a caller waits for a slot before a 429.
     max_concurrent_generations: int = 2

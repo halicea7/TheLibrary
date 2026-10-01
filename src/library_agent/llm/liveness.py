@@ -9,6 +9,12 @@ So a probe asks for one token every so often with a short timeout, and the answe
 new generations at once with a 503 and the reason, instead of holding every caller's
 socket open for the full timeout.
 
+On a shared GPU (several people's queries on the same box) one slow probe is load, not a
+wedge: a probe that times out or breaks off marks the model *strained* -- requests still go
+through, the desk says it is slow, and the next probe comes sooner -- and only several in a
+row mark it down. A refused connection (nothing listening: the tunnel is down) is down at
+once, since every request would fail the same way.
+
 **The gate.** One Ollama serialises generations; without a gate a script in a loop puts
 everyone behind it invisibly. The gate holds a small global limit and one in-flight
 generation per client, and a caller that would wait longer than the queue timeout gets a
@@ -32,6 +38,9 @@ log = logging.getLogger(__name__)
 @dataclass
 class Liveness:
     alive: bool = True
+    # Slow or breaking off, but not (yet) down: requests go through; the desk says so.
+    strained: bool = False
+    failures: int = 0  # slow or broken probes in a row
     checked_at: float = 0.0
     latency: float | None = None
     detail: str = ""
@@ -56,33 +65,57 @@ class Liveness:
                     },
                 )
                 r.raise_for_status()
-                self.alive = True
-                self.detail = ""
+                self.alive, self.strained, self.failures, self.detail = True, False, 0, ""
+        except httpx.ConnectError as exc:
+            # Nothing listening: down now, whatever came before.
+            self.alive, self.strained = False, False
+            self.failures = max(self.failures + 1, cfg.liveness_failures_to_down)
+            self.detail = (
+                f"cannot connect ({str(exc)[:80] or 'connection refused'}) -- is the tunnel up?"
+            )
         except httpx.TimeoutException:
-            self.alive = False
-            self.detail = f"the model did not answer a one-token probe within {timeout or cfg.liveness_timeout_seconds:.0f}s"
+            self._fault(
+                f"the model did not answer a one-token probe within "
+                f"{timeout or cfg.liveness_timeout_seconds:.0f}s"
+            )
         except Exception as exc:  # noqa: BLE001
-            self.alive = False
-            self.detail = f"{type(exc).__name__}: {str(exc)[:120]}"
+            self._fault(f"{type(exc).__name__}: {str(exc)[:120]}")
         self.latency = round(time.monotonic() - t0, 2)
         self.checked_at = time.time()
         return self.alive
+
+    def _fault(self, detail: str) -> None:
+        """A slow or broken probe: strained until it happens enough times in a row."""
+        self.failures += 1
+        self.detail = detail
+        if self.failures >= settings().liveness_failures_to_down:
+            self.alive, self.strained = False, False
+        else:
+            self.alive, self.strained = True, True
 
     async def _loop(self) -> None:
         cfg = settings()
         while True:
             try:
-                was = self.alive
+                was, was_strained = self.alive, self.strained
                 await self.probe()
                 if was and not self.alive:
                     log.error("model liveness lost: %s", self.detail)
                 elif not was and self.alive:
                     log.info("model liveness back after %.1fs", self.latency or 0)
+                elif self.strained and not was_strained:
+                    log.warning(
+                        "model strained (%d/%d): %s",
+                        self.failures,
+                        cfg.liveness_failures_to_down,
+                        self.detail,
+                    )
             except Exception:
                 log.debug("liveness loop error", exc_info=True)
+            # Healthy: the usual interval. Strained or down: look again sooner.
             await asyncio.sleep(
                 cfg.liveness_interval_seconds
-                if self.alive
+                if self.alive and not self.strained
                 else max(15, cfg.liveness_interval_seconds // 4)
             )
 
@@ -98,6 +131,8 @@ class Liveness:
     def snapshot(self) -> dict:
         return {
             "alive": self.alive,
+            "strained": self.strained,
+            "failures": self.failures,
             "checked_seconds_ago": round(time.time() - self.checked_at)
             if self.checked_at
             else None,

@@ -245,7 +245,7 @@ async def rare_terms(db: AsyncSession, query: str, *, max_df: int | None = None)
             await db.execute(
                 text(
                     "select count(*) from document d, jsonb_array_elements_text("
-                    "coalesce(d.authors, '[]'::jsonb)) a where a ilike :p"
+                    "case when jsonb_typeof(d.authors) = 'array' then d.authors else '[]'::jsonb end) a where a ilike :p"
                 ),
                 {"p": f"%{w}%"},
             )
@@ -305,7 +305,7 @@ async def rare_hits(
             "c.fts @@ plainto_tsquery('english', :t0)",
             (
                 "c.kind = 'text' and c.order_index < 2 and exists (select 1 from "
-                "jsonb_array_elements_text(coalesce(d.authors, '[]'::jsonb)) a where a ilike :a0)"
+                "jsonb_array_elements_text(case when jsonb_typeof(d.authors) = 'array' then d.authors else '[]'::jsonb end) a where a ilike :a0)"
             ),
         ):
             rows = (

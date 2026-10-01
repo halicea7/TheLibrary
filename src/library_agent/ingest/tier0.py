@@ -138,8 +138,9 @@ async def ingest(
         tier=0,
         status=DocumentStatus.READY,
         near_dup_of=near[0] if near else None,
-        authors=ex.authors or None,
     )
+    if ex.authors:  # set only when there are some: an explicit None is stored as JSON null
+        doc.authors = ex.authors
     db.add(doc)
     await db.flush()
 

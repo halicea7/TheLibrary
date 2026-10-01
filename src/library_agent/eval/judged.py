@@ -469,14 +469,14 @@ async def auto_judge(n: int = 10, *, type_: str = "concept") -> list[Case]:
 
 
 def agreement(cases: list[Case] | None = None) -> dict:
-    """How often the model agrees with the owner, on cases the owner judged and the model
-    also marked, per question type. Per passage, over everything that was pooled:
+    """How often the model agrees with a person -- the owner, or a reviewer such as Astra --
+    on cases they judged and the model also marked, per question type and per judge. Per passage, over everything that was pooled:
     agreement, and the model's precision and recall on "supports", with Cohen's kappa so
     agreement a coin would reach does not count."""
     cases = [
         c
         for c in (cases if cases is not None else load())
-        if c.judge == "human" and c.judged and c.model_marks and c.pooled
+        if c.judge != "model" and c.judged and c.model_marks and c.pooled
     ]
 
     def stats(group: list[Case]) -> dict:
@@ -506,6 +506,9 @@ def agreement(cases: list[Case] | None = None) -> dict:
     out = {"all": stats(cases)}
     for t in sorted({c.type for c in cases}):
         out[t] = stats([c for c in cases if c.type == t])
+    judges = sorted({c.judge for c in cases})
+    if len(judges) > 1:
+        out["by_judge"] = {j: stats([c for c in cases if c.judge == j]) for j in judges}
     return out
 
 
@@ -625,6 +628,73 @@ Answer with JSON exactly in the `answer_format` shape, one entry per item, using
 id and the passage labels (P1, P2, ...)."""
 
 
+async def export_review_packet() -> dict:
+    """The questions the model judged unattended, as a blind packet for a reviewer: each
+    with every passage the model was shown, none of its marks. Answers import as that
+    reviewer's cases, with the model's marks kept beside them for agreement."""
+    cases = [c for c in load() if c.judge == "model" and c.judged and c.pooled]
+    ids = {x for c in cases for x in c.pooled}
+    texts: dict[str, dict] = {}
+    if ids:
+        async with session_scope() as db:
+            rows = (
+                await db.execute(
+                    text(
+                        "select c.id, d.title, s.path, c.page_start, c.text from chunk c"
+                        " join document d on d.id = c.document_id"
+                        " left join section s on s.id = c.section_id where c.id = any(:ids)"
+                    ),
+                    {"ids": [uuid.UUID(x) for x in ids]},
+                )
+            ).all()
+        for cid, title, path, page, body in rows:
+            texts[str(cid)] = {"title": title, "section": path, "page": page, "text": body}
+    items = []
+    for c in cases:
+        passages = [
+            {
+                "label": f"P{i}",
+                "chunk_id": cid,
+                "title": texts[cid]["title"],
+                "section": texts[cid]["section"],
+                "page": texts[cid]["page"],
+                "text": " ".join(str(texts[cid]["text"]).split())[:2000],
+            }
+            for i, cid in enumerate((x for x in c.pooled if x in texts), 1)
+        ]
+        if passages:
+            items.append(
+                {
+                    "id": uuid.uuid5(uuid.NAMESPACE_URL, c.question).hex[:12],
+                    "question": c.question,
+                    "source": c.source,
+                    "passages": passages,
+                }
+            )
+    return {
+        "library_judging_packet": 1,
+        "exported_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        # Neutral on purpose: who judged these first is not the reviewer's business.
+        "purpose": "a second judgement of questions already judged once",
+        "instructions": PACKET_INSTRUCTIONS,
+        "types": [t for t in TYPES if t != "unanswerable"],
+        "answer_format": {
+            "judge": "astra",
+            "judgements": [
+                {
+                    "id": "the item's id",
+                    "type": "concept",
+                    "unanswerable": False,
+                    "supporting": ["P1", "P4"],
+                    "distractors": ["P2"],
+                    "notes": "",
+                }
+            ],
+        },
+        "items": items,
+    }
+
+
 async def export_packet(n: int = 40) -> dict:
     """Questions actually asked, not yet judged, each with its pooled passages as text --
     for someone outside the library to judge. Labels P1.. map back to passages on import."""
@@ -719,6 +789,9 @@ async def import_judgements(packet: dict, answers: dict) -> dict:
             notes=str(j.get("notes") or "")[:500],
             judge=judge_name,
             pooled=list(labels.values()),
+            # Replacing a model-judged case: the model's marks stay beside the reviewer's,
+            # so agreement between them can be measured.
+            model_marks=(prev.model_marks or {}) if prev else {},
             **({"id": prev.id} if prev else {}),
         )
         await judge(case)

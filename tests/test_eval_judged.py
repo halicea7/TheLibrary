@@ -181,3 +181,70 @@ async def test_a_reviewer_judges_a_packet_and_it_comes_back_as_their_cases(tmp_s
     again = await judged.import_judgements(packet, answers)
     assert again["skipped"] == 2 and judged.load()[0].judge in ("human", "astra")
     assert next(c for c in judged.load() if c.question.startswith("How does Raft")).judge == "human"
+
+
+async def test_a_reviewer_rejudges_the_models_cases_blind_and_agreement_is_kept(
+    tmp_set, monkeypatch
+):
+    # The model judged a case unattended; a reviewer judges the same question blind. The
+    # reviewer's marks become the case, the model's stay beside them, and agreement counts.
+    a, b, c = (str(judged.uuid.uuid5(judged.uuid.NAMESPACE_URL, x)) for x in "abc")
+    model_case = judged.Case(
+        question="How does Raft elect a leader?",
+        type="mechanism",
+        supporting=[a],
+        distractors=[b],
+        judge="model",
+        judged_at="then",
+        pooled=[a, b, c],
+        model_marks={"supporting": [a], "distractors": [b], "model": "m"},
+    )
+    judged.save([model_case])
+
+    class FakeDB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def execute(self, *args, **kwargs):
+            class R:
+                def all(self_inner):
+                    return [(x, "T", "S", 1, f"text {x}") for x in (a, b, c)]
+
+            return R()
+
+    monkeypatch.setattr(judged, "session_scope", lambda: FakeDB())
+    packet = await judged.export_review_packet()
+    assert len(packet["items"]) == 1
+    item = packet["items"][0]
+    assert [p["chunk_id"] for p in item["passages"]] == [a, b, c]
+    # Blind: an item is the question and its passages, nothing of anyone's marks.
+    assert set(item) == {"id", "question", "source", "passages"}
+    assert set(item["passages"][0]) == {"label", "chunk_id", "title", "section", "page", "text"}
+    assert "unattended" not in json_dumps(packet)
+
+    async def judge_no_db(case):
+        case.split, case.judged_at, case.answerable = "tune", "now", True
+        judged.save([c for c in judged.load() if c.id != case.id] + [case])
+        return case
+
+    monkeypatch.setattr(judged, "judge", judge_no_db)
+    answers = {
+        "judge": "astra",
+        "judgements": [{"id": item["id"], "type": "mechanism", "supporting": ["P1", "P3"]}],
+    }
+    got = await judged.import_judgements(packet, answers)
+    assert got["saved"] == 1, got
+    (case,) = judged.load()
+    assert case.judge == "astra" and case.supporting == [a, c]
+    assert case.model_marks["supporting"] == [a]  # the model's verdict kept
+    ag = judged.agreement()
+    assert ag["all"]["cases"] == 1 and ag["all"]["recall"] == 0.5  # the model found 1 of 2
+
+
+def json_dumps(x):
+    import json
+
+    return json.dumps(x)

@@ -9,7 +9,7 @@
 #   ./library export --name "…" [--level readings] --subject "…"   make a cartridge
 #   ./library insert <cartridge.zip>          put a cartridge on the rack
 #   ./library mcp [--http PORT]               an MCP server other agents can use (stdio by default)
-#   ./library eval [tune|test|all|export]    score the hand-judged set (judge it at /eval); export > file.json
+#   ./library eval [tune|test|all|export|review-packet]   score the hand-judged set (judge it at /eval); export > file.json; review-packet: the model's cases, blind, for a reviewer
 #   ./library anchors [--report]            tie every Tier 1 claim to the passage that says it
 #   ./library spans [--repair]                check each passage opens on its own text; fix the ones that don't
 #
@@ -41,6 +41,7 @@ case "${1:-start}" in
   mcp) shift; exec uv run python -m library_agent.mcp_server "$@" ;;
   eval) shift
     if [ "${1:-}" = "export" ]; then exec uv run python -c "import asyncio, json, sys; from library_agent.eval.judged import export_bundle; json.dump(asyncio.run(export_bundle()), sys.stdout, indent=1, ensure_ascii=False)"; fi
+    if [ "${1:-}" = "review-packet" ]; then exec uv run python -c "import asyncio, json, sys; from library_agent.eval.judged import export_review_packet; json.dump(asyncio.run(export_review_packet()), sys.stdout, indent=1, ensure_ascii=False)"; fi
     exec uv run python -m library_agent.eval.judged "$@" ;;
   anchors) shift; exec uv run python -m library_agent.library.anchors "$@" ;;
   bench) shift; exec uv run python bench/run.py "$@" ;;

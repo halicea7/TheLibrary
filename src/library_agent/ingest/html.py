@@ -116,7 +116,7 @@ def extract_html(path: Path) -> str:
 def page_people(html: str) -> list[str]:
     """Who made a wiki page: Confluence's "Created by <author> on …, last updated by
     <editor> on …", the creator first. The block is stripped from the body (it isn't the
-    document) but kept here, so "what has Hector written?" can be answered."""
+    document) but kept here, so "what has Ann Lee written?" can be answered."""
     soup = BeautifulSoup(html, "html.parser")
     block = soup.select_one(".page-metadata")
     if block is None:

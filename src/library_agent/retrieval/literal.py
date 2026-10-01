@@ -169,7 +169,7 @@ def exact_first(
 # --------------------------------------------------------------------------- rare words
 
 # A word the question uses that only a handful of passages contain is almost always the
-# thing being asked about: a person ("what has Hector said"), a project ("RaaSP"), a host.
+# thing being asked about: a person ("what has Ann Lee said"), a project ("Halyard"), a host.
 # Meaning-based search can't place a rare name, and the lexical half drowns it in common
 # words -- measured on Astra's judgements: six questions about people whose names appear in
 # 9-14 passages each, and search surfaced none of those passages. So such a word is looked
@@ -256,7 +256,7 @@ async def rare_terms(db: AsyncSession, query: str, *, max_df: int | None = None)
 
 
 async def _written_as_a_name(db: AsyncSession, w: str) -> bool:
-    """Does the library write this word as a name -- capitalised (Rubeel, RaaSP, RCEs) in
+    """Does the library write this word as a name -- capitalised (Okafor, Halyard, RCEs) in
     most places it appears? A rare *ordinary* word ("summarise", "calibration") is
     lowercase in running text, and looking it up exactly only crowds out better results:
     measured, it cost one of Astra's questions its first place."""
@@ -286,8 +286,8 @@ async def rare_hits(
     levels: list[str] | None = None,
     document_ids: list[uuid.UUID] | None = None,
 ) -> list[SearchHit]:
-    """For each rare word: the passages that hold it (by the full-text index, so "hector"
-    is not found inside "vector"), and the opening passages of volumes it authored."""
+    """For each rare word: the passages that hold it (by the full-text index, so "hall"
+    is not found inside "shallow"), and the opening passages of volumes it authored."""
     base: dict = {
         "docs": [str(x) for x in document_ids] if document_ids else None,
         "cats": [str(x) for x in category_ids] if category_ids else None,

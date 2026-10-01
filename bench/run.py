@@ -253,12 +253,12 @@ JUDGE_CASES = [
         "label": "Cluster head nodes",
         "expect": False,
         "claims": [
-            "The head node of the Pegasus cluster is login01.",
+            "The head node of the Vega cluster is login01.",
             "The head node of the Orion cluster is hydra01.",
         ],
-        "titles": ["Pegasus User Guide", "Orion User Guide"],
+        "titles": ["Vega User Guide", "Orion User Guide"],
         "scopes": {
-            "Pegasus User Guide": "How to use the Pegasus cluster.",
+            "Vega User Guide": "How to use the Vega cluster.",
             "Orion User Guide": "How to use the Orion cluster.",
         },
     },

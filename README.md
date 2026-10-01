@@ -120,7 +120,7 @@ And when you ask it something, the answer is a reading column with an apparatus:
 
 Drop PDFs, Markdown, HTML, or text onto the shelf — folders are walked. A document is **searchable within seconds**.
 
-- **Wikis drop straight in.** An HTML page is read as the Markdown it converts to: the page body found (Confluence's `#main-content`, MediaWiki's, `<article>`, `<main>`), breadcrumbs, metadata and footers dropped, headings, lists, code and tables kept, the page title as its H1. A **Confluence space export** becomes one volume per page, and each page keeps who created and last updated it, so *what has Hector written?* can be answered (`./library authors` adds this to pages shelved before it existed).
+- **Wikis drop straight in.** An HTML page is read as the Markdown it converts to: the page body found (Confluence's `#main-content`, MediaWiki's, `<article>`, `<main>`), breadcrumbs, metadata and footers dropped, headings, lists, code and tables kept, the page title as its H1. A **Confluence space export** becomes one volume per page, and each page keeps who created and last updated it, so *what has Ann Lee written?* can be answered (`./library authors` adds this to pages shelved before it existed).
 - **Reading is a click.** *have it read* writes section summaries and subjects (a couple of minutes); *annotate it* writes marginalia. Under the shelf header, *read the N unread* and *annotate the N read* queue everything in view — the whole shelf, a subject, or a seated cartridge — skip what's already queued, and say how long it will take first.
 - **Re-shelving.** *re-shelve these N* appears when one shelf is chosen, and places its volumes again from what they say rather than where they sit.
 

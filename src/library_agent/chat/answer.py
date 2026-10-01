@@ -142,9 +142,6 @@ def build_messages(
         )
     if stance and stance in STANCES:
         system += f"\n\nFor this answer, take a stance — {STANCES[stance]['label']}:\n{STANCES[stance]['prompt']}"
-    # About this turn's connected systems -- guidance, never a source to cite.
-    for note in notes or []:
-        system += f"\n\n{note}"
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
     for role, text in history[-8:]:
         messages.append({"role": role, "content": text})
@@ -155,10 +152,22 @@ def build_messages(
         if hits
         else _NO_CONTEXT
     )
+    # Live results are not the library's: headed as "passages from the library" they were
+    # described as such ("the library does not contain …" about SentinelOne's own data).
+    live = any(getattr(h, "kind", "") == "live" for h in hits)
+    heading = (
+        "Sources: passages from the library, and live results just fetched from connected "
+        "systems (marked as live results):"
+        if live
+        else "Passages from the library:"
+    )
+    # Guidance about this turn's connected systems sits beside the question, where it is
+    # weighed -- in the system prompt it was overridden (a current OS release called unreal).
+    guide = "".join(f"{n}\n\n" for n in notes or [])
     messages.append(
         {
             "role": "user",
-            "content": f"Passages from the library:\n\n{context}\n\n---\n\n{question}",
+            "content": f"{heading}\n\n{context}\n\n---\n\n{guide}{question}",
         }
     )
     return messages

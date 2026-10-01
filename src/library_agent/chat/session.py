@@ -208,10 +208,22 @@ async def run_turn(
                     live_hits.append(as_hit(lr))
                 if live_hits:
                     names = sorted({h.live["module"] for h in live_hits})
+                    from datetime import UTC, datetime, timedelta
+
+                    now = datetime.now(UTC)
+                    # A calendar to read from, not arithmetic to attempt: asked for the last
+                    # and next Friday from a Thursday, the model got both dates wrong.
+                    days = ", ".join(
+                        f"{d:%a} {d:%Y-%m-%d}"
+                        for d in (now + timedelta(days=k) for k in range(-7, 8))
+                    )
                     notes.append(
+                        f"It is now {now:%A %Y-%m-%d %H:%M} UTC. The days around today: "
+                        f"{days}. Read dates that follow from a schedule (the last and next "
+                        "run) off this list rather than working them out. "
                         f"Some sources are live results just fetched from {', '.join(names)} "
                         "(marked live). They are that system's data, not the library's: write "
-                        f"\"{names[0]} shows …\", \"{names[0]} returned …\". If they don't answer "
+                        f'"{names[0]} shows …", "{names[0]} returned …". If they don\'t answer '
                         f"the question, say which {names[0]} lookup was made and what it returned, "
                         "and what it can't show. Never say the library or "
                         f"{' or '.join(names)} has no information when {' or '.join(names)} was "

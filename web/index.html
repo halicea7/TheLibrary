@@ -4210,8 +4210,51 @@ async function loadProviders() {
       <td>${esc(r.label)}${r.remote ? ' <span class="remote" title="runs on a provider, not Ollama">remote</span>' : ''}</td>
       <td><select onchange="roleChange('${r.id}', this)">${opts(r)}</select>
         ${r.id === 'reading' ? '<div class="role-warn" hidden>Artifacts record the model that wrote them. With a different reader, the next backfill re-reads the whole shelf — every volume, at that model\'s price. <button class="linkish" onclick="roleApply(\'reading\', this)">change it anyway</button> <button class="linkish" onclick="loadProviders()">keep</button></div>' : ''}</td>
-      <td>${esc(r.note)}</td></tr>`).join('')}</table>
-    <p class="empty" style="padding:8px 0 0">Embeddings stay on Ollama: every vector in the library is <code>bge-m3</code>, and moving them is a re-embedding of everything.</p>`;
+      <td>${esc(r.note)}</td></tr>`).join('')}
+      ${embedRow(j)}</table>`;
+}
+// Embeddings: always the library's one model; only where it runs is a choice. A move is
+// saved only once a sample of stored passages embeds the same way there.
+function embedRow(j) {
+  const e = j.embeddings, lib = e.library_model;
+  const guess = (pid) => (j.catalogue[pid] || []).map(n => n.slice(pid.length + 1)).find(n => n === lib || n.startsWith(lib + ':')) || lib;
+  const where = `<option value="" ${!e.provider ? 'selected' : ''}>Ollama</option>` + j.providers.map(p => `<option value="${esc(p.id)}" data-guess="${esc(guess(p.id))}" ${p.id === e.provider ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  return `<tr id="emb-row"><td>Embeddings${e.provider ? ' <span class="remote" title="runs on a provider, not Ollama">remote</span>' : ''}</td>
+    <td><select id="emb-where" onchange="embWhere(this)">${where}</select>
+      <input type="text" id="emb-name" value="${esc(e.provider ? e.model : lib)}" spellcheck="false" ${e.provider ? '' : 'hidden'} title="the provider's name for ${esc(lib)}">
+      <span class="acts inline"><button class="linkish" id="emb-apply" onclick="embApply(this)" hidden>check and use</button><button class="linkish" onclick="embCheck(this)">check</button></span>
+      <div class="prov-out" id="emb-out" hidden></div></td>
+    <td>always <code>${esc(lib)}</code> at ${e.dim} dimensions; only where it runs changes, and a move is used only if stored passages embed the same way there${e.dangling ? ' — <b>its provider was removed; Ollama is used</b>' : ''}</td></tr>`;
+}
+function embWhere(sel) {
+  const name = $('#emb-name'), opt = sel.selectedOptions[0];
+  name.hidden = !sel.value; if (sel.value) name.value = opt.dataset.guess || name.value;
+  $('#emb-apply').hidden = sel.value === (provCache?.embeddings.provider || '') && (!sel.value || name.value === provCache.embeddings.model);
+  name.oninput = () => { $('#emb-apply').hidden = false; };
+}
+function embSaid(j) {
+  return j.error ? `<span class="bad">no</span> · ${esc(j.where)} · <code>${esc(j.model)}</code> · ${esc(j.error)}`
+    : `${j.ok ? '<span class="ok">same vectors</span>' : '<span class="bad">different vectors</span>'} · ${esc(j.where)} · <code>${esc(j.model)}</code> · ${j.passages} stored passages, agreement ${j.min} at worst (${j.mean} on average; ${j.agree_at} needed) · ${j.seconds}s`;
+}
+async function embCheck(btn, proposed) {
+  const out = $('#emb-out'); out.hidden = false; out.textContent = 'embedding a few stored passages…'; btn.textContent = 'checking…';
+  let j;
+  try {
+    const r = await fetch('/api/settings/embeddings/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: proposed ? JSON.stringify(proposed) : 'null' });
+    j = await r.json(); if (!r.ok) j = { error: j.detail || r.statusText, where: '', model: '' };
+  } catch (e) { j = { error: String(e), where: '', model: '' }; }
+  out.innerHTML = embSaid(j); btn.textContent = btn.id === 'emb-apply' ? 'check and use' : 'check';
+  return j;
+}
+async function embApply(btn) {
+  const body = { provider: $('#emb-where').value, model: $('#emb-name').value.trim() };
+  const j = await embCheck(btn, body);
+  const out = $('#emb-out');
+  if (!j.ok) { out.innerHTML += ' — not changed. Searches would stop matching the shelf with different vectors.'; return; }
+  const r = await fetch('/api/settings/embeddings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { out.textContent = (await r.json()).detail || r.statusText; return; }
+  const said = out.innerHTML; await loadProviders();
+  const o = $('#emb-out'); o.hidden = false; o.innerHTML = said + ' — now in use.';
 }
 function provEdit(pid) {
   const p = provCache?.providers.find(x => x.id === pid) || { id: '', name: '', base_url: '', has_key: false };

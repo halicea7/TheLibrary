@@ -34,6 +34,18 @@ def fake_server(*, json_schema_ok: bool = True, reasoning: bool = True) -> FastA
     async def models():
         return {"data": [{"id": "big-model"}, {"id": "small-model"}]}
 
+    @app.post("/v1/embeddings")
+    async def embeddings(req: Request):
+        body = await req.json()
+        app.state.calls.append(body)
+        if body["model"] != "bge-m3:latest":
+            return _err(404, f"Model '{body['model']}' not found")
+        data = [
+            {"index": i, "embedding": [float(len(t)), float(i)]}
+            for i, t in enumerate(body["input"])
+        ]
+        return {"data": list(reversed(data))}  # out of order, as a server may answer
+
     @app.post("/v1/chat/completions")
     async def chat(req: Request):
         body = await req.json()
@@ -310,3 +322,73 @@ async def test_a_thinking_family_model_that_did_not_think_still_answers(pfile, s
     _configure(pfile)
     pieces = await _stream("acme:qwen3:30b-a3b")
     assert _joined(pieces, "content") == "Just the answer, no reasoning."
+
+
+# --- where embeddings run -------------------------------------------------------------
+
+
+def test_embeddings_default_to_ollama_and_survive_a_removed_provider(pfile):
+    from library_agent.config import settings
+
+    assert providers.embed_route() == (None, settings().embed_model)
+    cfg = _configure(pfile)
+    cfg.embed_provider, cfg.embed_name = "acme", "bge-m3:latest"
+    providers.save(cfg)
+    back = providers.load()
+    assert (back.embed_provider, back.embed_name) == ("acme", "bge-m3:latest")
+    prov, name = providers.embed_route()
+    assert prov is not None and prov.id == "acme" and name == "bge-m3:latest"
+    del back.providers["acme"]
+    providers.save(back)
+    assert providers.embed_route() == (None, settings().embed_model)
+
+
+async def test_library_embeddings_follow_the_setting(pfile, served, monkeypatch):
+    from library_agent.config import settings
+    from library_agent.llm.embed import embed_texts
+    from library_agent.llm.ollama import Ollama
+
+    app = served(fake_server())
+    to_ollama: list[str | None] = []
+
+    async def ollama_embed(self, texts, model=None):
+        to_ollama.append(model)
+        return [[0.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(Ollama, "embed", ollama_embed)
+    cfg = _configure(pfile)
+    assert await embed_texts(["a"]) == [[0.0, 0.0]]
+    assert to_ollama == [settings().embed_model]
+
+    cfg.embed_provider, cfg.embed_name = "acme", "bge-m3:latest"
+    providers.save(cfg)
+    # In the order asked, under the provider's name for the model.
+    assert await embed_texts(["a", "bbb"]) == [[1.0, 0.0], [3.0, 1.0]]
+    assert app.state.calls[-1]["model"] == "bge-m3:latest"
+    # Any other model asked for by name is still Ollama's.
+    async with LLM() as c:
+        await c.embed(["a"], model="nomic-embed-text")
+    assert to_ollama[-1] == "nomic-embed-text"
+
+
+async def test_embeddings_settings_route(pfile):
+    from library_agent.api.app import app
+    from library_agent.config import settings
+
+    _configure(pfile)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        j = (await c.get("/api/settings/embeddings")).json()
+        assert j["provider"] == "" and j["model"] == settings().embed_model
+        r = await c.put("/api/settings/embeddings", json={"provider": "nobody"})
+        assert r.status_code == 422
+        j = (
+            await c.put(
+                "/api/settings/embeddings", json={"provider": "acme", "model": "bge-m3:latest"}
+            )
+        ).json()
+        assert j["provider"] == "acme" and j["model"] == "bge-m3:latest"
+        assert j["library_model"] == settings().embed_model
+        j = (await c.put("/api/settings/embeddings", json={"provider": ""})).json()
+        assert j["provider"] == "" and providers.load().embed_name == ""

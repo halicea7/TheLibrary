@@ -2,7 +2,8 @@
 
 An Ollama client that also knows the configured providers: a model named with a
 provider's prefix goes to that provider over the OpenAI protocol, any other model goes
-to Ollama exactly as before. Embeddings and the resident-model list are always Ollama's.
+to Ollama exactly as before. Embeddings go to Ollama unless the settings name a provider
+that serves the library's embedding model; the resident-model list is always Ollama's.
 Backends are opened on first use and closed together."""
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
+from library_agent.config import settings
 from library_agent.llm import providers
 from library_agent.llm.ollama import Ollama
 from library_agent.llm.openai_compat import OpenAICompat
@@ -24,6 +26,9 @@ class LLM(Ollama):
         prov, name = providers.split(model)
         if prov is None:
             return None, model
+        return self._client_for(prov), name
+
+    def _client_for(self, prov: providers.Provider) -> OpenAICompat:
         # A provider edited in the settings gets a fresh client, since the key or URL
         # may have changed under us.
         cur = self._remote.get(prov.id)
@@ -31,7 +36,7 @@ class LLM(Ollama):
             if cur is not None:
                 self._stale = getattr(self, "_stale", []) + [cur]
             cur = self._remote[prov.id] = OpenAICompat(prov)
-        return cur, name
+        return cur
 
     async def aclose(self) -> None:
         for c in list(self._remote.values()) + list(getattr(self, "_stale", [])):
@@ -75,3 +80,12 @@ class LLM(Ollama):
         if remote:
             return await remote.supports_thinking(name)
         return await super().supports_thinking(model)
+
+    async def embed(self, texts: list[str], model: str | None = None) -> list[list[float]]:
+        # Only the library's own embedding model moves; any other name asked for by hand
+        # is an Ollama model, as before.
+        if model is None or model == settings().embed_model:
+            prov, name = providers.embed_route()
+            if prov is not None:
+                return await self._client_for(prov).embed(texts, name)
+        return await super().embed(texts, model)

@@ -12,7 +12,9 @@ and may be pointed at any model, on Ollama or on a provider, from the settings. 
 assignments and the providers live in one small file beside the document store, so the
 API and the worker both see a change without a restart. Embeddings are not a role:
 every vector in the library is bge-m3 at 1024 dimensions, and moving them is a
-re-embedding of everything, not a setting.
+re-embedding of everything, not a setting. *Where* that same model runs is a setting:
+Ollama by default, or a provider that serves it over the OpenAI embeddings call. The
+vectors keep the library's model name either way, so the stored ones stay valid.
 """
 
 from __future__ import annotations
@@ -93,6 +95,10 @@ class Config:
     models: dict[str, str] = field(default_factory=dict)  # role -> model, when overridden
     # Who the library is for, in the owner's words: the answers take it into account.
     about: str = ""
+    # Where embeddings are computed: a provider id ("" = Ollama), and that provider's name
+    # for the library's embedding model ("" = the same name).
+    embed_provider: str = ""
+    embed_name: str = ""
 
 
 def path() -> Path:
@@ -135,6 +141,10 @@ def load() -> Config:
         r: m for r, m in (raw.get("models") or {}).items() if r in ROLES and m is not None
     }
     cfg.about = str(raw.get("about") or "")[:ABOUT_MAX]
+    emb = raw.get("embeddings") or {}
+    if isinstance(emb, dict):
+        cfg.embed_provider = str(emb.get("provider") or "")
+        cfg.embed_name = str(emb.get("model") or "")
     _cache = (p, mtime, cfg)
     return cfg
 
@@ -157,6 +167,7 @@ def save(cfg: Config) -> None:
         },
         "models": cfg.models,
         "about": cfg.about,
+        "embeddings": {"provider": cfg.embed_provider, "model": cfg.embed_name},
     }
     tmp = p.with_suffix(".json.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -182,6 +193,16 @@ def split(model: str) -> tuple[Provider | None, str]:
         if prov and tail:
             return prov, tail
     return None, model
+
+
+def embed_route() -> tuple[Provider | None, str]:
+    """Where an embedding call goes, and under what name. A provider that has since been
+    removed falls back to Ollama rather than failing every search."""
+    cfg = load()
+    prov = cfg.providers.get(cfg.embed_provider) if cfg.embed_provider else None
+    if prov is None:
+        return None, settings().embed_model
+    return prov, cfg.embed_name or settings().embed_model
 
 
 def is_remote(model: str) -> bool:

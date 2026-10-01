@@ -81,11 +81,14 @@ class OpenAICompat:
         return sorted(str(m.get("id")) for m in data if m.get("id"))
 
     async def _complete(self, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+        return await self._post("/chat/completions", payload, timeout)
+
+    async def _post(self, path: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
         # A router in front of many machines rate-limits; a 429 or a passing 5xx is a
         # reason to wait, not to fail the pass. Retry-After is honoured when given.
         delay = 2.0
         for attempt in range(5):
-            r = await self._client.post("/chat/completions", json=payload, timeout=timeout)
+            r = await self._client.post(path, json=payload, timeout=timeout)
             if r.status_code in (429, 502, 503, 504) and attempt < 4:
                 wait = r.headers.get("retry-after")
                 try:
@@ -331,6 +334,18 @@ class OpenAICompat:
             ],
         }
         return self._text(await self._complete(payload, timeout))
+
+    async def embed(
+        self, texts: list[str], model: str, timeout: float = 120.0
+    ) -> list[list[float]]:
+        """The OpenAI embeddings call, in the order given (a server may answer out of order)."""
+        reply = await self._post("/embeddings", {"model": model, "input": texts}, timeout)
+        data = sorted(reply.get("data") or [], key=lambda d: d.get("index", 0))
+        if len(data) != len(texts):
+            raise OllamaError(
+                f"{self.provider.name}: {len(data)} embeddings for {len(texts)} texts"
+            )
+        return [d["embedding"] for d in data]
 
     async def supports_thinking(self, model: str) -> bool:
         # Unknown until it streams; the reasoning is shown if it arrives, and the UI's

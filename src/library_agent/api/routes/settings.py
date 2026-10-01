@@ -156,6 +156,7 @@ async def list_providers() -> dict:
         "providers": [p.public() for p in cfg.providers.values()],
         "roles": roles,
         "catalogue": catalogue,
+        "embeddings": _embeddings_public(),
         "file": str(providers.path()).replace(str(Path.home()), "~"),
     }
 
@@ -272,6 +273,133 @@ async def put_models(body: dict[str, str | None]) -> dict:
         cfg.models[role] = model
     providers.save(cfg)
     return {r: providers.model_for(r) for r in providers.ROLES}
+
+
+class EmbeddingsIn(BaseModel):
+    # A provider id, or "" for Ollama; and that provider's name for the model ("" = the
+    # library's own name for it).
+    provider: str = ""
+    model: str = ""
+
+
+def _embeddings_public() -> dict:
+    cfg = providers.load()
+    prov, name = providers.embed_route()
+    return {
+        "provider": prov.id if prov else "",
+        "provider_name": prov.name if prov else "Ollama",
+        "model": name,
+        "library_model": settings().embed_model,
+        "dim": settings().embed_dim,
+        # Set to a provider that has since been removed: shown, so it can be fixed.
+        "dangling": bool(cfg.embed_provider) and prov is None,
+    }
+
+
+@router.get("/embeddings")
+async def get_embeddings() -> dict:
+    return _embeddings_public()
+
+
+@router.put("/embeddings")
+async def put_embeddings(body: EmbeddingsIn) -> dict:
+    """Where the library's embedding model runs. The vectors keep the library's model
+    name, so moving between two servers of the same model needs no re-embedding -- the
+    check below is how to know they really are the same model."""
+    cfg = providers.load()
+    pid = body.provider.strip()
+    if pid and pid not in cfg.providers:
+        raise HTTPException(422, f"no provider called {pid}")
+    cfg.embed_provider = pid
+    cfg.embed_name = body.model.strip() if pid else ""
+    providers.save(cfg)
+    return _embeddings_public()
+
+
+# Two servers of the same model agree to the third decimal or so (precision, batching);
+# a different model, or a different pooling, lands far below this.
+EMBED_AGREE = 0.99
+EMBED_SAMPLE = 8
+
+
+@router.post("/embeddings/check")
+async def check_embeddings(db: SessionDep, body: EmbeddingsIn | None = None) -> dict:
+    """Embed a few passages already on the shelf where the setting says (or where `body`
+    proposes, before saving) and compare with the vectors stored for them. Agreement
+    means the move needs no re-embedding."""
+    import json as _json
+    import math
+
+    from sqlalchemy import text as sql
+
+    from library_agent.llm.ollama import Ollama
+
+    cfg = providers.load()
+    if body is not None and body.provider:
+        prov = cfg.providers.get(body.provider)
+        if prov is None:
+            raise HTTPException(422, f"no provider called {body.provider}")
+        name = body.model.strip() or settings().embed_model
+    elif body is not None:
+        prov, name = None, settings().embed_model
+    else:
+        prov, name = providers.embed_route()
+    rows = (
+        await db.execute(
+            sql(
+                "SELECT c.context_prefix, c.text, e.vec::text AS v FROM chunk c "
+                "JOIN embedding e ON e.owner_kind = 'chunk' AND e.owner_id = c.id "
+                "AND e.model = :m WHERE c.kind = 'text' ORDER BY random() LIMIT :n"
+            ),
+            {"m": settings().embed_model, "n": EMBED_SAMPLE},
+        )
+    ).all()
+    if not rows:
+        raise HTTPException(409, "no stored passages to compare against yet")
+    texts = [f"{r.context_prefix}\n\n{r.text}" for r in rows]
+    t0 = time.monotonic()
+    try:
+        if prov is None:
+            async with Ollama() as c:
+                got = await c.embed(texts, settings().embed_model)
+        else:
+            async with OpenAICompat(prov) as c:
+                got = await c.embed(texts, name)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "where": prov.name if prov else "Ollama",
+            "model": name,
+            "error": str(exc)[:300],
+        }
+    seconds = round(time.monotonic() - t0, 2)
+
+    def cos(a: list[float], b: list[float]) -> float:
+        na = math.sqrt(sum(x * x for x in a))
+        nb = math.sqrt(sum(x * x for x in b))
+        return sum(x * y for x, y in zip(a, b, strict=True)) / (na * nb) if na and nb else 0.0
+
+    stored = [_json.loads(r.v) for r in rows]
+    out = {
+        "where": prov.name if prov else "Ollama",
+        "model": name,
+        "seconds": seconds,
+        "passages": len(rows),
+    }
+    if any(len(g) != len(s) for g, s in zip(got, stored, strict=True)):
+        return {
+            **out,
+            "ok": False,
+            "error": f"{len(got[0])} dimensions; the library's vectors have {len(stored[0])}",
+        }
+    sims = [round(cos(g, s), 4) for g, s in zip(got, stored, strict=True)]
+    return {
+        **out,
+        "ok": min(sims) >= EMBED_AGREE,
+        "min": min(sims),
+        "mean": round(sum(sims) / len(sims), 4),
+        "agree_at": EMBED_AGREE,
+    }
 
 
 @router.post("/gc")

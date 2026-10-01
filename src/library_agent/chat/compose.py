@@ -747,8 +747,7 @@ async def compose(
     # Classification: the writer and the checker both read the material, so a remote
     # model on either side holds the whole composition to the remote ceiling.
     scale = classification.load()
-    remote = providers.is_remote(model) or providers.is_remote(helper)
-    top = classification.effective_ceiling(ceiling, remote=remote, s=scale)
+    top = classification.effective_ceiling(ceiling, models=[model, helper], s=scale)
     levels = classification.allowed_levels(top, s=scale)
     comp = Composition(brief=brief, scale=scale, ceiling=top)
     held = False

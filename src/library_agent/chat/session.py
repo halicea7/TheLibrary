@@ -204,7 +204,7 @@ async def run_turn(
         # Classification: what this question may draw on -- at or below the conversation's
         # ceiling, and at or below the remote ceiling when the model is not on this machine.
         scale = classification.load()
-        top = classification.effective_ceiling(ceiling, remote=providers.is_remote(model), s=scale)
+        top = classification.effective_ceiling(ceiling, models=[model], s=scale)
         levels = classification.allowed_levels(top, s=scale)
         withheld = 0
 
@@ -241,11 +241,12 @@ async def run_turn(
             from library_agent.modules import store as mod_store
             from library_agent.modules.consult import consult as consult_modules
 
-            remote_chat = providers.is_remote(model)
+            # Local, or a provider marked internal: may use modules for local models only.
+            remote_chat = not providers.is_trusted(model)
             # Clearance is per operation: on a remote provider only the operations cleared
             # for any model are offered; a token with none left is held back whole.
             usable, held_back = [], []
-            local_only = "local models only; chat is on a remote provider"
+            local_only = "local models only; chat is on a provider not marked internal"
             for mod, mcfg in mod_store.seated_modules():
                 # Classified above what this question may draw on: not consulted at all,
                 # so nothing it would return reaches the model.

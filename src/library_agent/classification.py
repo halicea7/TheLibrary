@@ -338,22 +338,47 @@ async def classify_all(session_scope) -> dict:
     return {"volumes": dict(levels), "portion_marked_passages": portions}
 
 
-def effective_ceiling(
-    ceiling: str | None, *, remote: bool = False, s: Scale | None = None
-) -> str | None:
-    """The lower of a question's own ceiling and -- when the model is remote -- the
-    remote ceiling. None when nothing restricts it."""
+def model_limit(model: str | None, s: Scale | None = None) -> str | None:
+    """The highest level a model may be shown: none for a local one; for a provider, the
+    ceiling set for it in Settings › Providers, else the scale's remote ceiling."""
+    from library_agent.llm import providers
+
+    if not model:
+        return None
+    prov, _ = providers.split(model)
+    if prov is None:
+        return None
     s = s or load()
-    limits = [c for c in (ceiling, s.remote_ceiling if remote else None) if c]
+    return prov.ceiling if prov.ceiling in {lv.id for lv in s.levels} else s.remote_ceiling
+
+
+def effective_ceiling(
+    ceiling: str | None,
+    *,
+    remote: bool = False,
+    models: list[str] | None = None,
+    s: Scale | None = None,
+) -> str | None:
+    """The lowest of: a question's own ceiling; the remote ceiling, when what is retrieved
+    leaves the machine some other way (the token API); and each model's own limit. None
+    when nothing restricts it."""
+    s = s or load()
+    limits = [ceiling, s.remote_ceiling if remote else None]
+    limits += [model_limit(m, s) for m in models or []]
+    limits = [c for c in limits if c]
     return min(limits, key=s.rank) if limits else None
 
 
 def allowed_levels(
-    ceiling: str | None, *, remote: bool = False, s: Scale | None = None
+    ceiling: str | None,
+    *,
+    remote: bool = False,
+    models: list[str] | None = None,
+    s: Scale | None = None,
 ) -> list[str] | None:
     """The level ids a question may draw on, or None when every level is allowed."""
     s = s or load()
-    top = effective_ceiling(ceiling, remote=remote, s=s)
+    top = effective_ceiling(ceiling, remote=remote, models=models, s=s)
     if top is None:
         return None
     allowed = s.at_or_below(top)

@@ -129,3 +129,37 @@ async def test_a_modules_live_results_carry_its_level(tmp_path, monkeypatch):
     assert await cls.hit_levels(None, [_live("s1"), _live("other")], s) == ["S", "U"]
     # A question held to Confidential may not consult a Secret module.
     assert cls.module_level("s1", s) not in cls.allowed_levels("C", s=s)
+
+
+def test_a_provider_sets_its_own_ceiling_and_can_be_internal(tmp_path, monkeypatch):
+    from library_agent.llm import providers
+
+    monkeypatch.setenv("LIBRARY_PROVIDERS_FILE", str(tmp_path / "providers.json"))
+    providers._cache = None
+    cfg = providers.Config()
+    cfg.providers["campus"] = providers.Provider(
+        id="campus",
+        name="Campus",
+        base_url="http://gpu.test/v1",
+        ceiling="confidential",
+        internal=True,
+    )
+    cfg.providers["cloud"] = providers.Provider(
+        id="cloud", name="Cloud", base_url="http://x.test/v1"
+    )
+    providers.save(cfg)
+    providers._cache = None
+    back = providers.load().providers["campus"]
+    assert back.ceiling == "confidential" and back.internal  # saved and read back
+    s = cls.Scale()  # company scale: remote ceiling Internal
+    assert cls.model_limit("qwen3:30b-a3b", s) is None  # local: no limit
+    assert cls.model_limit("campus:qwen3:30b-a3b", s) == "confidential"
+    assert cls.model_limit("cloud:gpt", s) == "internal"  # unset: the remote ceiling
+    # The lowest of the question's ceiling and each model's limit.
+    assert cls.effective_ceiling(None, models=["campus:m"], s=s) == "confidential"
+    assert cls.effective_ceiling("public", models=["campus:m"], s=s) == "public"
+    assert cls.effective_ceiling(None, models=["campus:m", "cloud:m"], s=s) == "internal"
+    assert cls.effective_ceiling(None, models=["qwen3:30b-a3b"], s=s) is None
+    # Internal: may use modules cleared for local models only.
+    assert providers.is_trusted("campus:m") and providers.is_trusted("qwen3:30b-a3b")
+    assert not providers.is_trusted("cloud:m")

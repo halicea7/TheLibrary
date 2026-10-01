@@ -563,6 +563,7 @@ select, .toggle {
 .ex-h { display:flex; align-items:center; gap:10px; } .ex-h .m { font:10.5px var(--mono); color:var(--faint); } .ex-h .go { margin-left:auto; }
 .ex .shows { margin:4px 0 0; padding-left:18px; font:11px/1.5 var(--sans); color:var(--dim); }
 .drawer.bay.over { outline:2px dashed var(--verdigris); outline-offset:-6px; }
+.prov-edit label.chk { display:flex; align-items:center; gap:6px; }
 .tok-card .tok-row.face { margin:0; cursor:default; }
 .tok-card[data-armed="true"] { box-shadow:inset 3px 0 0 var(--gilt); padding-left:8px; }
 .tok-card b { color:var(--fg); font:600 13px/1.3 var(--serif); }
@@ -3176,7 +3177,7 @@ async function loadClassification() {
       <tr><td>Scale</td><td><select id="cl-scheme">${scale.presets.map(p => `<option value="${p}" ${p === scale.scheme ? 'selected' : ''}>${p === 'us' ? 'U.S. (U · CUI · C · S · TS)' : 'Company (Public · Internal · Confidential · Restricted)'}</option>`).join('')}${scale.scheme === 'custom' ? '<option value="custom" selected>custom</option>' : ''}</select></td>
         <td>${scale.levels.map(l => `<span class="lvl" style="--lc:${esc(l.colour)}" title="${esc(l.label)}">${esc(l.short)}</span>`).join(' ')}</td></tr>
       <tr><td>Unmarked volumes</td><td><select id="cl-default">${opts(scale.default)}</select></td><td>the level of a volume with no marking and nothing set</td></tr>
-      <tr><td>Remote ceiling</td><td><select id="cl-remote">${opts(scale.remote_ceiling)}</select></td><td>the highest level a model on another machine may read, whatever the question asks; also the token API</td></tr>
+      <tr><td>Remote ceiling</td><td><select id="cl-remote">${opts(scale.remote_ceiling)}</select></td><td>the highest level a provider's model may read, unless the provider sets its own (Settings › Providers); also what the token API hands out</td></tr>
       <tr><td>Export ceiling</td><td><select id="cl-export">${opts(scale.export_ceiling)}</select></td><td>nothing above it leaves in a cartridge, at any level of sharing</td></tr>
       <tr><td>Uncited paragraphs</td><td><select id="cl-mode"><option value="strict" ${scale.mode === 'strict' ? 'selected' : ''}>strict</option><option value="cited" ${scale.mode === 'cited' ? 'selected' : ''}>cited only</option></select></td><td>strict: a paragraph citing nothing takes the highest level the model read</td></tr>
       <tr><td>Mark output</td><td><label class="toggle"><input type="checkbox" id="cl-marking" ${scale.marking ? 'checked' : ''}/> portion marks and banners</label></td><td></td></tr>
@@ -4171,7 +4172,7 @@ async function loadProviders() {
   let j; try { j = await (await fetch('/api/settings/providers')).json(); } catch (e) { ps.innerHTML = `<p class="label">Providers</p><div class="empty">${esc(String(e))}</div>`; return; }
   provCache = j;
   const rows = j.providers.map(p => `<tr data-pid="${esc(p.id)}"><td><b>${esc(p.name)}</b><div class="dim"><code>${esc(p.id)}:</code></div></td>
-      <td>${esc(p.base_url)}<div class="dim">${p.has_key ? 'key ····' + esc(p.key_tail) : 'no key'}</div></td>
+      <td>${esc(p.base_url)}<div class="dim">${p.has_key ? 'key ····' + esc(p.key_tail) : 'no key'} · ${p.internal ? '<b>internal</b>' : 'external'} · may see up to ${esc(lvOf(p.ceiling || scale?.remote_ceiling)?.label || 'the remote ceiling')}</div></td>
       <td><span class="acts inline"><button class="linkish" onclick="provTest('${esc(p.id)}', this)">test</button><button class="linkish" onclick="provEdit('${esc(p.id)}')">edit</button><button class="linkish danger" onclick="provRemove('${esc(p.id)}', this)">remove</button></span></td></tr>
       <tr class="prov-out-row" data-pid="${esc(p.id)}"><td colspan="3"><div class="prov-out" hidden></div></td></tr>`).join('');
   ps.innerHTML = `<p class="label">Providers</p>
@@ -4207,13 +4208,16 @@ function provEdit(pid) {
     <label>name <input type="text" id="pv-name" value="${esc(p.name)}" placeholder="OpenRouter"></label>
     <label>base URL <input type="text" id="pv-url" value="${esc(p.base_url)}" placeholder="https://openrouter.ai/api/v1" spellcheck="false"></label>
     <label>API key <input type="password" id="pv-key" value="" placeholder="${p.has_key ? 'unchanged unless you type a new one' : 'sk-…'}" autocomplete="off"></label>
+    <label>may see up to <select id="pv-ceiling">${(scale?.levels || []).map(l => `<option value="${esc(l.id)}" ${l.id === (p.ceiling || scale.remote_ceiling) ? 'selected' : ''}>${esc(l.label)}${l.id === scale.remote_ceiling ? ' (the remote ceiling)' : ''}</option>`).join('')}</select><span class="hint">the highest classification it is ever shown, whatever the question asks</span></label>
+    <label class="chk"><input type="checkbox" id="pv-internal" ${p.internal ? 'checked' : ''}> internal <span class="hint">it runs on infrastructure you control — modules cleared for local models only may use it</span></label>
     <div class="acts"><button class="linkish" onclick="provSave('${esc(pid)}', this)">save</button><button class="linkish" onclick="$('#prov-form').hidden=true">cancel</button></div>
     <div class="prov-out" hidden></div></div>`;
   (pid ? $('#pv-url') : $('#pv-id')).focus();
 }
 async function provSave(pid, btn) {
   const id = (pid || $('#pv-id').value).trim().toLowerCase(), out = btn.closest('.prov-edit').querySelector('.prov-out');
-  const body = { name: $('#pv-name').value, base_url: $('#pv-url').value };
+  const body = { name: $('#pv-name').value, base_url: $('#pv-url').value, internal: $('#pv-internal').checked,
+    ceiling: $('#pv-ceiling') && scale && $('#pv-ceiling').value !== scale.remote_ceiling ? $('#pv-ceiling').value : '' };
   const key = $('#pv-key').value; if (key) body.api_key = key;
   btn.textContent = 'saving…';
   const r = await fetch(`/api/settings/providers/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

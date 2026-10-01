@@ -74,9 +74,8 @@ def load(path: Path) -> dict:
 
 async def _allowed_levels(model: str) -> list[str] | None:
     from library_agent import classification
-    from library_agent.llm import providers
 
-    return classification.allowed_levels(None, remote=providers.is_remote(model))
+    return classification.allowed_levels(None, models=[model])
 
 
 async def _scope(db, cartridge: str | None, shelf: str | None) -> list | None:

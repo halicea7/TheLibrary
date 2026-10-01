@@ -166,6 +166,10 @@ class ProviderIn(BaseModel):
     # Omitted or null keeps the key already on file; "" clears it.
     api_key: str | None = None
     headers: dict[str, str] = {}
+    # How far it is trusted: the highest classification level it may see ("" = the remote
+    # ceiling), and whether it runs on infrastructure you control.
+    ceiling: str = ""
+    internal: bool = False
 
 
 @router.put("/providers/{pid}")
@@ -180,8 +184,19 @@ async def put_provider(pid: str, body: ProviderIn) -> dict:
     cfg = providers.load()
     old = cfg.providers.get(pid)
     key = body.api_key if body.api_key is not None else (old.api_key if old else "")
+    if body.ceiling:
+        from library_agent import classification
+
+        if body.ceiling not in {lv.id for lv in classification.load().levels}:
+            raise HTTPException(422, "the ceiling is a level on the classification scale")
     cfg.providers[pid] = providers.Provider(
-        id=pid, name=body.name.strip() or pid, base_url=base, api_key=key, headers=body.headers
+        id=pid,
+        name=body.name.strip() or pid,
+        base_url=base,
+        api_key=key,
+        headers=body.headers,
+        ceiling=body.ceiling,
+        internal=body.internal,
     )
     providers.save(cfg)
     _catalogue.pop(pid, None)

@@ -64,6 +64,11 @@ class Provider:
     base_url: str
     api_key: str = ""
     headers: dict[str, str] = field(default_factory=dict)
+    # How far the library trusts it. `ceiling`: the highest classification level it may be
+    # shown (a level id; "" is the scale's remote ceiling). `internal`: it runs on
+    # infrastructure you control, so modules cleared for local models only may use it.
+    ceiling: str = ""
+    internal: bool = False
 
     def public(self) -> dict[str, Any]:
         """For the UI: the key stays here, only its tail is shown."""
@@ -74,6 +79,8 @@ class Provider:
             "has_key": bool(self.api_key),
             "key_tail": self.api_key[-4:] if len(self.api_key) >= 8 else "",
             "headers": self.headers,
+            "ceiling": self.ceiling,
+            "internal": self.internal,
         }
 
 
@@ -121,6 +128,8 @@ def load() -> Config:
                 base_url=str(v["base_url"]).rstrip("/"),
                 api_key=v.get("api_key") or "",
                 headers={str(k): str(x) for k, x in (v.get("headers") or {}).items()},
+                ceiling=str(v.get("ceiling") or ""),
+                internal=bool(v.get("internal")),
             )
     cfg.models = {
         r: m for r, m in (raw.get("models") or {}).items() if r in ROLES and m is not None
@@ -141,6 +150,8 @@ def save(cfg: Config) -> None:
                 "base_url": v.base_url,
                 "api_key": v.api_key,
                 "headers": v.headers,
+                "ceiling": v.ceiling,
+                "internal": v.internal,
             }
             for pid, v in cfg.providers.items()
         },
@@ -175,6 +186,13 @@ def split(model: str) -> tuple[Provider | None, str]:
 
 def is_remote(model: str) -> bool:
     return split(model)[0] is not None
+
+
+def is_trusted(model: str) -> bool:
+    """Local (Ollama), or a provider marked internal: may use modules cleared for local
+    models only."""
+    prov, _ = split(model)
+    return prov is None or prov.internal
 
 
 def default_for(role: str) -> str:

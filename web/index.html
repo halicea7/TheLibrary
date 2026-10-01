@@ -3661,20 +3661,27 @@ async function openVolume(id) {
   };
   const figHtml = f => `<figure onclick="this.classList.toggle('wide')">
       <img src="/api/documents/${d.id}/figures/${f.n}.png" width="${f.width}" height="${f.height}" loading="lazy" alt="${esc(f.caption || 'Figure on page ' + f.page)}">
-      <figcaption>${f.caption ? esc(f.caption) : 'Figure'}<small>p.${f.page}</small>${f.description ? `<span class="seen">${esc(f.description)}</span>` : ''}</figcaption></figure>`;
+      <figcaption>${f.caption ? esc(f.caption) : 'Figure ' + f.n}${isMd ? '' : `<small>p.${f.page}</small>`}${f.description ? `<span class="seen">${esc(f.description)}</span>` : ''}</figcaption></figure>`;
+  const placed = new Set();  // figures already set into the text at their marker
   const body = d.sections.map((s, i) => {
     let h = s.title
-      ? `<h3 id="sec-${i}">${esc(s.title)}${s.page_start ? `<small>p.${s.page_start}</small>` : ''}</h3>`
+      ? `<h3 id="sec-${i}">${esc(s.title)}${s.page_start && !isMd ? `<small>p.${s.page_start}</small>` : ''}</h3>`
       : '';
     if (s.summary) h += `<p class="lead">${esc(s.summary)}</p>`;
     h += s.passages.map(p => {
       const notes = (p.reflections || []).map(r => r.cartridge
         ? `<span class="theirs" style="--c:${esc(r.cartridge.colour)}"><i>${esc(r.cartridge.name)}</i>${esc(r.text)}</span>`
         : `<span>${esc(r.text)}</span>`).join('');
-      const body = isMd ? `<div class="pass md">${mdBlocks(p.text).join('')}</div>` : `<p class="pass">${esc(p.text)}</p>`;
+      // A Markdown volume's embedded images sit in its text as "(Figure n)" markers: the
+      // image goes there, where the writer put it, not at the end of the section.
+      const inline = html => html.replace(/<em>\(Figure (\d+)(?::[^<]*)?\)<\/em>/g, (m, n) => {
+        const f = figs.find(x => x.n === +n); if (!f) return m;
+        placed.add(f.n); return figHtml(f);
+      });
+      const body = isMd ? `<div class="pass md">${inline(mdBlocks(p.text).join(''))}</div>` : `<p class="pass">${esc(p.text)}</p>`;
       return `${body}<div class="gloss">${notes}</div>`;
     }).join('');
-    h += figs.filter(f => figHome(f) === i).map(figHtml).join('');
+    h += figs.filter(f => figHome(f) === i && !placed.has(f.n)).map(figHtml).join('');
     return h;
   }).join('');
 

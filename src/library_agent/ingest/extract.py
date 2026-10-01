@@ -389,6 +389,11 @@ def extract_text_file(path: Path) -> Extracted:
     else:
         raw = path.read_text(encoding="utf-8", errors="replace")
         people = []
+    if is_md:
+        # Exporters' presentation out: embedded base64 images, heading anchors (see markdown.py).
+        from library_agent.ingest.markdown import tidy
+
+        raw = tidy(raw)
     # Strip fenced code blocks from heading detection but keep them in the body.
     text = raw if is_md else normalize(raw)
 
@@ -416,7 +421,13 @@ def extract_text_file(path: Path) -> Extracted:
                     )
                 )
 
+    from library_agent.ingest.markdown import is_generic_title
+
+    # The first H1 names the document -- unless it names a part of it ("Overview"), when
+    # the caller falls back to the file's name.
     title = toc[0].title if toc and toc[0].level == 1 else path.stem
+    if is_generic_title(title):
+        title = None
     return Extracted(
         text=text, page_offsets=[(0, 1)], toc=toc, title=title, page_count=1, authors=people
     )

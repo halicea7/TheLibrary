@@ -64,7 +64,8 @@ async def describe_figures(
     if not doc or doc.readings_only or not doc.source_path:
         return res
     path = Path(doc.source_path)
-    if path.suffix.lower() != ".pdf" or not path.exists():
+    is_md = path.suffix.lower() in fig.MARKDOWN
+    if (path.suffix.lower() != ".pdf" and not is_md) or not path.exists():
         return res
     figs = fig.index(doc.content_hash, path)
     res.figures = len(figs)
@@ -79,6 +80,21 @@ async def describe_figures(
             )
         ).scalars()
     )
+
+    # A Markdown figure's home is the section whose text holds its "(Figure n)" marker.
+    md_home: dict[int, uuid.UUID] = {}
+    if is_md:
+        from library_agent.ingest.markdown import FIGURE_MARKER
+
+        for sid, body in (
+            await db.execute(
+                select(Chunk.section_id, Chunk.text).where(
+                    Chunk.document_id == document_id, Chunk.kind == "text"
+                )
+            )
+        ).all():
+            for m in FIGURE_MARKER.finditer(body or ""):
+                md_home.setdefault(int(m.group(1)), sid)
 
     def home(page: int) -> Section | None:
         # The last section that starts on or before the figure's page.
@@ -145,7 +161,11 @@ async def describe_figures(
         return res
     vecs = await embed_texts([t for _, t in texts], client if not own else None)
     for (f, text), vec in zip(texts, vecs, strict=True):
-        sec = home(f.page)
+        sec = (
+            next((s for s in sections if s.id == md_home.get(f.n)), None)
+            if is_md and f.n in md_home
+            else home(f.page)
+        )
         cid = figure_chunk_id(doc.content_hash, f.n)
         db.add(
             Chunk(

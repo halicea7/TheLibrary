@@ -118,9 +118,12 @@ def index(content_hash: str, pdf: Path) -> list[Figure]:
                 return [Figure(**f) for f in data["figures"]]
         except Exception:
             log.debug("bad figure index for %s", content_hash, exc_info=True)
-    if pdf.suffix.lower() != ".pdf" or not pdf.exists():
+    if pdf.suffix.lower() in MARKDOWN and pdf.exists():
+        figs = _markdown_figures(content_hash, pdf)
+    elif pdf.suffix.lower() != ".pdf" or not pdf.exists():
         return []
-    figs = find_figures(pdf)
+    else:
+        figs = find_figures(pdf)
     d.mkdir(parents=True, exist_ok=True)
     idx.write_text(json.dumps({"version": INDEX_VERSION, "figures": [asdict(f) for f in figs]}))
     return figs
@@ -135,6 +138,10 @@ def render(content_hash: str, pdf: Path, n: int) -> Path | None:
     fig = next((f for f in figs if f.n == n), None)
     if not fig:
         return None
+    if pdf.suffix.lower() in MARKDOWN:  # written when indexed; gone means re-index
+        forget(content_hash)
+        index(content_hash, pdf)
+        return out if out.exists() else None
     with pymupdf.open(pdf) as doc:
         page = doc[fig.page - 1]
         pix = page.get_pixmap(
@@ -142,6 +149,37 @@ def render(content_hash: str, pdf: Path, n: int) -> Path | None:
         )
         out.parent.mkdir(parents=True, exist_ok=True)
         pix.save(out)
+    return out
+
+
+MARKDOWN = {".md", ".markdown"}
+
+
+def _markdown_figures(content_hash: str, md_path: Path) -> list[Figure]:
+    """A Markdown file's embedded images, decoded once into the same store as a PDF's
+    rendered figures, as PNG. `page` is 1 (a Markdown volume is one page); where each sat
+    is the "(Figure n)" marker left in the text."""
+    import io
+
+    from PIL import Image
+
+    from library_agent.ingest.markdown import embedded_images
+
+    d = figures_dir(content_hash)
+    d.mkdir(parents=True, exist_ok=True)
+    out = []
+    for e in embedded_images(md_path.read_text(encoding="utf-8", errors="replace")):
+        try:
+            with Image.open(io.BytesIO(e.data)) as im:
+                im.load()
+                if im.mode not in ("RGB", "RGBA", "L", "LA"):
+                    im = im.convert("RGBA")
+                im.save(d / f"{e.n}.png", format="PNG")
+                w, h = im.size
+        except Exception:
+            log.debug("embedded image %s of %s unreadable", e.n, content_hash, exc_info=True)
+            continue
+        out.append(Figure(n=e.n, page=1, bbox=[], caption=e.alt or None, width=w, height=h))
     return out
 
 

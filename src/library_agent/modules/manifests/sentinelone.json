@@ -62,6 +62,41 @@
       }
     },
     {
+      "id": "threats_matching",
+      "summary": "Threats whose details mention a file, process, path or hash -- how many, and on how many endpoints.",
+      "ask_when": "the question names a file, process, path or hash and asks how many endpoints alerted for it, where it was detected, or whether it was seen as a threat.",
+      "method": "GET",
+      "path": "/web/api/v2.1/threats",
+      "params": {
+        "text": {
+          "type": "string",
+          "description": "the file name, process, path or hash, e.g. invoice_viewer.exe",
+          "in": "query",
+          "key": "threatDetails__contains",
+          "required": true
+        }
+      },
+      "query": {
+        "limit": "100",
+        "sortBy": "createdAt",
+        "sortOrder": "desc"
+      },
+      "pagination": {
+        "type": "cursor",
+        "param": "cursor",
+        "cursor_path": "pagination.nextCursor",
+        "max_pages": 3
+      },
+      "response": {
+        "format": "json",
+        "rows": "data",
+        "summary": "{count} threats matched, on {distinct:agentRealtimeInfo.agentComputerName} distinct endpoints (up to 300 threats are fetched).",
+        "line": "{threatInfo.createdAt|date} — {threatInfo.threatName} at {threatInfo.filePath|trunc:120} on {agentRealtimeInfo.agentComputerName} ({threatInfo.mitigationStatus}; incident {threatInfo.incidentStatus})",
+        "empty": "No threat in SentinelOne mentions that.",
+        "limit": 25
+      }
+    },
+    {
       "id": "cve_exposure",
       "summary": "Which endpoints in the fleet are exposed to a given CVE.",
       "ask_when": "the question names a CVE id and asks who or what is exposed, affected, vulnerable or at risk in the fleet.",

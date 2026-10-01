@@ -49,6 +49,10 @@ class Render:
     empty: str = "nothing matched"
     limit: int = 20
     format: str = "json"  # json | xml | csv | text
+    # A line computed over every row fetched, before the rows: "{count} threats on
+    # {distinct:agentRealtimeInfo.agentComputerName} endpoints". Counted in code, so a
+    # total the answer gives can be checked -- not summed by the model from 30 lines.
+    summary: str = ""
 
 
 @dataclass(frozen=True)
@@ -310,6 +314,7 @@ def _mcp_operation(o: dict, oid: str) -> Operation:
             empty=_s(r, "empty", "nothing matched", 300),
             limit=_int(r, "limit", 20, 1, 200),
             format=fmt,
+            summary=_s(r, "summary", "", 300),
         ),
         method="MCP",
         param_specs=placements,
@@ -377,6 +382,7 @@ def _http_operation(o: dict, oid: str) -> Operation:
         empty=_s(r, "empty", "nothing matched", 300),
         limit=_int(r, "limit", 20, 1, 200),
         format=fmt,
+        summary=_s(r, "summary", "", 300),
     )
     p = o.get("pagination") or {}
     ptype = _s(p, "type", "none", 10)
@@ -580,6 +586,7 @@ def to_dict(m: Module) -> dict:
                         "line": o.render.line,
                         "empty": o.render.empty,
                         "limit": o.render.limit,
+                        **({"summary": o.render.summary} if o.render.summary else {}),
                     },
                 }
             )
@@ -598,6 +605,7 @@ def to_dict(m: Module) -> dict:
                 "line": o.render.line,
                 "empty": o.render.empty,
                 "limit": o.render.limit,
+                **({"summary": o.render.summary} if o.render.summary else {}),
             },
         }
         if o.clearance:

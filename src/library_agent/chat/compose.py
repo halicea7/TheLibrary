@@ -632,6 +632,7 @@ def _numbered(h: SearchHit, by_key: dict, comp: Composition, docs: dict, provena
         readings_only=bool(d and d.readings_only),
         authors=d.authors if d and isinstance(d.authors, list) else None,
         kind=getattr(h, "kind", "passage"),
+        live=getattr(h, "live", None),
         **reading_identity(h),
     )
     if src.key() in by_key:
@@ -780,6 +781,31 @@ async def compose(
         with clock("facets"):
             facets = await _facets(client, helper, brief)
         yield {"event": "facets", "data": {"facets": [f["facet"] for f in facets]}}
+        # Seated modules, as in Ask: a brief about your own systems ("how many endpoints
+        # alerted for …") is answered from them, not only from the shelf. Their results
+        # count for coverage and join every section's material. The writer and the checker
+        # both read them, so both must be trusted for a local-only operation.
+        from library_agent.modules.consult import (
+            as_hit,
+            consult,
+            held_back_view,
+            usable_modules,
+        )
+
+        live_hits: list[SearchHit] = []
+        usable, held_back = usable_modules([model, helper], levels, top, scale)
+        if usable:
+            with clock("consult"):
+                for lr in await consult(client, helper, brief, usable):
+                    live_hits.append(as_hit(lr))
+        if usable or held_back:
+            yield {
+                "event": "consulted",
+                "data": {
+                    "results": [h.live for h in live_hits],
+                    "held_back": held_back_view(held_back),
+                },
+            }
         with clock("embed"):
             await prime_queries([brief] + [f["query"] for f in facets], client)
         named = []
@@ -843,7 +869,7 @@ async def compose(
                 per_facet.append(found)
         clock.stop(t_probe)
         # Interleaved by facet, so the judge's sample holds every part, not the first one's.
-        probe: list[SearchHit] = []
+        probe: list[SearchHit] = list(live_hits)
         seen_p: set = set()
         for row in zip_longest(*per_facet):
             for h in row:
@@ -952,6 +978,7 @@ async def compose(
                     named=named,
                     levels=levels,
                 )
+                hits = live_hits + hits
                 docs = {
                     d.id: d
                     for d in (
@@ -994,6 +1021,7 @@ async def compose(
                             "cartridge": s.cartridge,
                             "readings_only": s.readings_only,
                             "kind": s.kind,
+                            "live": s.live,
                             "artifact_id": s.artifact_id,
                             "page_end": s.page_end,
                             "level": s.level,

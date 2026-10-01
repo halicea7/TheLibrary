@@ -261,13 +261,15 @@ async def _written_as_a_name(db: AsyncSession, w: str) -> bool:
     lowercase in running text, and looking it up exactly only crowds out better results:
     measured, it cost one of Astra's questions its first place."""
     rows = (
-        await db.execute(
-            text(
-                "select text from chunk where fts @@ plainto_tsquery('english', :w) limit 30"
-            ),
-            {"w": w},
+        (
+            await db.execute(
+                text("select text from chunk where fts @@ plainto_tsquery('english', :w) limit 30"),
+                {"w": w},
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     rx = re.compile(rf"\b({re.escape(w)})", re.IGNORECASE)
     seen = [m.group(1) for body in rows for m in rx.finditer(body)]
     if not seen:

@@ -306,3 +306,32 @@ def test_a_rewrite_that_invents_an_identifier_is_not_used():
         "cve-2023-5678",
     }
     assert not ungrounded("look up CVE-2025-48432 with NVD", known)
+
+
+def test_a_summary_line_counts_every_row_and_distinct_values():
+    from library_agent.modules.render import summarise
+
+    rows = [{"host": {"name": n}} for n in ("a", "b", "a", "c", "")]
+    assert summarise("{count} rows on {distinct:host.name} hosts", rows) == "5 rows on 3 hosts"
+    op = SENTINELONE.op("threats_matching")
+    assert "{distinct:" in op.render.summary and op.params["required"] == ["text"]
+
+
+def test_write_and_ask_gate_modules_by_every_model_that_reads_them(monkeypatch):
+    from library_agent import classification as cls
+    from library_agent.llm import providers
+    from library_agent.modules import consult as cm
+    from library_agent.modules import store
+
+    monkeypatch.setattr(store, "seated_modules", lambda: [(SENTINELONE, _cfg())])
+    monkeypatch.setattr(cls, "module_level", lambda mid, s=None: "internal")
+    monkeypatch.setattr(providers, "is_trusted", lambda m: not m.startswith("cloud:"))
+    s = cls.Scale()
+    usable, held = cm.usable_modules(["local-model", "local-helper"], None, None, s)
+    assert usable and not held
+    # A checker on an untrusted provider reads the results too: local-only ops held back.
+    usable, held = cm.usable_modules(["local-model", "cloud:helper"], None, None, s)
+    assert held and "not marked internal" in held[0][2]
+    # Classified above the ceiling: not consulted at all.
+    usable, held = cm.usable_modules(["local-model"], ["public"], "public", s)
+    assert not usable and "above this question's ceiling" in held[0][2]

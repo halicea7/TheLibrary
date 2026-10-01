@@ -284,3 +284,105 @@ async def consult(
         if out.get("done"):
             break
     return results
+
+
+# --------------------------------------------------------------------------- shared by Ask and Write
+
+# A live result's volume id: stable per module, so its notes group like a volume's.
+_MODULE_NS = uuid.uuid5(uuid.NAMESPACE_URL, "library-agent:module")
+
+
+def usable_modules(
+    models: list[str], levels: list[str] | None, top: str | None, scale
+) -> tuple[list, list]:
+    """The seated modules these models may consult for this question: (usable, held_back).
+    Classified above the question's ceiling: not consulted at all. Operations cleared for
+    local models only: offered only if every model that will read the results is local or
+    on a provider marked internal. held_back is (module, op ids, why) for the desk."""
+    from dataclasses import replace
+
+    from library_agent import classification
+    from library_agent.llm import providers
+    from library_agent.modules import store as mod_store
+
+    remote = not all(providers.is_trusted(m) for m in models if m)
+    usable, held_back = [], []
+    for mod, mcfg in mod_store.seated_modules():
+        mlevel = classification.module_level(mod.id, scale)
+        if levels is not None and mlevel not in levels:
+            held_back.append(
+                (
+                    mod,
+                    [o.id for o in mod.operations],
+                    (
+                        f"classified {scale.level(mlevel).label}, above this question's "
+                        f"ceiling ({scale.level(top).label})"
+                    ),
+                )
+            )
+            continue
+        ops = mod.cleared(remote)
+        if ops:
+            usable.append(
+                (replace(mod, operations=ops) if len(ops) < len(mod.operations) else mod, mcfg)
+            )
+        if len(ops) < len(mod.operations):
+            held_back.append(
+                (
+                    mod,
+                    [o.id for o in mod.operations if o not in ops],
+                    "local models only; a model here is on a provider not marked internal",
+                )
+            )
+    return usable, held_back
+
+
+def held_back_view(held_back: list) -> list[dict]:
+    return [
+        {
+            "module": m.name + ("" if len(ids) == len(m.operations) else f" ({', '.join(ids)})"),
+            "reason": why,
+        }
+        for m, ids, why in held_back
+    ]
+
+
+def as_hit(lr):
+    """A module's live result as a passage, so it numbers, cites, holds and verifies like
+    any other -- but marked live, in the module's own colour."""
+    from datetime import UTC, datetime
+
+    from library_agent.retrieval.hybrid import SearchHit
+
+    when_label = datetime.fromtimestamp(lr.when, UTC).strftime("%H:%M")
+    arg = str(next(iter(lr.args.values()), "")) if lr.args else ""
+    if lr.error:
+        body = (
+            f"{lr.module.name} could not be reached just now ({lr.error}). Its live answer is "
+            "unavailable; say the source was unreachable rather than guessing."
+        )
+    else:
+        body = f"{lr.module.name} · {lr.op.summary}\n{lr.text}"
+    return SearchHit(
+        chunk_id=lr.chunk_id,
+        document_id=uuid.uuid5(_MODULE_NS, lr.module.id),
+        document_title=lr.module.name,
+        section_path=lr.op.id,
+        page=None,
+        text=body,
+        score=1.0,
+        dense_rank=None,
+        lexical_rank=None,
+        kind="live",
+        live={
+            "module": lr.module.name,
+            "module_id": lr.module.id,
+            "colour": lr.module.colour,
+            "op": lr.op.id,
+            "when": lr.when,
+            "when_label": when_label,
+            "arg": arg,
+            "error": lr.error,
+            "count": lr.count,
+        },
+    )

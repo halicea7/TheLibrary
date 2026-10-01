@@ -7,7 +7,7 @@ import logging
 import re
 import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,8 +41,6 @@ from library_agent.retrieval.readings import named_documents, retrieve_readings
 
 log = logging.getLogger(__name__)
 
-_MODULE_NS = uuid.uuid5(uuid.NAMESPACE_URL, "library-agent:module")
-
 
 def _names(question: str, name: str) -> bool:
     """Does the question name this module? "Sentinel One" and "sentinelone" both count."""
@@ -58,45 +56,6 @@ def _cannot_note(mod) -> str:
         f"The reader named {mod.name}, which is connected, but none of its operations answers "
         f"this question, so it was not queried. Say so plainly, and what it can look up: {can}. "
         f"Do not say {mod.name} or the library has no information about it."
-    )
-
-
-def _live_hit(lr) -> SearchHit:
-    """A module's live result as a passage, so it numbers, cites, holds and verifies like
-    any other -- but marked live, in the module's own colour."""
-    from datetime import UTC, datetime
-
-    when_label = datetime.fromtimestamp(lr.when, UTC).strftime("%H:%M")
-    arg = str(next(iter(lr.args.values()), "")) if lr.args else ""
-    if lr.error:
-        body = (
-            f"{lr.module.name} could not be reached just now ({lr.error}). Its live answer is "
-            "unavailable; say the source was unreachable rather than guessing."
-        )
-    else:
-        body = f"{lr.module.name} · {lr.op.summary}\n{lr.text}"
-    return SearchHit(
-        chunk_id=lr.chunk_id,
-        document_id=uuid.uuid5(_MODULE_NS, lr.module.id),
-        document_title=lr.module.name,
-        section_path=lr.op.id,
-        page=None,
-        text=body,
-        score=1.0,
-        dense_rank=None,
-        lexical_rank=None,
-        kind="live",
-        live={
-            "module": lr.module.name,
-            "module_id": lr.module.id,
-            "colour": lr.module.colour,
-            "op": lr.op.id,
-            "when": lr.when,
-            "when_label": when_label,
-            "arg": arg,
-            "error": lr.error,
-            "count": lr.count,
-        },
     )
 
 
@@ -238,48 +197,15 @@ async def run_turn(
         live_hits: list[SearchHit] = []
         notes: list[str] = []  # for the model, not citable: e.g. a module that can't help
         if needs_retrieval:
-            from library_agent.modules import store as mod_store
+            from library_agent.modules.consult import as_hit, held_back_view, usable_modules
             from library_agent.modules.consult import consult as consult_modules
 
-            # Local, or a provider marked internal: may use modules for local models only.
-            remote_chat = not providers.is_trusted(model)
-            # Clearance is per operation: on a remote provider only the operations cleared
-            # for any model are offered; a token with none left is held back whole.
-            usable, held_back = [], []
-            local_only = "local models only; chat is on a provider not marked internal"
-            for mod, mcfg in mod_store.seated_modules():
-                # Classified above what this question may draw on: not consulted at all,
-                # so nothing it would return reaches the model.
-                mlevel = classification.module_level(mod.id, scale)
-                if levels is not None and mlevel not in levels:
-                    held_back.append(
-                        (
-                            mod,
-                            [o.id for o in mod.operations],
-                            (
-                                f"classified {scale.level(mlevel).label}, above this "
-                                f"question's ceiling ({scale.level(top).label})"
-                            ),
-                        )
-                    )
-                    continue
-                ops = mod.cleared(remote_chat)
-                if ops:
-                    usable.append(
-                        (
-                            replace(mod, operations=ops) if len(ops) < len(mod.operations) else mod,
-                            mcfg,
-                        )
-                    )
-                if len(ops) < len(mod.operations):
-                    held_back.append(
-                        (mod, [o.id for o in mod.operations if o not in ops], local_only)
-                    )
+            usable, held_back = usable_modules([model], levels, top, scale)
             if usable:
                 # The reader's own words and the conversation: a follow-up ("look those
                 # up") points into the last answer, which the loop can see.
                 for lr in await consult_modules(client, model, question, usable, history):
-                    live_hits.append(_live_hit(lr))
+                    live_hits.append(as_hit(lr))
                 # The question names a seated module, but nothing it has answers it: say so,
                 # rather than let the answer read as if the module were not there at all.
                 if not live_hits:
@@ -298,14 +224,7 @@ async def run_turn(
                     "event": "consulted",
                     "data": {
                         "results": [h.live for h in live_hits],
-                        "held_back": [
-                            {
-                                "module": m.name
-                                + ("" if len(ids) == len(m.operations) else f" ({', '.join(ids)})"),
-                                "reason": why,
-                            }
-                            for m, ids, why in held_back
-                        ],
+                        "held_back": held_back_view(held_back),
                     },
                 }
 

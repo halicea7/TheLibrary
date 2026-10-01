@@ -3925,6 +3925,11 @@ async function composeDoc() {
           const tone = cv.verdict === 'strong' ? 'verdigris' : (cv.verdict === 'thin' ? 'amber' : 'amber');
           wove = `<div class="plan cover" style="border-color:var(--${tone})"><b style="color:var(--${tone})">Coverage: ${esc(cv.verdict)}</b>${cv.note ? ' — ' + esc(cv.note) : ''}${cv.missing && cv.verdict !== 'strong' ? ` <span class="miss">Thin on: ${esc(cv.missing)}</span>` : ''}</div>` + wove;
           if (wove) doc.innerHTML = wove;
+        } else if (ev === 'consulted') {
+          const cs = JSON.parse(raw);
+          const got = (cs.results || []).map(r => `${esc(r.module)} · ${esc(r.op)}${r.error ? ' (unreachable)' : ` (${r.count})`}`);
+          const held = (cs.held_back || []).map(h => `${esc(h.module)} held back: ${esc(h.reason)}`);
+          if (got.length || held.length) { wove += `<div class="plan wove">${got.length ? 'Consulted live: ' + got.join(' · ') : ''}${got.length && held.length ? ' — ' : ''}${held.join(' · ')}</div>`; doc.innerHTML = wove; }
         } else if (ev === 'facets') {
           const f = JSON.parse(raw).facets || [];
           if (f.length > 1) { wove += `<div class="plan wove">The brief's parts, each to be developed: ${f.map(esc).join(' · ')}</div>`; doc.innerHTML = wove; }

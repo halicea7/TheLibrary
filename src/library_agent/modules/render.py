@@ -105,9 +105,34 @@ def render_rows(op: Operation, data: Any) -> str:
         rows = [rows] if isinstance(rows, dict) else rows if isinstance(rows, list) else []
     if not rows:
         return r.empty
+    head = summarise(r.summary, rows) if r.summary else ""
     lines = [ln for ln in (format_row(r.line, row) for row in rows[: r.limit]) if ln.strip()]
     more = len(rows) - r.limit
     text = "\n".join(lines)
     if more > 0:
         text += f"\n… and {more} more"
+    if head:
+        text = f"{head}\n{text}"
     return text or r.empty
+
+
+_SUMMARY = re.compile(r"\{(count|distinct:[A-Za-z0-9_.\[\]*]+)\}")
+
+
+def summarise(template: str, rows: list) -> str:
+    """{count}: the rows fetched; {distinct:path}: how many different values that field
+    takes across them (empty values not counted)."""
+
+    def one(m: re.Match) -> str:
+        key = m.group(1)
+        if key == "count":
+            return str(len(rows))
+        path = key.split(":", 1)[1]
+        vals = {
+            json.dumps(v, sort_keys=True)
+            for row in rows
+            if (v := dig(row, path)) not in (None, "", [])
+        }
+        return str(len(vals))
+
+    return _SUMMARY.sub(one, template)

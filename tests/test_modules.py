@@ -335,3 +335,9 @@ def test_write_and_ask_gate_modules_by_every_model_that_reads_them(monkeypatch):
     # Classified above the ceiling: not consulted at all.
     usable, held = cm.usable_modules(["local-model"], ["public"], "public", s)
     assert not usable and "above this question's ceiling" in held[0][2]
+
+
+def test_threats_can_be_found_by_host():
+    op = SENTINELONE.op("threats_on_host")
+    assert op.params["required"] == ["host"] and op.query["host"] == "computerName__contains"
+    assert "{count}" in op.render.summary

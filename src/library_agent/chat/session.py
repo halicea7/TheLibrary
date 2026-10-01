@@ -206,6 +206,15 @@ async def run_turn(
                 # up") points into the last answer, which the loop can see.
                 for lr in await consult_modules(client, model, question, usable, history):
                     live_hits.append(as_hit(lr))
+                if live_hits:
+                    names = sorted({h.live["module"] for h in live_hits})
+                    notes.append(
+                        f"Some sources are live results just fetched from {', '.join(names)} "
+                        "(marked live), not from the library. Answer from them as that system's "
+                        "data. If they don't answer the question, say what was looked up and what "
+                        f"came back; never say {' or '.join(names)} has no information when it "
+                        "was queried, and don't describe live results as library passages."
+                    )
                 # The question names a seated module, but nothing it has answers it: say so,
                 # rather than let the answer read as if the module were not there at all.
                 if not live_hits:

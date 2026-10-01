@@ -97,6 +97,41 @@
       }
     },
     {
+      "id": "threats_on_host",
+      "summary": "The threats SentinelOne recorded on a named endpoint (host / computer name): how many, newest first, and their state.",
+      "ask_when": "the question names an endpoint, host or computer and asks how many alerts, threats or detections it has, or what was detected on it.",
+      "method": "GET",
+      "path": "/web/api/v2.1/threats",
+      "params": {
+        "host": {
+          "type": "string",
+          "description": "the endpoint's computer name or part of it, e.g. WS-FINANCE-07",
+          "in": "query",
+          "key": "computerName__contains",
+          "required": true
+        }
+      },
+      "query": {
+        "limit": "100",
+        "sortBy": "createdAt",
+        "sortOrder": "desc"
+      },
+      "pagination": {
+        "type": "cursor",
+        "param": "cursor",
+        "cursor_path": "pagination.nextCursor",
+        "max_pages": 3
+      },
+      "response": {
+        "format": "json",
+        "rows": "data",
+        "summary": "{count} threats recorded on {distinct:agentRealtimeInfo.agentComputerName} endpoint(s) matching that name ({distinct:threatInfo.threatName} distinct threat names; up to 300 are fetched).",
+        "line": "{threatInfo.createdAt|date} — {threatInfo.threatName} on {agentRealtimeInfo.agentComputerName} ({threatInfo.classification}; mitigation {threatInfo.mitigationStatus}; incident {threatInfo.incidentStatus})",
+        "empty": "SentinelOne has no threats recorded on an endpoint by that name.",
+        "limit": 25
+      }
+    },
+    {
       "id": "cve_exposure",
       "summary": "Which endpoints in the fleet are exposed to a given CVE.",
       "ask_when": "the question names a CVE id and asks who or what is exposed, affected, vulnerable or at risk in the fleet.",

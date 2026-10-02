@@ -136,7 +136,7 @@ def summarise(template: str, rows: list) -> str:
                     nums.append(float(dig(row, path) or 0))
                 except (TypeError, ValueError):
                     pass
-            total = (sum(nums) if kind == "sum" else max(nums, default=0.0))
+            total = sum(nums) if kind == "sum" else max(nums, default=0.0)
             return f"{total:,.0f}" if total == int(total) else f"{total:,.2f}"
         vals = {
             json.dumps(v, sort_keys=True)

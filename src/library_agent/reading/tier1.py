@@ -115,13 +115,14 @@ async def _upsert_artifact(
 
 
 async def stale_documents(db: AsyncSession) -> list[uuid.UUID]:
-    """Documents whose Tier 1 artifacts predate the current prompt versions or model."""
+    """Documents whose Tier 1 artifacts predate the current prompt versions or model. The
+    same model served from elsewhere (Ollama, or a provider) is the same model."""
     rows = (
         await db.execute(
             select(Artifact.target_id).where(
                 Artifact.kind == ArtifactKind.DOCUMENT_SUMMARY,
                 (Artifact.prompt_version != _version("document_summary"))
-                | (Artifact.model != providers.model_for("reading")),
+                | Artifact.model.not_in(providers.same_model(providers.model_for("reading"))),
             )
         )
     ).scalars()

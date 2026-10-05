@@ -291,7 +291,7 @@ async def find_contradictions(
     # the pass is authoritative -- without the reset a verdict flipped to false on re-run
     # left the previous true standing, and an instruction-echo "contradiction" survived
     # two fixes that way.
-    model = providers.model_for("threads")
+    model = providers.model_for("conflicts")
     version = cfg.prompt_versions.get("contradiction", "v1")
 
     def stamp(row) -> str:
@@ -323,7 +323,7 @@ async def find_contradictions(
                 continue
             out = await judge_cluster(
                 c,
-                providers.model_for("threads"),
+                providers.model_for("conflicts"),
                 row.label,
                 claims,
                 row.titles,
@@ -361,7 +361,7 @@ async def find_contradictions(
                             target_id=row.id,
                             text=textval,
                             data=out,
-                            model=providers.model_for("threads"),
+                            model=providers.model_for("conflicts"),
                             prompt_version=cfg.prompt_versions.get("contradiction", "v1"),
                             tier=1,
                         )

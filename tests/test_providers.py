@@ -392,3 +392,27 @@ async def test_embeddings_settings_route(pfile):
         assert j["library_model"] == settings().embed_model
         j = (await c.put("/api/settings/embeddings", json={"provider": ""})).json()
         assert j["provider"] == "" and providers.load().embed_name == ""
+
+
+def test_conflicts_follow_threads_until_set(pfile):
+    from library_agent.config import settings
+
+    assert providers.model_for("conflicts") == settings().reader_model
+    cfg = _configure(pfile)
+    cfg.models["threads"] = "acme:big-model"
+    providers.save(cfg)
+    assert providers.model_for("conflicts") == "acme:big-model"
+    cfg.models["conflicts"] = "acme:small-model"
+    providers.save(cfg)
+    assert providers.model_for("conflicts") == "acme:small-model"
+    assert providers.model_for("threads") == "acme:big-model"
+
+
+def test_the_same_model_on_another_server_is_the_same_model(pfile):
+    _configure(pfile)
+    assert set(providers.same_model("qwen3:30b-a3b")) == {"qwen3:30b-a3b", "acme:qwen3:30b-a3b"}
+    assert set(providers.same_model("acme:qwen3:30b-a3b")) == {
+        "qwen3:30b-a3b",
+        "acme:qwen3:30b-a3b",
+    }
+    assert "gemma" not in " ".join(providers.same_model("acme:qwen3:30b-a3b"))

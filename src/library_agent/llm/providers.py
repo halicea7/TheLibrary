@@ -43,7 +43,11 @@ ROLES: dict[str, dict[str, str]] = {
         "label": "Reading",
         "note": "Tier 1 and 2; artifacts record their model, so a different one re-reads the whole shelf on the next backfill",
     },
-    "threads": {"label": "Threads", "note": "cluster summaries, conflict judging, shelving"},
+    "threads": {"label": "Threads", "note": "cluster summaries and shelving"},
+    "conflicts": {
+        "label": "Conflicts",
+        "note": "judges whether a theme's sources disagree; changing it re-judges every theme on the next rebuild; by default the threads model",
+    },
     "compose": {
         "label": "Compose (long-form)",
         "note": "writes documents from the whole shelf; a background job, so a larger, slower model earns its keep here without slowing chat",
@@ -205,6 +209,14 @@ def embed_route() -> tuple[Provider | None, str]:
     return prov, cfg.embed_name or settings().embed_model
 
 
+def same_model(model: str) -> list[str]:
+    """Every name the same model goes by wherever it runs: on Ollama and under each
+    configured provider's prefix. What a model wrote does not change because the machine
+    serving it did, so moving a role to another server of the same model costs nothing."""
+    _, base = split(model)
+    return [base, *(f"{pid}:{base}" for pid in load().providers)]
+
+
 def is_remote(model: str) -> bool:
     return split(model)[0] is not None
 
@@ -227,6 +239,10 @@ def default_for(role: str) -> str:
         return cfg.reader_model
     if role == "threads":
         return cfg.reader_model
+    if role == "conflicts":
+        # Its own role so the judge can be a different model from the summariser: on 40
+        # flagged themes qwen3 was right 3 times, gemma4-31b 3 of 3 (bench/results).
+        return model_for("threads")
     if role == "compose":
         # Long-form writing wants the deepest model on offer; by default the chat model.
         return cfg.chat_model_options.get("general", cfg.chat_model)

@@ -39,7 +39,12 @@ def describe(m: Module, base_url: str = "") -> dict:
         "auth": m.auth_spec().type,
         "clearance": "local models only" if m.local_only else "any model",
         "operations": [
-            {"id": o.id, "method": o.method, "path": o.tool or o.path, "summary": o.summary}
+            {
+                "id": o.id,
+                "method": "MCP read" if o.resource else o.method,
+                "path": o.resource or o.tool or o.path,
+                "summary": o.summary,
+            }
             for o in m.operations
         ],
         "searches_by_post": sum(o.method == "POST" for o in m.operations),
@@ -404,16 +409,19 @@ class MCPIn(BaseModel):
     transport: dict
     token: str | None = None  # for this probe only; saved with the connection, not here
     pick: list[str] | None = None
+    # Resources to read, by URI, and templates by their URI template.
+    pick_resources: list[str] | None = None
 
 
 @router.post("/draft/mcp")
 async def draft_mcp(body: MCPIn) -> dict:
-    """From an MCP server: without `pick`, its tools (and which may be used: the server's
-    own read-only / destructive marks); with `pick`, a draft manifest of those. Starting a
+    """From an MCP server: without picks, what it offers -- its tools (and which may be
+    used: the server's own read-only / destructive marks), its resources and resource
+    templates; with `pick` / `pick_resources`, a draft manifest of those. Starting a
     stdio server runs its command on this machine -- the command is shown before this is
     called, and nothing is kept."""
     from library_agent.modules import importers
-    from library_agent.modules.mcp_transport import MCPError, list_tools
+    from library_agent.modules.mcp_transport import MCPError, list_offer
 
     probe_manifest = {
         "id": "probe",
@@ -427,10 +435,18 @@ async def draft_mcp(body: MCPIn) -> dict:
     probe = _check(probe_manifest)
     cfg = mod_store.ModuleConfig(id="probe", token=body.token or "")
     try:
-        tools = await list_tools(probe, cfg)
-        if not body.pick:
-            return {"tools": tools}
-        manifest, notes = importers.draft_from_mcp(body.name, body.transport, tools, body.pick)
+        offer = await list_offer(probe, cfg)
+        if not body.pick and not body.pick_resources:
+            return offer
+        manifest, notes = importers.draft_from_mcp(
+            body.name,
+            body.transport,
+            offer["tools"],
+            body.pick or [],
+            resources=offer["resources"],
+            templates=offer["templates"],
+            resource_picks=body.pick_resources,
+        )
     except (MCPError, ManifestError) as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"manifest": manifest, "notes": notes}

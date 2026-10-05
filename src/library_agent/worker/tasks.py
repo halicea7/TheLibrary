@@ -445,6 +445,12 @@ async def _startup(ctx: dict) -> None:
         lib.setLevel(logging.INFO)
 
 
+async def _shutdown(ctx: dict) -> None:
+    from library_agent.modules.mcp_transport import close_all
+
+    await close_all()  # MCP servers kept open between calls
+
+
 class WorkerSettings:
     functions: ClassVar[list] = [
         read_document,
@@ -455,6 +461,7 @@ class WorkerSettings:
         arq_func(ocr_document_job, timeout=LIBRARY_TIMEOUT),
     ]
     on_startup = _startup
+    on_shutdown = _shutdown
     redis_settings = RedisSettings.from_dsn(settings().redis_url)
     job_timeout = JOB_TIMEOUT
     # Retry is how a paused job returns to the queue every few minutes; a pause of a

@@ -54,6 +54,9 @@ async def lifespan(_: FastAPI):
     yield
     liveness.stop()
     task.cancel()
+    from library_agent.modules.mcp_transport import close_all
+
+    await close_all()  # MCP servers kept open between calls
 
 
 def _warm_reranker() -> None:

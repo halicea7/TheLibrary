@@ -153,6 +153,11 @@ class Settings(BaseSettings):
             if n.strip()
         ]
 
+    # --- modules ---
+    # An MCP server is kept running between calls and closed after this long unused (a
+    # stdio server costs a process start, often seconds, every time it is opened).
+    mcp_idle_seconds: int = 300
+
     # --- running it for others ---
     # A one-token probe every so often: reachability is not liveness (a wedged Ollama still
     # answers /api/tags). When the probe fails, generations are refused with a 503 at once.

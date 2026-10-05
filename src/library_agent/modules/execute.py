@@ -354,6 +354,9 @@ async def call(
         op.path,
         op.render.format,
         op.render.rows,
+        op.tool,
+        op.resource,
+        tuple(sorted((k, str(v)) for k, v in op.const_query.items())),
         tuple(sorted((k, str(v)) for k, v in args.items())),
     )
     ttl = module.limits.cache_seconds if module.limits else CACHE_TTL
@@ -370,12 +373,13 @@ async def call(
         }
 
     if module.is_mcp:
-        # An MCP server: one tool call, read-only by the manifest and by the server's word.
-        from library_agent.modules.mcp_transport import MCPError, call_tool
+        # An MCP server: one tool call (read-only by the manifest and by the server's
+        # word) or one resource read, over the module's live session.
+        from library_agent.modules.mcp_transport import MCPError, call_operation
 
         _rate(module)
         try:
-            rows, raw = await call_tool(module, cfg, op, args)
+            rows, raw = await call_operation(module, cfg, op, args)
         except MCPError as exc:
             raise ModuleError(str(exc)) from exc
         rows = rows[: max(op.render.limit * 5, op.render.limit)]

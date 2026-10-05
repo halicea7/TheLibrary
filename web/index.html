@@ -2290,7 +2290,7 @@ function makeBlank() {
     operations: [makeBlankOp()] };
 }
 function makeBlankOp() {
-  return { id: 'search', summary: '', ask_when: '', method: 'GET', read_only_post: false, path: '/', tool: '', clearance: '', _params: [], _query: '', _body: '',
+  return { id: 'search', summary: '', ask_when: '', method: 'GET', read_only_post: false, path: '/', tool: '', resource: '', _reads: false, clearance: '', _params: [], _query: '', _body: '',
     pagination: { type: 'none', param: '', size_param: '', size: 0, start: 1, cursor_path: '', max_pages: 3 },
     response: { format: 'json', rows: '', line: '{name}', empty: 'nothing matched', limit: 20 } };
 }
@@ -2305,6 +2305,7 @@ function makeFromManifest(d) {
   m.transport = { type: t.type || 'http', command: t.command || '', _args: (t.args || []).join('\n'), _env: Object.entries(t.env || {}).map(([k, v]) => `${k}=${v}`).join('\n'), secret_env: t.secret_env || '', url: t.url || '' };
   m.operations = (d.operations || []).map(o => ({ ...makeBlankOp(), ...o,
     read_only_post: !!o.read_only_post,
+    _reads: !!o.resource,
     pagination: { ...makeBlankOp().pagination, ...(o.pagination || {}) },
     response: { ...makeBlankOp().response, ...(o.response || {}) },
     _params: Object.entries(o.params || {}).map(([name, p]) => ({ name, type: p.type || 'string', in: p.in || 'query', key: p.key || '', required: !!p.required, default: p.default ?? '', values: (p.values || []).join(', '), description: p.description || '' })),
@@ -2342,7 +2343,7 @@ function makeManifest() {
       }
       if (mcp) {
         for (const p of Object.values(params)) { delete p.in; delete p.key; }
-        return { id: o.id, tool: o.tool, read_only: true, summary: o.summary, ask_when: o.ask_when, params, ...(o.clearance ? { clearance: o.clearance } : {}),
+        return { id: o.id, ...(o._reads ? { resource: (o.resource || '').trim() } : { tool: o.tool }), read_only: true, summary: o.summary, ask_when: o.ask_when, params, ...(o.clearance ? { clearance: o.clearance } : {}),
           args: Object.fromEntries(lines(o._query).map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; }).filter(([k]) => k)),
           response: { ...o.response, format: ['json', 'text'].includes(o.response.format) ? o.response.format : 'text', limit: +o.response.limit } };
       }
@@ -2409,7 +2410,7 @@ function makeRender() {
         ${makeCard('oa', 'From an OpenAPI spec', 'Paste or upload the API’s Swagger / OpenAPI document, then pick the operations.', "maker.oa = maker.oa || { text: '' }; makeRender()")}
         ${makeCard('curl', 'From a curl command', 'Paste a command that already works; its sign-in goes to the connection, not the file.', "maker.curl = maker.curl || ' '; makeRender()")}
         ${makeCard('pm', 'From a Postman collection', 'Paste an exported collection (v2.x) and pick the requests that only read.', "maker.pm = maker.pm || { text: '' }; makeRender()")}
-        ${makeCard('mcp', 'From an MCP server', 'A program this machine runs, or a server at a URL. Pick its read-only tools.', "maker.mcp = maker.mcp || { type: 'mcp_stdio', command: '', args: '', env: '', secret_env: '', secret: '', url: '', name: '' }; makeRender()")}
+        ${makeCard('mcp', 'From an MCP server', 'A program this machine runs, or a server at a URL. Pick its read-only tools and the documents it offers.', "maker.mcp = maker.mcp || { type: 'mcp_stdio', command: '', args: '', env: '', secret_env: '', secret: '', url: '', name: '' }; makeRender()")}
         <label class="start file" ondragover="event.preventDefault(); this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="makeCardDrop(event, this)">
           <input type="file" accept=".json,application/json" onchange="makeImportFile(this)">
           <b>Import a module file</b><span class="d">A .json someone shared. Choose it, or drop it on this card. You’ll see what it can do before anything is added.</span>
@@ -2441,9 +2442,10 @@ function makeRender() {
             <label>Secret variable<input type="text" id="mk-mcp-senv" value="${esc2(maker.mcp.secret_env)}" placeholder="GITHUB_PERSONAL_ACCESS_TOKEN"></label>`
           : `<label class="wide">Server URL<input type="text" id="mk-mcp-url" value="${esc2(maker.mcp.url)}" placeholder="https://mcp.example.com/mcp"></label>`}
           <label>Secret<input type="password" id="mk-mcp-secret" value="${esc2(maker.mcp.secret)}" autocomplete="off"></label></div>
-        ${maker.mcp.type === 'mcp_stdio' ? `<p class="nt warn">Listing its tools starts this program on this machine: ${esc(maker.mcp.command || '…')} ${esc((maker.mcp.args || '').split('\n').join(' '))}. Only use a server you trust.</p>` : ''}
-        <div class="acts"><button onclick="makeMcpList()">list its tools</button></div>
+        ${maker.mcp.type === 'mcp_stdio' ? `<p class="nt warn">Listing what it offers starts this program on this machine: ${esc(maker.mcp.command || '…')} ${esc((maker.mcp.args || '').split('\n').join(' '))}. Only use a server you trust.</p>` : ''}
+        <div class="acts"><button onclick="makeMcpList()">list what it offers</button></div>
         ${maker.mcp.tools ? `<p class="nt">Only tools that look things up can be a module's operations; those the server marks destructive or not read-only are shut.</p><div class="picks">${maker.mcp.tools.map((t, i) => `<label><input type="checkbox" data-mcp="${i}" ${t.refused ? 'disabled' : ''} ${maker.mcp.picked?.has(t.name) ? 'checked' : ''}> ${esc(t.name)} <span class="nt">${t.refused ? esc(t.refused) : t.read_only ? 'read-only' : 'not marked read-only'} — ${esc(t.description.slice(0, 120))}</span></label>`).join('')}</div>
+          ${(maker.mcp.resources || []).length + (maker.mcp.templates || []).length ? `<p class="nt">Resources: documents the server offers, read rather than called. A template's {placeholders} become the operation's parameters.</p><div class="picks">${[...maker.mcp.resources.map(r => ({ key: r.uri, name: r.name, d: r.description, m: r.mime_type })), ...maker.mcp.templates.map(t => ({ key: t.uri_template, name: t.name, d: t.description, m: t.mime_type }))].map(r => `<label><input type="checkbox" data-mcpr="${esc2(r.key)}" ${maker.mcp.pickedR?.has(r.key) ? 'checked' : ''}> ${esc(r.name || r.key)} <span class="nt"><code>${esc(r.key)}</code>${r.m ? ' · ' + esc(r.m) : ''}${r.d ? ' — ' + esc(r.d.slice(0, 120)) : ''}</span></label>`).join('')}</div>` : ''}
           <div class="acts"><button class="go" onclick="makeMcpDraft()">draft the module</button></div>` : ''}` : ''}
       ${maker.imp ? `<div class="approve"><b>This module can:</b><ul>
           ${maker.imp.summary.runs ? `<li class="warn">start a program on this machine: ${esc(maker.imp.summary.runs)}</li>` : ''}
@@ -2455,6 +2457,7 @@ function makeRender() {
         ${maker.imp.summary.conflict ? `<p class="warn">${esc(maker.imp.summary.conflict)}</p>` : `<div class="acts"><button class="go" onclick="makeImportApprove()">approve and add it</button><button onclick="maker.imp = null; makeRender()">no</button></div>`}</div>` : ''}
       <p class="nt warn">${esc(maker.msg)}</p></div>`;
     for (const cb of document.querySelectorAll('.mk [data-pm]')) cb.onchange = e => { const k = maker.pm.reqs[+e.target.dataset.pm].key; maker.pm.picked = maker.pm.picked || new Set(); e.target.checked ? maker.pm.picked.add(k) : maker.pm.picked.delete(k); };
+    for (const cb of document.querySelectorAll('.mk [data-mcpr]')) cb.onchange = e => { const k = e.target.dataset.mcpr; maker.mcp.pickedR = maker.mcp.pickedR || new Set(); e.target.checked ? maker.mcp.pickedR.add(k) : maker.mcp.pickedR.delete(k); };
     for (const cb of document.querySelectorAll('.mk [data-mcp]')) cb.onchange = e => { const k = maker.mcp.tools[+e.target.dataset.mcp].name; maker.mcp.picked = maker.mcp.picked || new Set(); e.target.checked ? maker.mcp.picked.add(k) : maker.mcp.picked.delete(k); };
     for (const cb of document.querySelectorAll('.mk [data-oa]')) cb.onchange = e => { const k = maker.oa.ops[+e.target.dataset.oa].key; maker.oa.picked = maker.oa.picked || new Set(); e.target.checked ? maker.oa.picked.add(k) : maker.oa.picked.delete(k); };
     return;
@@ -2481,10 +2484,11 @@ function makeRender() {
       <td><button class="linkish" onclick="maker.m.operations[${i}]._params.splice(${j}, 1); makeRender()">×</button></td></tr>`).join('');
     const pg = o.pagination;
     return `<details class="op" ${i === (maker.openOp ?? 0) ? 'open' : ''} ontoggle="if (this.open) maker.openOp = ${i}">
-      <summary>${esc2(o.id || 'operation')} <span class="m">${isMcp ? 'tool ' + esc2(o.tool) : esc2(o.method) + ' ' + esc2(o.path)}</span></summary>
+      <summary>${esc2(o.id || 'operation')} <span class="m">${isMcp ? (o._reads ? 'reads ' + esc2(o.resource) : 'tool ' + esc2(o.tool)) : esc2(o.method) + ' ' + esc2(o.path)}</span></summary>
       <div class="grid2">
         ${inp(`${P}.id`, 'Id', o.id, { ph: 'search_tickets' })}
-        ${isMcp ? inp(`${P}.tool`, 'Tool', o.tool, { ph: 'search_issues' }) : sel(`${P}.method`, 'Method', o.method, [['GET', 'GET'], ['POST', 'POST (read-only search)']]) + inp(`${P}.path`, 'Path', o.path, { ph: '/v1/items/{id}', wide: true })}
+        ${isMcp ? `<label>Kind<select onchange="maker.m.operations[${i}]._reads = this.value === 'resource'; makeRender()"><option value="tool" ${!o._reads ? 'selected' : ''}>calls a tool</option><option value="resource" ${o._reads ? 'selected' : ''}>reads a resource</option></select></label>`
+          + (o._reads ? inp(`${P}.resource`, 'Resource', o.resource, { ph: 'docs://guides/{name}', wide: true }) : inp(`${P}.tool`, 'Tool', o.tool, { ph: 'search_issues' })) : sel(`${P}.method`, 'Method', o.method, [['GET', 'GET'], ['POST', 'POST (read-only search)']]) + inp(`${P}.path`, 'Path', o.path, { ph: '/v1/items/{id}', wide: true })}
         ${sel(`${P}.clearance`, 'Clearance', o.clearance || '', [['', 'as the module'], ['local', 'local models only'], ['any', 'any model']], false)}
         ${inp(`${P}.summary`, 'Answers', o.summary, { ph: 'Which tickets are open for a customer', wide: true })}
         ${inp(`${P}.ask_when`, 'Ask when', o.ask_when, { ph: 'the question asks about a customer’s open tickets', wide: true })}
@@ -2525,7 +2529,7 @@ function makeRender() {
       ${sel('transport.type', 'Transport', T.type, [['http', 'an HTTP API'], ['mcp_stdio', 'an MCP server this machine runs'], ['mcp_http', 'an MCP server at a URL']])}
       ${T.type === 'mcp_stdio' ? inp('transport.command', 'Command', T.command, { ph: 'npx' }) + txt('transport._args', 'Arguments', T._args, 'one per line') + txt('transport._env', 'Environment', T._env, 'NAME=value, one per line (not secrets)') + inp('transport.secret_env', 'Secret variable', T.secret_env, { ph: 'API_TOKEN' }) : ''}
       ${T.type === 'mcp_http' ? inp('transport.url', 'Server URL', T.url, { ph: 'https://mcp.example.com/mcp', wide: true }) : ''}</div>
-    ${T.type === 'mcp_stdio' ? `<p class="nt warn">This module starts ${esc(T.command || 'its program')} on this machine each time it is consulted, with only PATH, HOME, the locale and its secret in the environment.</p>` : ''}
+    ${T.type === 'mcp_stdio' ? `<p class="nt warn">This module starts ${esc(T.command || 'its program')} on this machine when it is first consulted and keeps it running until it has gone unused for a few minutes, with only PATH, HOME, the locale and its secret in the environment.</p>` : ''}
     ${T.type === 'mcp_stdio' ? `<div class="grid2"><label>Secret${T.secret_env ? ` ($${esc(T.secret_env)})` : ''}<input type="password" id="mk-secret" value="${esc2(maker.conn.token)}" placeholder="${maker.editing ? 'blank keeps the saved one' : ''}" autocomplete="off"></label></div>` : `<h4>Signing in</h4><div class="grid2">
       ${sel('auth.type', 'Kind', a.type, T.type === 'mcp_http' ? [['none', 'none'], ['bearer', 'bearer token'], ['header', 'API key in a header']] : [['none', 'none'], ['bearer', 'bearer token'], ['header', 'API key in a header'], ['query', 'API key in the query'], ['basic', 'username and password'], ['oauth2_client', 'OAuth2 client credentials']])}
       ${authFields}</div>`}
@@ -2598,21 +2602,22 @@ function makeMcpTransport() {
     : { type: 'mcp_http', url: c.url.trim() };
 }
 async function makeMcpList() {
-  makeMcpKeep(); maker.msg = 'asking the server for its tools…'; makeRender();
+  makeMcpKeep(); maker.msg = 'asking the server what it offers…'; makeRender();
   const r = await fetch('/api/connectors/draft/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: maker.mcp.name, transport: makeMcpTransport(), token: maker.mcp.secret || null }) });
   const j = await r.json(); maker.msg = r.ok ? '' : j.detail;
-  if (r.ok) Object.assign(maker.mcp, { tools: j.tools, picked: new Set() });
+  if (r.ok) Object.assign(maker.mcp, { tools: j.tools, resources: j.resources || [], templates: j.templates || [], picked: new Set(), pickedR: new Set() });
   makeRender();
 }
 async function makeMcpDraft() {
   makeMcpKeep();
-  const pick = [...(maker.mcp.picked || [])]; if (!pick.length) { maker.msg = 'Pick at least one tool.'; return makeRender(); }
+  const pick = [...(maker.mcp.picked || [])], pick_resources = [...(maker.mcp.pickedR || [])];
+  if (!pick.length && !pick_resources.length) { maker.msg = 'Pick at least one tool or resource.'; return makeRender(); }
   const r = await fetch('/api/connectors/draft/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: maker.mcp.name, transport: makeMcpTransport(), token: maker.mcp.secret || null, pick }) });
+    body: JSON.stringify({ name: maker.mcp.name, transport: makeMcpTransport(), token: maker.mcp.secret || null, pick, pick_resources }) });
   const j = await r.json(); if (!r.ok) { maker.msg = j.detail; return makeRender(); }
   maker.m = makeFromManifest(j.manifest); maker.conn = { base_url: '', token: maker.mcp.secret || '', username: '' };
-  maker.mcp = null; maker.msg = ['Drafted. Try each tool, then make the module.', ...(j.notes || [])].join(' '); makeRender();
+  maker.mcp = null; maker.msg = ['Drafted. Try each operation, then make the module.', ...(j.notes || [])].join(' '); makeRender();
 }
 async function makeOaFile(input) { const f = input.files[0]; if (!f) return; maker.oa.text = await f.text(); makeRender(); }
 async function makeOaList() {

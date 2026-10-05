@@ -655,14 +655,125 @@ def _schema_param(schema: dict) -> dict:
     return spec
 
 
+_SCALAR = ("string", "integer", "number", "boolean")
+# Fields that name a row, put first so each line starts with what it is.
+_LEADS = ("name", "title", "id", "key", "label", "summary")
+
+
+def _kind(schema: dict) -> str:
+    t = schema.get("type")
+    if isinstance(t, list):
+        t = next((x for x in t if x != "null"), "")
+    return t or ("object" if schema.get("properties") else "")
+
+
+def _fields_line(props: dict) -> str:
+    """A line naming the row's plain fields: "{name} · status: {status} · …". Lists of
+    plain values are joined; nested objects are left out (the author can add them)."""
+    picked = []
+    for k, ps in props.items():
+        if not isinstance(ps, dict) or not re.match(r"^[A-Za-z_][\w\-]{0,63}$", k):
+            continue
+        kind = _kind(ps)
+        if kind in _SCALAR:
+            flt = "|date" if ps.get("format") in ("date", "date-time") else ""
+            picked.append((k, flt))
+        elif kind == "array" and _kind(ps.get("items") or {}) in _SCALAR:
+            picked.append((k, "|join"))
+    picked.sort(
+        key=lambda kf: (
+            kf[0].lower() not in _LEADS,
+            _LEADS.index(kf[0].lower()) if kf[0].lower() in _LEADS else 0,
+        )
+    )
+    picked = picked[:8]
+    if not picked:
+        return ""
+    head, *rest = picked
+    lead = (
+        f"{{{head[0]}{head[1]}}}"
+        if head[0].lower() in _LEADS
+        else f"{head[0]}: {{{head[0]}{head[1]}}}"
+    )
+    return " · ".join([lead, *(f"{k}: {{{k}{f}}}" for k, f in rest)])
+
+
+def _deref(node: Any, root: dict, depth: int = 0) -> Any:
+    """A schema with its local references ("#/$defs/Ticket") written out, a few levels
+    deep: generated schemas name every nested type that way."""
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/"):
+            if depth >= 6:  # a type that contains itself: stop here
+                return {}
+            target: Any = root
+            for part in ref[2:].split("/"):
+                target = target.get(part, {}) if isinstance(target, dict) else {}
+            return _deref(target, root, depth + 1)
+        return {k: _deref(v, root, depth) for k, v in node.items() if k != "$defs"}
+    if isinstance(node, list):
+        return [_deref(x, root, depth) for x in node]
+    return node
+
+
+def response_from_output_schema(schema: dict) -> dict | None:
+    """A tool's declared output, as a response block that reads its structured result field
+    by field: the rows are the first list of objects it returns (or the result itself), and
+    each prints its plain fields. None when the schema says too little to draft from."""
+    if not isinstance(schema, dict):
+        return None
+    schema = _deref(schema, schema)
+    if _kind(schema) != "object":
+        return None
+    props = schema.get("properties") or {}
+    if list(props) == ["result"] and _kind(props["result"]) in (*_SCALAR, ""):
+        return None  # a plain value the SDK wrapped as {"result": ...}: read as text
+    for k, ps in props.items():
+        if not isinstance(ps, dict) or _kind(ps) != "array":
+            continue
+        item = ps.get("items") or {}
+        if _kind(item) == "object" and (line := _fields_line(item.get("properties") or {})):
+            return {
+                "format": "json",
+                "rows": k,
+                "line": line,
+                "empty": "nothing matched",
+                "limit": 30,
+                "summary": f"{{count}} {k.replace('_', ' ')}",
+            }
+    if line := _fields_line(props):
+        return {"format": "json", "rows": "", "line": line, "empty": "nothing matched", "limit": 30}
+    return None
+
+
+_TEMPLATE_VAR = re.compile(r"\{(\w+)\}")
+
+
 def draft_from_mcp(
-    name: str, transport: dict, tools: list[dict], picks: list[str]
+    name: str,
+    transport: dict,
+    tools: list[dict],
+    picks: list[str],
+    *,
+    resources: list[dict] | None = None,
+    templates: list[dict] | None = None,
+    resource_picks: list[str] | None = None,
 ) -> tuple[dict, list[str]]:
-    """(draft manifest, notes) from an MCP server's tools. Only tools the server does not
-    mark destructive or not-read-only can be picked; each becomes an operation whose
-    parameters are the tool's declared arguments."""
+    """(draft manifest, notes) from what an MCP server offers. Only tools the server does
+    not mark destructive or not-read-only can be picked; each becomes an operation whose
+    parameters are the tool's declared arguments, and whose result is read field by field
+    when the tool declares its output. A picked resource (by URI, or a template by its URI
+    template) becomes an operation that reads it, its {placeholders} the parameters."""
     by = {t["name"]: t for t in tools}
     ops, notes, seen = [], [], set()
+
+    def new_id(raw: str) -> str:
+        oid = _slug(raw)
+        while oid in seen:
+            oid = _slug(oid + "_2")
+        seen.add(oid)
+        return oid
+
     for tname in picks:
         t = by.get(tname)
         if not t:
@@ -683,29 +794,62 @@ def draft_from_mcp(
             if pname in required:
                 spec["required"] = True
             params[pname] = spec
-        oid = _slug(tname)
-        while oid in seen:
-            oid = _slug(oid + "_2")
-        seen.add(oid)
+        response = response_from_output_schema(t.get("output_schema") or {})
+        if response is None:
+            response = {
+                "format": "text",
+                "rows": "",
+                "line": "{text}",
+                "empty": "nothing matched",
+                "limit": 30,
+            }
         ops.append(
             {
-                "id": oid,
+                "id": new_id(tname),
                 "tool": tname,
                 "read_only": True,
                 "summary": t.get("description", "")[:300] or tname,
                 "ask_when": f"the question calls for {tname.replace('_', ' ')}.",
                 "params": params,
+                "response": response,
+            }
+        )
+
+    offered = {r["uri"]: r for r in resources or []}
+    offered.update({t["uri_template"]: t for t in templates or []})
+    for uri in resource_picks or []:
+        r = offered.get(uri)
+        if r is None:
+            raise ManifestError(f"the server offers no resource {uri!r}")
+        label = r.get("name") or uri
+        params = {
+            v: {"type": "string", "required": True, "description": f"the {v} in {uri}"}
+            for v in dict.fromkeys(_TEMPLATE_VAR.findall(uri))
+        }
+        if "json" in (r.get("mime_type") or ""):
+            notes.append(
+                f"{label} is JSON: it is drafted as text; set its format to json, with rows "
+                "and a line, to read it field by field."
+            )
+        ops.append(
+            {
+                "id": new_id(label),
+                "resource": uri,
+                "read_only": True,
+                "summary": (r.get("description") or "")[:300] or f"reads {label}",
+                "ask_when": f"the question needs what {label} says.",
+                "params": params,
                 "response": {
                     "format": "text",
                     "rows": "",
                     "line": "{text}",
-                    "empty": "nothing matched",
-                    "limit": 30,
+                    "empty": "nothing there",
+                    "limit": 40,
                 },
             }
         )
     if not ops:
-        raise ManifestError("pick at least one tool")
+        raise ManifestError("pick at least one tool or resource")
     return (
         {
             "format": FORMAT,

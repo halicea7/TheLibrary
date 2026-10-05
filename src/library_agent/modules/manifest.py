@@ -85,6 +85,9 @@ class Operation:
     # author must declare it read-only, and a server that marks it otherwise is refused.
     tool: str = ""
     read_only: bool = False
+    # Or a resource the server offers, read rather than called: a URI, or a URI template
+    # whose {placeholders} are the parameters. Read-only by the protocol itself.
+    resource: str = ""
     # Clearance for this operation alone: "local" (local models only), "any", or "" to
     # take the token's. Lets one token keep a sensitive lookup local and share a plain one.
     clearance: str = ""
@@ -272,9 +275,15 @@ def _param(name: str, spec: dict, path_names: set[str]) -> tuple[dict, dict]:
 
 def _mcp_operation(o: dict, oid: str) -> Operation:
     tool = _s(o, "tool", n=100)
-    if not re.match(r"^[A-Za-z0-9_.\-/]{1,100}$", tool):
-        raise ManifestError(f"{oid}: an MCP operation names its tool")
-    if o.get("read_only") is not True:
+    resource = _s(o, "resource", n=500)
+    if tool and resource:
+        raise ManifestError(f"{oid}: an MCP operation calls a tool or reads a resource, not both")
+    if resource:
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:\S+$", resource):
+            raise ManifestError(f"{oid}: a resource is a URI, e.g. docs://guides/{{name}}")
+    elif not re.match(r"^[A-Za-z0-9_.\-/]{1,100}$", tool):
+        raise ManifestError(f"{oid}: an MCP operation names its tool, or a resource to read")
+    elif o.get("read_only") is not True:
         raise ManifestError(
             f"{oid}: mark it read_only: true -- only tools that look things up, never ones "
             "that change anything"
@@ -297,9 +306,13 @@ def _mcp_operation(o: dict, oid: str) -> Operation:
     if not isinstance(const, dict):
         raise ManifestError(f"{oid}: args is fixed name -> value")
     r = o.get("response") or {}
-    fmt = _s(r, "format", "json", 8)
+    fmt = _s(r, "format", "text" if resource else "json", 8)
     if fmt not in ("json", "text"):
         raise ManifestError(f"{oid}: an MCP tool's result is read as json or text")
+    if resource:
+        free = set(re.findall(r"\{(\w+)\}", resource)) - set(props) - {str(k) for k in const}
+        if free:
+            raise ManifestError(f"{oid}: {{{min(free)}}} in the resource is not a parameter")
     return Operation(
         id=oid,
         summary=_s(o, "summary", n=300),
@@ -320,6 +333,7 @@ def _mcp_operation(o: dict, oid: str) -> Operation:
         param_specs=placements,
         tool=tool,
         read_only=True,
+        resource=resource,
     )
 
 
@@ -575,7 +589,7 @@ def to_dict(m: Module) -> dict:
                     "id": o.id,
                     "summary": o.summary,
                     "ask_when": o.ask_when,
-                    "tool": o.tool,
+                    **({"resource": o.resource} if o.resource else {"tool": o.tool}),
                     "read_only": True,
                     **({"clearance": o.clearance} if o.clearance else {}),
                     "params": params,

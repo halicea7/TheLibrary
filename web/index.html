@@ -4222,7 +4222,12 @@ async function loadProviders() {
 // saved only once a sample of stored passages embeds the same way there.
 function embedRow(j) {
   const e = j.embeddings, lib = e.library_model;
-  const guess = (pid) => (j.catalogue[pid] || []).map(n => n.slice(pid.length + 1)).find(n => n === lib || n.startsWith(lib + ':')) || lib;
+  // A router may list the model twice, for chat and for embeddings ("bge-m3-embed"); the
+  // embedding entry is the one that answers /embeddings, so it is preferred.
+  const guess = (pid) => {
+    const names = (j.catalogue[pid] || []).map(n => n.slice(pid.length + 1)).filter(n => n.startsWith(lib));
+    return names.find(n => /embed/i.test(n)) || names.find(n => n === lib || n.startsWith(lib + ':')) || lib;
+  };
   const where = `<option value="" ${!e.provider ? 'selected' : ''}>Ollama</option>` + j.providers.map(p => `<option value="${esc(p.id)}" data-guess="${esc(guess(p.id))}" ${p.id === e.provider ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
   return `<tr id="emb-row"><td>Embeddings${e.provider ? ' <span class="remote" title="runs on a provider, not Ollama">remote</span>' : ''}</td>
     <td><select id="emb-where" onchange="embWhere(this)">${where}</select>

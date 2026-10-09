@@ -53,6 +53,11 @@ from library_agent.llm.providers import Provider
 _JSON_SCHEMA_OK: dict[str, bool] = {}
 
 
+# Providers found to drop all but the first text of an embedding batch, by provider id.
+_BATCH_EMBED_OK: dict[str, bool] = {}
+EMBED_SINGLE_CONCURRENCY = 8
+
+
 class OpenAICompat:
     def __init__(self, provider: Provider, timeout: float = 600.0):
         self.provider = provider
@@ -338,14 +343,36 @@ class OpenAICompat:
     async def embed(
         self, texts: list[str], model: str, timeout: float = 120.0
     ) -> list[list[float]]:
-        """The OpenAI embeddings call, in the order given (a server may answer out of order)."""
+        """The OpenAI embeddings call, in the order given (a server may answer out of order).
+        A server that answers a batch with fewer vectors than texts -- one router embedded
+        only the first -- is learned and sent one text per request from then on."""
+        if not texts:
+            return []
+        if len(texts) > 1 and not _BATCH_EMBED_OK.get(self.provider.id, True):
+            return await self._embed_singly(texts, model, timeout)
         reply = await self._post("/embeddings", {"model": model, "input": texts}, timeout)
         data = sorted(reply.get("data") or [], key=lambda d: d.get("index", 0))
-        if len(data) != len(texts):
-            raise OllamaError(
-                f"{self.provider.name}: {len(data)} embeddings for {len(texts)} texts"
-            )
-        return [d["embedding"] for d in data]
+        if len(data) == len(texts):
+            return [d["embedding"] for d in data]
+        if len(texts) > 1 and len(data) < len(texts):
+            _BATCH_EMBED_OK[self.provider.id] = False
+            return await self._embed_singly(texts, model, timeout)
+        raise OllamaError(f"{self.provider.name}: {len(data)} embeddings for {len(texts)} texts")
+
+    async def _embed_singly(
+        self, texts: list[str], model: str, timeout: float
+    ) -> list[list[float]]:
+        sem = asyncio.Semaphore(EMBED_SINGLE_CONCURRENCY)
+
+        async def one(t: str) -> list[float]:
+            async with sem:
+                reply = await self._post("/embeddings", {"model": model, "input": [t]}, timeout)
+            data = reply.get("data") or []
+            if len(data) != 1:
+                raise OllamaError(f"{self.provider.name}: {len(data)} embeddings for 1 text")
+            return data[0]["embedding"]
+
+        return list(await asyncio.gather(*(one(t) for t in texts)))
 
     async def supports_thinking(self, model: str) -> bool:
         # Unknown until it streams; the reasoning is shown if it arrives, and the UI's

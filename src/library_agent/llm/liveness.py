@@ -47,9 +47,30 @@ class Liveness:
     _task: asyncio.Task | None = field(default=None, repr=False)
 
     async def probe(self, timeout: float | None = None) -> bool:
+        """One token from the chat model, wherever it runs: Ollama, or a provider. What
+        people wait on is chat; a probe of a server chat does not use would report the
+        wrong machine (or, with every role on a provider, refuse everything for an Ollama
+        nobody needs)."""
         cfg = settings()
         t0 = time.monotonic()
+        prov, name = providers.split(providers.model_for("chat_general") or "")
         try:
+            if prov is not None:
+                from library_agent.llm.openai_compat import OpenAICompat
+
+                limit = timeout or cfg.liveness_timeout_seconds
+                async with asyncio.timeout(limit), OpenAICompat(prov, timeout=limit) as c:
+                    await c.generate(
+                        name,
+                        "Reply with the single word: ready",
+                        temperature=0,
+                        num_predict=4,
+                        timeout=timeout or cfg.liveness_timeout_seconds,
+                    )
+                self.alive, self.strained, self.failures, self.detail = True, False, 0, ""
+                self.latency = round(time.monotonic() - t0, 2)
+                self.checked_at = time.time()
+                return self.alive
             async with httpx.AsyncClient(
                 base_url=cfg.ollama_url, timeout=timeout or cfg.liveness_timeout_seconds
             ) as c:
@@ -70,10 +91,11 @@ class Liveness:
             # Nothing listening: down now, whatever came before.
             self.alive, self.strained = False, False
             self.failures = max(self.failures + 1, cfg.liveness_failures_to_down)
-            self.detail = (
-                f"cannot connect ({str(exc)[:80] or 'connection refused'}) -- is the tunnel up?"
+            where = prov.name if prov is not None else "Ollama"
+            self.detail = f"cannot connect to {where} ({str(exc)[:80] or 'connection refused'})" + (
+                " -- is the tunnel up?" if prov is None else ""
             )
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, TimeoutError):
             self._fault(
                 f"the model did not answer a one-token probe within "
                 f"{timeout or cfg.liveness_timeout_seconds:.0f}s"

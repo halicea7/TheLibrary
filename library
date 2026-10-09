@@ -61,20 +61,24 @@ fi
 fail() { echo "✗ $1"; exit 1; }
 pg_isready -q 2>/dev/null                  || fail "Postgres is not running"
 redis-cli ping >/dev/null 2>&1              || fail "Redis is not running"
-curl -sf "$OLLAMA/api/tags" >/dev/null 2>&1 || fail "Ollama is not reachable at $OLLAMA (tunnel up?)"
-
-# Warn about missing models rather than failing — chat works without the technical one.
-missing="$(uv run python - <<'PY'
-import json, urllib.request
+# Ollama is needed only for what still runs on it: roles set to an Ollama model, and the
+# embeddings unless Settings › Models › Embeddings names a provider.
+on_ollama="$(uv run python -c 'from library_agent.llm import providers; print(" ".join(providers.on_ollama()))')"
+if [ -n "$on_ollama" ]; then
+  curl -sf "$OLLAMA/api/tags" >/dev/null 2>&1 \
+    || fail "Ollama is not reachable at $OLLAMA (tunnel up?) -- still used for: $on_ollama"
+  # Warn about missing models rather than failing — chat works without the technical one.
+  missing="$(ON_OLLAMA="$on_ollama" uv run python - <<'PY'
+import json, os, urllib.request
 from library_agent.config import settings
-s = settings()
 have = {m["name"].removesuffix(":latest") for m in
-        json.load(urllib.request.urlopen(f"{s.ollama_url}/api/tags"))["models"]}
-need = {s.reader_model, s.chat_model, s.embed_model, *s.chat_model_options.values()}
+        json.load(urllib.request.urlopen(f"{settings().ollama_url}/api/tags"))["models"]}
+need = os.environ["ON_OLLAMA"].split()
 print(" ".join(sorted(m for m in need if m.removesuffix(":latest") not in have)))
 PY
 )"
-[ -n "$missing" ] && echo "! models not on this Ollama: $missing   (ollama pull ...)"
+  [ -n "$missing" ] && echo "! models not on this Ollama: $missing   (ollama pull ...)"
+fi
 
 # ── migrate, then bring it up ─────────────────────────────────────────────
 uv run alembic upgrade head >/dev/null 2>&1 || fail "database migration failed"

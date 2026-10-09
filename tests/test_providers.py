@@ -29,6 +29,7 @@ def pfile(tmp_path, monkeypatch):
 def fake_server(*, json_schema_ok: bool = True, reasoning: bool = True) -> FastAPI:
     app = FastAPI()
     app.state.calls = []
+    app.state.first_only = False
 
     @app.get("/v1/models")
     async def models():
@@ -44,6 +45,8 @@ def fake_server(*, json_schema_ok: bool = True, reasoning: bool = True) -> FastA
             {"index": i, "embedding": [float(len(t)), float(i)]}
             for i, t in enumerate(body["input"])
         ]
+        if app.state.first_only:  # a router that embeds only the first text of a batch
+            data = data[:1]
         return {"data": list(reversed(data))}  # out of order, as a server may answer
 
     @app.post("/v1/chat/completions")
@@ -416,3 +419,37 @@ def test_the_same_model_on_another_server_is_the_same_model(pfile):
         "acme:qwen3:30b-a3b",
     }
     assert "gemma" not in " ".join(providers.same_model("acme:qwen3:30b-a3b"))
+
+
+async def test_a_server_that_embeds_only_the_first_of_a_batch_is_sent_one_at_a_time(pfile, served):
+    from library_agent.llm.embed import embed_texts
+
+    app = served(fake_server())
+    app.state.first_only = True
+    openai_compat._BATCH_EMBED_OK.clear()
+    cfg = _configure(pfile)
+    cfg.embed_provider, cfg.embed_name = "acme", "bge-m3:latest"
+    providers.save(cfg)
+    assert await embed_texts(["a", "bbb", "cc"]) == [[1.0, 0.0], [3.0, 0.0], [2.0, 0.0]]
+    assert openai_compat._BATCH_EMBED_OK["acme"] is False
+    sent = len(app.state.calls)
+    assert await embed_texts(["dddd", "e"]) == [[4.0, 0.0], [1.0, 0.0]]
+    # learned: no batch is tried again, one request per text
+    assert [len(c["input"]) for c in app.state.calls[sent:]] == [1, 1]
+
+
+async def test_the_health_check_probes_chat_where_it_runs(pfile, served):
+    from library_agent.llm.liveness import Liveness
+
+    app = served(fake_server())
+    cfg = _configure(pfile)
+    cfg.models["chat_general"] = "acme:big-model"
+    providers.save(cfg)
+    lv = Liveness()
+    assert await lv.probe(timeout=5) and not lv.strained
+    assert app.state.calls[-1]["model"] == "big-model"  # the provider, not Ollama
+    cfg.providers["acme"] = providers.Provider(
+        id="acme", name="Acme", base_url="http://127.0.0.1:9/v1", api_key="k"
+    )
+    providers.save(cfg)
+    assert not await Liveness().probe(timeout=5)  # nothing listening: down, naming Acme

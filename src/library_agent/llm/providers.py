@@ -272,6 +272,15 @@ def chat_options() -> dict[str, str]:
     return out
 
 
+def on_ollama() -> list[str]:
+    """What still runs on Ollama: models of roles assigned to it, and the embedding model
+    unless embeddings go to a provider. Empty means Ollama is not needed at all."""
+    need = {m for r in ROLES if (m := model_for(r)) and not is_remote(m)}
+    if embed_route()[0] is None:
+        need.add(settings().embed_model)
+    return sorted(need)
+
+
 def ollama_probe_model() -> str:
     """A model that lives on Ollama, for the liveness probe: the chat model if it is
     there, else the first role that is, else the reader."""

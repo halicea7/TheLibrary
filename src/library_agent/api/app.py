@@ -34,6 +34,7 @@ from library_agent.config import settings
 from library_agent.db.models import Chunk, Document, Embedding
 from library_agent.db.purge import count_orphans
 from library_agent.db.session import SessionDep, session_scope
+from library_agent.llm import providers
 from library_agent.llm.client import LLM
 from library_agent.llm.liveness import gate, liveness
 from library_agent.ops import incidents
@@ -113,7 +114,10 @@ async def health(db: SessionDep) -> HealthOut:
     )
     orphans["stray_files"] = stray
     # Over an SSH tunnel this is the failure you actually hit: the tunnel drops and
-    # every model call fails. Say so plainly rather than showing an empty model list.
+    # every model call fails. Say so plainly rather than showing an empty model list --
+    # when anything still runs on Ollama. With every role and the embeddings on a
+    # provider, an unreachable Ollama is nobody's problem.
+    needed = providers.on_ollama()
     reachable = True
     try:
         async with LLM() as c:
@@ -125,14 +129,14 @@ async def health(db: SessionDep) -> HealthOut:
         model_answering=liveness.alive,
         model_liveness=liveness.snapshot(),
         generations=gate.snapshot(),
-        ok=reachable and all(v == 0 for v in orphans.values()),
+        ok=(reachable or not needed) and all(v == 0 for v in orphans.values()),
         documents=docs,
         chunks=chunks,
         embeddings=embs,
         orphan_vectors=orphans,
         models_resident=resident,
         embed_model=cfg.embed_model,
-        chat_model=cfg.chat_model,
+        chat_model=providers.model_for("chat_general") or cfg.chat_model,
     )
 
 

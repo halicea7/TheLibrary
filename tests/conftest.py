@@ -218,3 +218,17 @@ def _fresh_query_cache():
     embed._QUERY_CACHE.clear()
     yield
     embed._QUERY_CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
+def _own_providers_file(tmp_path, monkeypatch):
+    """Each test starts with no providers and no role overrides: the machine's own
+    providers.json (roles on some router, embeddings elsewhere) must not decide where a
+    test's model calls go. A test that configures providers sets its own file."""
+    from library_agent.llm import openai_compat, providers
+
+    monkeypatch.setenv("LIBRARY_PROVIDERS_FILE", str(tmp_path / "providers.none.json"))
+    providers._cache = None
+    openai_compat._BATCH_EMBED_OK.clear()
+    yield
+    providers._cache = None

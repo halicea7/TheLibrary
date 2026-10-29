@@ -141,6 +141,24 @@ async def health(db: SessionDep) -> HealthOut:
 
 
 app.mount("/vendor", StaticFiles(directory=WEB_DIR / "vendor"), name="vendor")
+app.mount("/icons", StaticFiles(directory=WEB_DIR / "icons"), name="icons")
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+async def webmanifest() -> FileResponse:
+    return FileResponse(WEB_DIR / "manifest.webmanifest", media_type="application/manifest+json")
+
+
+# iOS asks for these at the root whatever the page says.
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+async def apple_touch_icon() -> FileResponse:
+    return FileResponse(WEB_DIR / "icons" / "apple-touch-icon.png", media_type="image/png")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> FileResponse:
+    return FileResponse(WEB_DIR / "icons" / "favicon-32.png", media_type="image/png")
 
 
 # The page and its scripts are revalidated on every load (an unchanged file answers 304),
